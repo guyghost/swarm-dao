@@ -1,0 +1,23 @@
+{
+  "name": "@swarm-dao/core",
+  "version": "0.1.0",
+  "description": "Swarm DAO core — pure business logic for AI agent governance",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./types": "./src/types/index.ts",
+    "./governance": "./src/governance/index.ts",
+    "./intelligence": "./src/intelligence/index.ts",
+    "./control": "./src/control/index.ts",
+    "./delivery": "./src/delivery/index.ts",
+    "./persistence": "./src/persistence.ts"
+  },
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}

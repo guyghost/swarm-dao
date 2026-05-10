@@ -1,0 +1,22 @@
+{
+  "name": "@swarm-dao/opencode-adapter",
+  "version": "0.1.0",
+  "description": "Swarm DAO adapter for OpenCode",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@swarm-dao/core": "workspace:*"
+  },
+  "peerDependencies": {
+    "@opencode-ai/plugin": ">=1.14.19"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}

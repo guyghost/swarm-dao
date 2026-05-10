@@ -1,0 +1,22 @@
+{
+  "name": "@swarm-dao/cli",
+  "version": "0.1.0",
+  "description": "Swarm DAO standalone CLI",
+  "type": "module",
+  "bin": {
+    "swarm-dao": "./src/cli.ts"
+  },
+  "exports": {
+    ".": "./src/cli.ts"
+  },
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@swarm-dao/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}

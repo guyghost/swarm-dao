@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+*.lock
+
+# Build outputs
+dist/
+build/
+*.tsbuildinfo
+
+# DAO local state
+.dao/
+.opencode-dao/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Test coverage
+coverage/
+
+# Environment
+.env
+.env.local
+
+# Temporary
+tmp/
+temp/

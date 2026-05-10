@@ -1,0 +1,24 @@
+{
+  "name": "@swarm-dao/pi-adapter",
+  "version": "0.1.0",
+  "description": "Swarm DAO adapter for the Pi coding agent",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@swarm-dao/core": "workspace:*"
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-ai": "*",
+    "@sinclair/typebox": "*"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}
