@@ -1,38 +1,38 @@
-# Guide des Prompts Agents
+# Agent Prompts Guide
 
-> Comment personnaliser et tester les prompts des agents DAO
+> How to customize and test DAO agent prompts
 
-## Structure des prompts
+## Prompt Structure
 
-Chaque agent a un **prompt système** qui définit :
-- Sa mission et son rôle
-- Son framework d'analyse
-- Son format de sortie (Vote, Score, Raisonnement)
+Each agent has a **system prompt** that defines:
+- Its mission and role
+- Its analysis framework
+- Its output format (Vote, Score, Reasoning)
 
-Les prompts vivent dans `agents/<agent-id>.md` avec un frontmatter YAML.
+Prompts live in `agents/<agent-id>.md` with YAML frontmatter.
 
-## Prompts par défaut
+## Default Prompts
 
-| Agent | Fichier | Rôle |
-|-------|---------|------|
-| Product Strategist | `agents/dao-strategist.md` | Vision, objectifs |
-| Research Agent | `agents/dao-researcher.md` | Marché, concurrence |
+| Agent | File | Role |
+|-------|------|------|
+| Product Strategist | `agents/dao-strategist.md` | Vision, objectives |
+| Research Agent | `agents/dao-researcher.md` | Market, competition |
 | Solution Architect | `agents/dao-architect.md` | Architecture |
-| Critic/Risk Agent | `agents/dao-critic.md` | Risques, objections |
-| Prioritization Agent | `agents/dao-prioritizer.md` | Impact/coût |
-| Spec Writer | `agents/dao-spec-writer.md` | Spécifications |
-| Delivery Agent | `agents/dao-delivery.md` | Exécution |
+| Critic/Risk Agent | `agents/dao-critic.md` | Risks, objections |
+| Prioritization Agent | `agents/dao-prioritizer.md` | Impact/cost |
+| Spec Writer | `agents/dao-spec-writer.md` | Specifications |
+| Delivery Agent | `agents/dao-delivery.md` | Execution |
 
-## Personnalisation des prompts
+## Customizing Prompts
 
-### Via config (par projet)
+### Via config (per project)
 
 ```json
 // .dao/config.json
 {
   "agentOverrides": {
     "strategist": {
-      "systemPrompt": "Vous êtes un stratège spécialisé en B2B SaaS..."
+      "systemPrompt": "You are a strategist specialized in B2B SaaS..."
     }
   }
 }
@@ -43,59 +43,59 @@ Les prompts vivent dans `agents/<agent-id>.md` avec un frontmatter YAML.
 ```typescript
 import { createPromptVariant, registerAgentPrompts, recordPromptInvocation } from "@swarm-dao/core";
 
-// Créer deux variantes
+// Create two variants
 const v1 = createPromptVariant("strategist", "v1", "Standard", "Prompt A...", 70);
-const v2 = createPromptVariant("strategist", "v2", "Expérimental", "Prompt B...", 30);
+const v2 = createPromptVariant("strategist", "v2", "Experimental", "Prompt B...", 30);
 
-// Enregistrer
+// Register
 registerAgentPrompts("strategist", [v1, v2]);
 
-// Utiliser (sélection automatique par poids)
+// Use (automatic selection by weight)
 const variant = getPromptVariant("strategist");
 
-// Enregistrer les résultats
+// Record results
 recordPromptInvocation("strategist", variant.id, 1200, { position: "for", confidence: 8 });
 ```
 
-### Comparer les performances
+### Comparing Performance
 
 ```typescript
 const comparison = compareVariants("strategist");
-// [{ variant, score }, ...] trié par score
+// [{ variant, score }, ...] sorted by score
 
-// Promouvoir la meilleure variante
+// Promote the best variant
 promoteBestVariant("strategist");
 ```
 
-## Métriques par prompt
+## Per-Prompt Metrics
 
-| Métrique | Description |
-|----------|-------------|
-| `invocations` | Nombre d'utilisations |
-| `avgResponseTimeMs` | Temps de réponse moyen |
-| `votesFor` | Votes "pour" |
-| `votesAgainst` | Votes "contre" |
-| `avgConfidence` | Confiance moyenne (0-10) |
+| Metric | Description |
+|--------|-------------|
+| `invocations` | Number of uses |
+| `avgResponseTimeMs` | Average response time |
+| `votesFor` | "For" votes |
+| `votesAgainst` | "Against" votes |
+| `avgConfidence` | Average confidence (0-10) |
 
-## Score composite
+## Composite Score
 
-Le score d'une variante est calculé comme :
+A variant's score is calculated as:
 ```
 score = approvalRate * 0.4 + confidenceFactor * 0.3 + volumeFactor * 0.3
 ```
 
-- **approvalRate** : % de votes "pour"
-- **confidenceFactor** : confiance moyenne normalisée (0-1)
-- **volumeFactor** : nombre d'invocations normalisé (0-1, max à 10)
+- **approvalRate**: % of "for" votes
+- **confidenceFactor**: normalized average confidence (0-1)
+- **volumeFactor**: normalized invocation count (0-1, max at 10)
 
-## Bonnes pratiques
+## Best Practices
 
-1. **Tester sur 10+ propositions** avant de tirer des conclusions
-2. **Varier un seul élément** à la fois (mission, format, température)
-3. **Documenter les changements** dans le CHANGELOG
-4. **Réinitialiser les métriques** entre les campagnes de test
+1. **Test on 10+ proposals** before drawing conclusions
+2. **Vary only one element** at a time (mission, format, temperature)
+3. **Document changes** in the CHANGELOG
+4. **Reset metrics** between test campaigns
 
-## Exemple complet
+## Complete Example
 
 ```typescript
 import {
@@ -106,7 +106,7 @@ import {
   formatPromptComparison,
 } from "@swarm-dao/core";
 
-// Définir les variantes
+// Define variants
 const standard = createPromptVariant(
   "critic",
   "standard",
@@ -125,17 +125,17 @@ const aggressive = createPromptVariant(
 
 registerAgentPrompts("critic", [standard, aggressive]);
 
-// Lors de la deliberation
+// During deliberation
 const agent = getAgent("critic");
 const variant = getPromptVariant("critic");
 const systemPrompt = variant.systemPrompt;
 
-// Après réception du vote
+// After receiving the vote
 recordPromptInvocation("critic", variant.id, durationMs, {
   position: vote.position,
   confidence: score.confidence,
 });
 
-// Afficher les résultats
+// Display results
 console.log(formatPromptComparison("critic"));
 ```

@@ -37,3 +37,6 @@ temp/
 
 # Ralph loop state
 .ralph/
+
+# Pi local extension symlink
+.pi/

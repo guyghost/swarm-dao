@@ -1,7 +1,7 @@
 // Stubs for Pi coding agent types — used for compilation when Pi is not installed.
 // These are replaced by the real types at runtime.
 
-declare module "@mariozechner/pi-coding-agent" {
+declare module "@earendil-works/pi-coding-agent" {
   export interface ExtensionAPI {
     registerTool<TParams = Record<string, unknown>>(tool: {
       name: string;
@@ -20,11 +20,11 @@ declare module "@mariozechner/pi-coding-agent" {
   }
 }
 
-declare module "@mariozechner/pi-ai" {
+declare module "@earendil-works/pi-ai" {
   export function StringEnum(values: string[], options?: Record<string, unknown>): any;
 }
 
-declare module "@sinclair/typebox" {
+declare module "typebox" {
   export const Type: {
     Object(props: Record<string, unknown>, options?: Record<string, unknown>): any;
     String(options?: Record<string, unknown>): any;

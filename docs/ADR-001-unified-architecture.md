@@ -1,45 +1,45 @@
-# ADR-001: Architecture Unifiée Swarm DAO
+# ADR-001: Unified Swarm DAO Architecture
 
-## Statut
-Proposé → Accepté (2026-05-10)
+## Status
+Proposed → Accepted (2026-05-10)
 
-## Contexte
-Deux projets DAO existaient indépendamment :
-- **pi-swarm-dao** : Extension pour l'agent de codage Pi
-- **opencode-dao** : Plugin pour OpenCode
+## Context
+Two DAO projects existed independently:
+- **pi-swarm-dao**: Extension for the Pi coding agent
+- **opencode-dao**: Plugin for OpenCode
 
-Chacun dupliquait ~80% de la logique métier (gouvernance, voting, scoring, lifecycle) tout en étant couplé à son hôte respectif. Cela rendait difficile :
-- La maintenance (bugfix à double)
-- L'ajout de nouveaux hôtes (Cline, Claude Code, etc.)
-- La cohérence des comportements entre hôtes
+Each duplicated ~80% of business logic (governance, voting, scoring, lifecycle) while being tightly coupled to its respective host. This made it difficult to:
+- Maintain (duplicate bug fixes)
+- Add new hosts (Cline, Claude Code, etc.)
+- Keep behavior consistent across hosts
 
-## Décision
-Créer un **monorepo unifié** (`swarm-dao`) avec une architecture en trois couches :
+## Decision
+Create a **unified monorepo** (`swarm-dao`) with a three-layer architecture:
 
 ```
 ┌──────────────────────────────────────┐
 │  Host Adapters (Pi, OpenCode, ...)   │
 ├──────────────────────────────────────┤
-│  HostAdapter Interface (8 méthodes)  │
+│  HostAdapter Interface (8 methods)   │
 ├──────────────────────────────────────┤
-│  Swarm DAO Core (logique métier)     │
+│  Swarm DAO Core (business logic)     │
 ├──────────────────────────────────────┤
-│  Persistence (.dao/ fichiers locaux) │
+│  Persistence (.dao/ local files)     │
 └──────────────────────────────────────┘
 ```
 
 ### Packages
 
-| Package | Responsabilité | Dépendances hôte |
-|---------|---------------|------------------|
-| `@swarm-dao/core` | Types, gouvernance, scoring, gates, audit, delivery | Aucune |
-| `@swarm-dao/pi-adapter` | Bridge Pi ExtensionAPI → core | `@mariozechner/pi-coding-agent` |
+| Package | Responsibility | Host Dependencies |
+|---------|---------------|-------------------|
+| `@swarm-dao/core` | Types, governance, scoring, gates, audit, delivery | None |
+| `@swarm-dao/pi-adapter` | Bridge Pi ExtensionAPI → core | `@earendil-works/pi-coding-agent` |
 | `@swarm-dao/opencode-adapter` | Bridge OpenCode Plugin → core | `@opencode-ai/plugin` |
-| `@swarm-dao/cli` | CLI standalone | Aucune (utilise core) |
+| `@swarm-dao/cli` | Standalone CLI | None (uses core) |
 
-### Interface HostAdapter
+### HostAdapter Interface
 
-Tout nouvel hôte doit implémenter :
+Any new host must implement:
 
 ```typescript
 interface HostAdapter {
@@ -55,25 +55,25 @@ interface HostAdapter {
 }
 ```
 
-## Conséquences
+## Consequences
 
-### Positives
-- **Single source of truth** pour la logique DAO
-- **Ajout d'hôte = ~200 lignes** (adapter seul)
-- **Tests centralisés** sur le core
-- **Agents partagés** : prompts dans `agents/*.md` consommables par tous les hôtes
+### Positive
+- **Single source of truth** for DAO logic
+- **Adding a host = ~200 lines** (adapter only)
+- **Centralized tests** on the core
+- **Shared agents**: prompts in `agents/*.md` consumable by all hosts
 
-### Négatives
-- **Complexité de build** : monorepo avec Bun workspaces
-- **Couplage indirect** : les adapters dépendent de l'interface core
-- **Migration** : les deux projets legacy doivent être migrés
+### Negative
+- **Build complexity**: monorepo with Bun workspaces
+- **Indirect coupling**: adapters depend on the core interface
+- **Migration**: both legacy projects need to be migrated
 
-## Alternatives rejetées
+## Rejected Alternatives
 
-1. **Micro-repos séparés** : Rejeté car duplication de code
-2. **Lib partagée + adapters in-repo** : Rejeté car moins clair pour les contributeurs
-3. **Plugin universel** : Rejeté car aucun standard commun entre agents de codage
+1. **Separate micro-repos**: Rejected due to code duplication
+2. **Shared lib + in-repo adapters**: Rejected as less clear for contributors
+3. **Universal plugin**: Rejected because no common standard exists between coding agents
 
-## Références
+## References
 - [pi-swarm-dao](https://github.com/guyghost/pi-swarm-dao)
 - [opencode-dao](https://github.com/guyghost/opencode-dao)

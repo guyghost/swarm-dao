@@ -1,65 +1,72 @@
-# Guide d'utilisation — Swarm DAO dans Pi et OpenCode
+# Swarm DAO Usage Guide
 
-> Installation, configuration et workflows complets pour Pi (extension) et OpenCode (plugin).
+> Installation, configuration, and complete workflows for Pi and OpenCode.
 
 ---
 
-## Table des matières
+## Table of Contents
 
-- [Installation dans Pi](#installation-dans-pi)
-- [Installation dans OpenCode](#installation-dans-opencode)
-- [Workflows communs](#workflows-communs)
-- [Différences Pi vs OpenCode](#différences-pi-vs-opencode)
+- [Installation in Pi](#installation-in-pi)
+- [Installation in OpenCode](#installation-in-opencode)
+- [Common Workflows](#common-workflows)
+- [Pi vs OpenCode Differences](#pi-vs-opencode-differences)
 - [Troubleshooting](#troubleshooting)
 
 ---
 
-## Installation dans Pi
+## Installation in Pi
 
-### Prérequis
+### Prerequisites
 
-- Pi coding agent (`pi`) installé
-- Node.js ≥ 18
+- [Pi coding agent](https://pi.dev) installed (`pi` CLI)
+- Bun ≥ 1.3
 - Git
 
-### 1. Cloner le repo
+### 1. Clone the Repository
 
 ```bash
 git clone https://github.com/guyghost/swarm-dao.git ~/swarm-dao
 cd ~/swarm-dao
 bun install
+bun add typebox
 ```
 
-### 2. Configurer Pi
+### 2. Link the Workspace Package
 
-Dans votre projet Pi, éditer `pi.config.json` (ou le fichier de config Pi) :
-
-```json
-{
-  "extensions": [
-    {
-      "package": "@swarm-dao/pi-adapter",
-      "path": "/chemin/vers/swarm-dao/packages/pi-adapter"
-    }
-  ]
-}
-```
-
-Ou installer via npm (après publication) :
+Bun workspaces do not always create a physical symlink in `node_modules/`. Create it manually so the extension can resolve `@swarm-dao/core`:
 
 ```bash
-pi install @swarm-dao/pi-adapter
+mkdir -p node_modules/@swarm-dao
+ln -s ../../packages/core node_modules/@swarm-dao/core
 ```
 
-### 3. Lancer Pi avec l'extension
+### 3. Register the Extension
+
+Create a symlink so Pi discovers the extension automatically:
 
 ```bash
-pi --extension @swarm-dao/pi-adapter
+mkdir -p .pi/extensions
+ln -s ../../packages/pi-adapter/src/index.ts .pi/extensions/swarm-dao.ts
 ```
 
-### 4. Initialiser le DAO
+Or install globally:
 
-Dans la session Pi :
+```bash
+mkdir -p ~/.pi/agent/extensions/swarm-dao
+ln -s ~/swarm-dao/packages/pi-adapter/src/index.ts ~/.pi/agent/extensions/swarm-dao/index.ts
+```
+
+### 4. Start Pi
+
+```bash
+pi
+```
+
+Pi will auto-discover the extension from `.pi/extensions/` (project-local) or `~/.pi/agent/extensions/` (global).
+
+### 5. Initialize the DAO
+
+Inside the Pi session:
 
 ```
 > dao_setup
@@ -67,11 +74,15 @@ Dans la session Pi :
 # DAO Initialized
 # 7 agents configured:
 # | Product Strategist | 3 | Vision, objectives, hypotheses |
-# | Research Agent | 2 | Market, competition, user signals |
-# | ...
+# | Research Agent     | 2 | Market, competition, user signals |
+# | Solution Architect | 3 | Technical options, tradeoffs |
+# | Critic / Risk Agent| 3 | Risk scoring, objections, guardrails |
+# | Prioritization Agent| 2 | Impact/cost/risk scoring |
+# | Spec Writer        | 1 | PRD, user stories, acceptance criteria |
+# | Delivery Agent     | 1 | Implementation plan, tasks, CI/CD |
 ```
 
-### 5. Vérifier l'installation
+### 6. Verify Installation
 
 ```
 > /dao
@@ -82,14 +93,14 @@ Dans la session Pi :
 
 ---
 
-## Installation dans OpenCode
+## Installation in OpenCode
 
-### Prérequis
+### Prerequisites
 
-- OpenCode CLI (`opencode`) installé (≥ 1.14.19)
+- OpenCode CLI (`opencode`) installed (≥ 1.14.19)
 - Bun ≥ 1.3
 
-### 1. Cloner le repo
+### 1. Clone the Repository
 
 ```bash
 git clone https://github.com/guyghost/swarm-dao.git ~/.config/opencode/plugins/swarm-dao
@@ -97,9 +108,9 @@ cd ~/.config/opencode/plugins/swarm-dao
 bun install
 ```
 
-### 2. Activer le plugin
+### 2. Activate the Plugin
 
-Dans votre projet, éditer `.opencode/config.json` :
+In your project, edit `.opencode/config.json`:
 
 ```json
 {
@@ -107,21 +118,19 @@ Dans votre projet, éditer `.opencode/config.json` :
 }
 ```
 
-Ou via la CLI :
+Or via CLI:
 
 ```bash
 opencode plugin install swarm-dao
 ```
 
-### 3. Lancer OpenCode
+### 3. Launch OpenCode
 
 ```bash
 opencode
 ```
 
-### 4. Initialiser le DAO
-
-Dans la session OpenCode :
+### 4. Initialize the DAO
 
 ```
 > dao_setup
@@ -131,7 +140,7 @@ Dans la session OpenCode :
 # Run `dao_propose` to create proposals.
 ```
 
-### 5. Vérifier l'installation
+### 5. Verify Installation
 
 ```
 > dao_status
@@ -144,14 +153,14 @@ Dans la session OpenCode :
 
 ---
 
-## Workflows communs
+## Common Workflows
 
-### Workflow 1 : Créer et délibérer une proposition
+### Workflow 1: Create and Deliberate a Proposal
 
-#### Dans Pi :
+#### In Pi:
 
 ```
-# Étape 1 : Créer une proposition
+# Step 1: Create a proposal
 > dao_propose
   title="Add dark mode"
   type="product-feature"
@@ -162,7 +171,7 @@ Dans la session OpenCode :
 
 # 📋 Proposal Created — #1
 
-# Étape 2 : Délibrer (swarm automatique)
+# Step 2: Deliberate (swarm vote)
 > dao_deliberate proposalId=1
 
 # 🗳️ Deliberation Complete — #1
@@ -170,21 +179,21 @@ Dans la session OpenCode :
 # Quorum: 85% / ✅ Met
 # Approval Score: 73%
 
-# Étape 3 : Contrôle qualité
+# Step 3: Quality control
 > dao_check proposalId=1
 
 # ✅ ALL GATES PASSED
 
-# Étape 4 : Exécuter
+# Step 4: Execute
 > dao_execute proposalId=1
 
 # ✅ Proposal Executed — #1
 ```
 
-#### Dans OpenCode :
+#### In OpenCode:
 
 ```
-# Étape 1 : Créer une proposition
+# Step 1: Create a proposal
 > dao_propose
   title="Add dark mode"
   type="product-feature"
@@ -192,7 +201,7 @@ Dans la session OpenCode :
 
 # 📋 Proposal Created — #1
 
-# Étape 2 : Planifier la délibération (retourne un plan de dispatch)
+# Step 2: Deliberate (returns a dispatch plan)
 > dao_deliberate proposalId=1
 
 # 🐝 Dispatch Plan — Proposal #1
@@ -200,8 +209,8 @@ Dans la session OpenCode :
 # ### @strategist
 # Spawn this sub-agent with the following task...
 
-# Étape 3 : Exécuter manuellement les sub-agents via `task`,
-# puis enregistrer les outputs
+# Step 3: Manually run sub-agents via `task`,
+# then record outputs
 > dao_record_outputs
   proposalId=1
   outputs=[
@@ -214,14 +223,14 @@ Dans la session OpenCode :
 
 # 🗳️ Deliberation Complete — #1
 
-# Étape 4 : Contrôle + Exécution
+# Step 4: Control + Execute
 > dao_control proposalId=1
 > dao_execute proposalId=1
 ```
 
-### Workflow 2 : Round Table (agents suggèrent)
+### Workflow 2: Round Table (Agents Suggest Ideas)
 
-#### Dans Pi :
+#### In Pi:
 
 ```
 > dao_roundtable
@@ -240,19 +249,19 @@ Dans la session OpenCode :
 # **Created:** Proposals #2, #3, #4, #5, #6
 ```
 
-#### Dans OpenCode :
+#### In OpenCode:
 
 ```
 > dao_roundtable
 
-# Même résultat — les agents sont spawnés automatiquement
-# via l'adapter OpenCode
+# Same result — agents are spawned automatically
+# via the OpenCode adapter
 ```
 
-### Workflow 3 : Dry-Run et Rollback
+### Workflow 3: Dry-Run and Rollback
 
 ```
-# Prévisualiser avant d'exécuter
+# Preview before executing
 > dao_dry_run proposalId=1
 
 # 🔍 Dry-Run — Proposal #1
@@ -260,20 +269,20 @@ Dans la session OpenCode :
 # Files Affected: src/theme.ts, src/components/
 # Risks: None identified
 
-# Exécuter
+# Execute
 > dao_execute proposalId=1
 
-# Si problème : rollback
+# If problem: rollback
 > dao_rollback proposalId=1
 
 # ⏪ Rollback Successful
 # Proposal #1 rolled back to commit abc123de
 ```
 
-### Workflow 4 : Dashboard et Artefacts
+### Workflow 4: Dashboard and Artefacts
 
 ```
-# Voir le dashboard
+# View dashboard
 > dao_dashboard
 
 # 🏛️ DAO Dashboard
@@ -282,7 +291,7 @@ Dans la session OpenCode :
 # | Pass Rate      | ████████░░ 80% |
 # | Avg Rating     | ████████░░ 78% |
 
-# Générer les artefacts
+# Generate artefacts
 > dao_artefacts proposalId=5
 
 # 📦 Artefacts — Proposal #5
@@ -295,23 +304,23 @@ Dans la session OpenCode :
 # | Release Packet      | ✅ |
 ```
 
-### Workflow 5 : GitHub Integration
+### Workflow 5: GitHub Integration
 
 ```
-# Configurer
+# Configure
 > dao_config_github
   token="ghp_xxx"
   owner="myorg"
   repo="myrepo"
   enabled=true
 
-# Créer une branche
+# Create branch
 > dao_github_create_branch proposalId=1
 
 # ✅ Branch ready
 # Ref: refs/heads/dao/1-add-dark-mode
 
-# Pousser le code, puis ouvrir une PR
+# Push code, then open PR
 > dao_github_open_pr
   proposalId=1
   headBranch="dao/1-add-dark-mode"
@@ -323,62 +332,76 @@ Dans la session OpenCode :
 
 ---
 
-## Différences Pi vs OpenCode
+## Pi vs OpenCode Differences
 
 | Aspect | Pi | OpenCode |
 |--------|-----|----------|
-| **Type d'intégration** | Extension (`ExtensionAPI`) | Plugin (`@opencode-ai/plugin`) |
-| **Installation** | `pi.config.json` extensions | `.opencode/config.json` plugins |
-| **Deliberation** | Automatique (sub-process `pi --mode json`) | Manuelle (plan + `task` tool + `dao_record_outputs`) |
-| **Sub-agents** | Spawnés automatiquement par le core | Spawnés manuellement via le `task` tool natif |
-| **Événements** | `session_start`, `before_agent_start` | Hooks via le plugin API |
-| **Commandes** | `/dao`, `/dao:propose`, etc. | `/dao/init`, `/dao/propose`, etc. |
-| **Syntaxe tools** | `dao_propose title="..."` | `dao_propose({ title: "..." })` |
-| **CLI standalone** | Via Pi | `opencode-dao` binaire inclus |
+| **Integration type** | Extension (`ExtensionAPI`) | Plugin (`@opencode-ai/plugin`) |
+| **Installation** | `.pi/extensions/` symlink | `.opencode/config.json` plugins |
+| **Deliberation** | Automatic (sub-process `pi --mode json`) | Manual (plan + `task` tool + `dao_record_outputs`) |
+| **Sub-agents** | Spawned automatically by the core | Spawned manually via native `task` tool |
+| **Events** | `session_start`, `before_agent_start` | Hooks via plugin API |
+| **Commands** | `/dao`, `/dao:propose`, etc. | `/dao/init`, `/dao/propose`, etc. |
+| **Tool syntax** | `dao_propose title="..."` | `dao_propose({ title: "..." })` |
+| **Standalone CLI** | Via Pi | `opencode-dao` binary included |
 
-### Pourquoi la deliberation est différente ?
+### Why is deliberation different?
 
-**Pi** peut spawn des sous-process Pi natifs :
+**Pi** can spawn native Pi sub-processes:
 ```typescript
-// Dans pi-adapter
+// In pi-adapter
 await adapter.spawnAgent({ agent, proposal, systemPrompt });
-// → Exécute `pi --mode json -p --no-session ...`
+// → Runs `pi --mode json -p --no-session ...`
 ```
 
-**OpenCode** ne peut pas spawn programmatically :
+**OpenCode** cannot spawn programmatically:
 ```typescript
-// Dans opencode-adapter
-// Étape 1: dao_deliberate retourne un plan markdown
-// Étape 2: L'utilisateur spawn @dao-strategist via `task`
-// Étape 3: dao_record_outputs ingère les résultats
+// In opencode-adapter
+// Step 1: dao_deliberate returns a markdown dispatch plan
+// Step 2: User spawns @dao-strategist via `task`
+// Step 3: dao_record_outputs ingests the results
 ```
 
 ---
 
 ## Troubleshooting
 
-### Pi : "DAO not initialized"
+### Pi: "DAO not initialized"
 
 ```
 > dao_setup
 ```
 
-### OpenCode : "Plugin not found"
+### Pi: "Cannot find module '@swarm-dao/core'"
 
-Vérifier le chemin du plugin :
+Check the symlink:
 ```bash
-ls ~/.config/opencode/plugins/swarm-dao/
-# Devrait contenir package.json, src/, etc.
+ls -la node_modules/@swarm-dao/core
+# Should point to packages/core
 ```
 
-### Les agents ne répondent pas
+If missing, recreate it:
+```bash
+mkdir -p node_modules/@swarm-dao
+ln -s ../../packages/core node_modules/@swarm-dao/core
+```
 
-Vérifier le modèle configuré :
+### OpenCode: "Plugin not found"
+
+Check the plugin path:
+```bash
+ls ~/.config/opencode/plugins/swarm-dao/
+# Should contain package.json, src/, etc.
+```
+
+### Agents do not respond
+
+Check the configured model:
 ```
 > dao_config_show
 ```
 
-### Erreur de compilation TypeScript
+### TypeScript compilation error
 
 ```bash
 cd packages/core && npx tsc --noEmit
@@ -386,37 +409,37 @@ cd packages/pi-adapter && npx tsc --noEmit
 cd packages/opencode-adapter && npx tsc --noEmit
 ```
 
-### Reset complet
+### Full Reset
 
 ```bash
 rm -rf .dao/
-# Puis ré-initialiser
+# Then re-initialize
 dao_setup
 ```
 
 ---
 
-## Référence rapide des commandes
+## Quick Command Reference
 
-| Commande | Pi | OpenCode | Description |
-|----------|-----|----------|-------------|
-| Initialiser | `dao_setup` | `dao_setup` | Créer les 7 agents |
-| Proposer | `dao_propose` | `dao_propose` | Créer proposition |
-| Délibérer | `dao_deliberate` | `dao_deliberate` + `dao_record_outputs` | Swarm vote |
-| Contrôler | `dao_check` | `dao_control` | Quality gates |
-| Exécuter | `dao_execute` | `dao_execute` | Exécuter proposition |
-| Artefacts | `dao_artefacts` | `dao_artefacts` | Générer documents |
-| Dashboard | `dao_dashboard` | `dao_dashboard` | Vue d'ensemble |
-| Dry-run | `dao_dry_run` | `dao_dry_run` | Prévisualiser |
-| Rollback | `dao_rollback` | `dao_rollback` | Revenir en arrière |
-| Roundtable | `dao_roundtable` | `dao_roundtable` | Suggestions agents |
-| Audit | `dao_audit` | `dao_audit` | Historique |
-| Status | `/dao` | `dao_status` | Dashboard rapide |
+| Command | Pi | OpenCode | Description |
+|---------|-----|----------|-------------|
+| Initialize | `dao_setup` | `dao_setup` | Create the 7 default agents |
+| Propose | `dao_propose` | `dao_propose` | Create a proposal |
+| Deliberate | `dao_deliberate` | `dao_deliberate` + `dao_record_outputs` | Swarm vote |
+| Control | `dao_check` | `dao_control` | Quality gates |
+| Execute | `dao_execute` | `dao_execute` | Execute proposal |
+| Artefacts | `dao_artefacts` | `dao_artefacts` | Generate documents |
+| Dashboard | `dao_dashboard` | `dao_dashboard` | Overview |
+| Dry-run | `dao_dry_run` | `dao_dry_run` | Preview changes |
+| Rollback | `dao_rollback` | `dao_rollback` | Revert execution |
+| Roundtable | `dao_roundtable` | `dao_roundtable` | Agent suggestions |
+| Audit | `dao_audit` | `dao_audit` | History |
+| Status | `/dao` | `dao_status` | Quick dashboard |
 
 ---
 
-## Prochaines étapes
+## Next Steps
 
-- [Configurer les agents](AGENT-PROMPTS.md)
-- [Ajouter un nouvel hôte](EXTENSION-GUIDE.md)
-- [Architecture détaillée](ADR-001-unified-architecture.md)
+- [Configure agents](AGENT-PROMPTS.md)
+- [Add a new host](EXTENSION-GUIDE.md)
+- [Detailed architecture](ADR-001-unified-architecture.md)

@@ -11,18 +11,29 @@ Swarm DAO unifies the governance systems from [pi-swarm-dao](https://github.com/
 git clone https://github.com/guyghost/swarm-dao.git
 cd swarm-dao
 
-# Install
+# Install dependencies
 bun install
+bun add typebox
 
-# Run CLI
-bun run packages/cli/src/cli.ts init
-bun run packages/cli/src/cli.ts setup
-bun run packages/cli/src/cli.ts propose --title "Add feature" --type product-feature --description "..."
+# Link workspace package (Bun workspaces may need manual symlink)
+mkdir -p node_modules/@swarm-dao
+ln -s ../../packages/core node_modules/@swarm-dao/core
 
-# Or use the binary (after publishing)
-swarm-dao init
-swarm-dao setup
-swarm-dao propose --title "Add dark mode" --type product-feature --description "Implement dark theme"
+# Register Pi extension
+mkdir -p .pi/extensions
+ln -s ../../packages/pi-adapter/src/index.ts .pi/extensions/swarm-dao.ts
+
+# Start Pi — the extension is auto-discovered
+pi
+```
+
+Inside Pi:
+```
+> dao_setup          # Initialize with 7 default agents
+> dao_propose        # Create a proposal
+> dao_deliberate     # Run swarm deliberation
+> dao_check          # Quality gates
+> dao_execute        # Execute approved proposal
 ```
 
 ## Architecture
@@ -127,6 +138,8 @@ swarm-dao config
 ```
 
 ## Pi Usage
+
+The Pi extension is auto-discovered from `.pi/extensions/` or `~/.pi/agent/extensions/`.
 
 ```bash
 # Initialize
@@ -273,8 +286,10 @@ GitHub Actions workflow included (`.github/workflows/ci.yml`):
 
 ## Documentation
 
-- [ADR-001: Architecture Unifiée](docs/ADR-001-unified-architecture.md)
-- [Guide d'Extension](docs/EXTENSION-GUIDE.md)
+- [ADR-001: Unified Architecture](docs/ADR-001-unified-architecture.md)
+- [Extension Guide](docs/EXTENSION-GUIDE.md)
+- [Usage Guide](docs/USAGE.md)
+- [Agent Prompts](docs/AGENT-PROMPTS.md)
 
 ## License
 

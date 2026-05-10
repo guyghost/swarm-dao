@@ -27,5 +27,8 @@
     "opencode"
   ],
   "author": "guyghost",
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "typebox": "^1.1.38"
+  }
 }

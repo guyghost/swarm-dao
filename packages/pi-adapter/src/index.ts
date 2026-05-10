@@ -4,9 +4,9 @@
 // Bridges the Swarm DAO core to Pi's ExtensionAPI.
 // Registers tools, commands, and event hooks.
 
-import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
-import { Type } from "@sinclair/typebox";
-import { StringEnum } from "@mariozechner/pi-ai";
+import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
+import { StringEnum } from "@earendil-works/pi-ai";
 
 import type {
   Proposal,

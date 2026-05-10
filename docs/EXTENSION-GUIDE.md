@@ -1,33 +1,33 @@
-# Guide d'Extension Swarm DAO
+# Swarm DAO Extension Guide
 
-> Comment ajouter un nouvel hôte (agent de codage) à Swarm DAO
+> How to add a new host (coding agent) to Swarm DAO.
 
-## Prérequis
+## Prerequisites
 
-- Comprendre l'architecture 4 couches : Governance → Intelligence → Control → Delivery
-- Avoir un environnement avec Bun ≥ 1.3
+- Understand the 4-layer architecture: Governance → Intelligence → Control → Delivery
+- Bun ≥ 1.3 installed
 
-## Étapes
+## Steps
 
-### 1. Créer le package adapter
+### 1. Create the Adapter Package
 
 ```bash
 cd packages/
-mkdir mon-hote-adapter/src
+mkdir -p my-host-adapter/src
 ```
 
-### 2. Implémenter HostAdapter
+### 2. Implement HostAdapter
 
 ```typescript
-// packages/mon-hote-adapter/src/index.ts
+// packages/my-host-adapter/src/index.ts
 import type { HostAdapter, AgentOutput, DAOAgent, Proposal } from "@swarm-dao/core";
 
-const monAdapter: HostAdapter = {
-  hostId: "mon-hote",
+const myAdapter: HostAdapter = {
+  hostId: "my-host",
 
   async spawnAgent({ agent, proposal, systemPrompt, timeoutMs }) {
-    // Implémentation spécifique à votre hôte
-    // Par exemple : appel API, subprocess, etc.
+    // Host-specific implementation
+    // For example: API call, subprocess, etc.
     return {
       agentId: agent.id,
       agentName: agent.name,
@@ -38,7 +38,7 @@ const monAdapter: HostAdapter = {
   },
 
   async spawnAgents({ agents, proposal, maxConcurrent }) {
-    // Dispatcher plusieurs agents en parallèle
+    // Dispatch multiple agents in parallel
     const outputs: AgentOutput[] = [];
     for (const agent of agents) {
       outputs.push(await this.spawnAgent({ agent, proposal, systemPrompt: agent.systemPrompt }));
@@ -79,24 +79,24 @@ const monAdapter: HostAdapter = {
 };
 ```
 
-### 3. Enregistrer les tools DAO
+### 3. Register DAO Tools
 
-Utilisez l'API de votre hôte pour enregistrer les tools du core :
+Use your host's API to register the core tools:
 
 ```typescript
 import {
   getState, createProposal, getProposal, /* ... */
 } from "@swarm-dao/core";
 
-// Enregistrer dao_setup
-hote.registerTool("dao_setup", async () => {
+// Register dao_setup
+host.registerTool("dao_setup", async () => {
   const state = getState();
   if (state.initialized) return "Already initialized";
-  // ... initialiser agents
+  // ... initialize agents
 });
 
-// Enregistrer dao_propose
-hote.registerTool("dao_propose", async (params) => {
+// Register dao_propose
+host.registerTool("dao_propose", async (params) => {
   const proposal = createProposal(params.title, params.type, params.description, "user");
   return `Proposal #${proposal.id} created`;
 });
@@ -104,25 +104,25 @@ hote.registerTool("dao_propose", async (params) => {
 // etc.
 ```
 
-### 4. Tester
+### 4. Test
 
 ```bash
-cd packages/mon-hote-adapter
+cd packages/my-host-adapter
 bun run typecheck
 bun test
 ```
 
 ## Checklist
 
-- [ ] Package créé avec `package.json` et `tsconfig.json`
-- [ ] `HostAdapter` implémenté avec les 8 méthodes
-- [ ] Tools DAO enregistrés dans l'hôte
-- [ ] Types stubs créés si l'hôte n'est pas installable
-- [ ] Tests passent
-- [ ] Compilation sans erreurs
+- [ ] Package created with `package.json` and `tsconfig.json`
+- [ ] `HostAdapter` implemented with all 8 methods
+- [ ] DAO tools registered in the host
+- [ ] Type stubs created if the host is not installable as an npm package
+- [ ] Tests pass
+- [ ] Compiles without errors
 
-## Exemples
+## Examples
 
-Voir les adapters existants :
-- `packages/pi-adapter/src/index.ts` — Extension Pi
-- `packages/opencode-adapter/src/index.ts` — Plugin OpenCode
+See existing adapters:
+- `packages/pi-adapter/src/index.ts` — Pi Extension
+- `packages/opencode-adapter/src/index.ts` — OpenCode Plugin
