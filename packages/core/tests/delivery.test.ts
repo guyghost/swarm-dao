@@ -7,7 +7,7 @@ import {
   createInitialState,
   initializeAgents,
   setState,
-} from "@swarm-dao/core";
+} from "@guyghost/swarm-dao-core";
 
 describe("delivery/plans", () => {
   it("generates delivery plan", () => {

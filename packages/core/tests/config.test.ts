@@ -6,8 +6,8 @@ import {
   canEditWithoutProposal,
   validateWeights,
   filterEnabledAgents,
-} from "@swarm-dao/core";
-import { initializeAgents } from "@swarm-dao/core";
+} from "@guyghost/swarm-dao-core";
+import { initializeAgents } from "@guyghost/swarm-dao-core";
 
 describe("config", () => {
   it("has correct defaults", () => {

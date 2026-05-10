@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "bun:test";
-import { runGates, formatControlResult, createInitialState, initializeAgents, DEFAULT_CONFIG, setState } from "@swarm-dao/core";
+import { runGates, formatControlResult, createInitialState, initializeAgents, DEFAULT_CONFIG, setState } from "@guyghost/swarm-dao-core";
 
 describe("control/gates", () => {
   beforeEach(() => {

@@ -1,5 +1,5 @@
 {
-  "name": "@swarm-dao/pi-adapter",
+  "name": "@guyghost/swarm-dao-pi-adapter",
   "version": "0.1.0",
   "description": "Swarm DAO adapter for the Pi coding agent",
   "type": "module",
@@ -21,7 +21,7 @@
     "prepublishOnly": "bun run build"
   },
   "dependencies": {
-    "@swarm-dao/core": "^0.1.0"
+    "@guyghost/swarm-dao-core": "^0.1.0"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",

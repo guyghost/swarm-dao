@@ -33,11 +33,11 @@ bun add typebox
 
 ### 2. Link the Workspace Package
 
-Bun workspaces do not always create a physical symlink in `node_modules/`. Create it manually so the extension can resolve `@swarm-dao/core`:
+Bun workspaces do not always create a physical symlink in `node_modules/`. Create it manually so the extension can resolve `@guyghost/swarm-dao-core`:
 
 ```bash
-mkdir -p node_modules/@swarm-dao
-ln -s ../../packages/core node_modules/@swarm-dao/core
+mkdir -p node_modules/@guyghost
+ln -s ../../packages/core node_modules/@guyghost/swarm-dao-core
 ```
 
 ### 3. Register the Extension
@@ -372,18 +372,18 @@ await adapter.spawnAgent({ agent, proposal, systemPrompt });
 > dao_setup
 ```
 
-### Pi: "Cannot find module '@swarm-dao/core'"
+### Pi: "Cannot find module '@guyghost/swarm-dao-core'"
 
 Check the symlink:
 ```bash
-ls -la node_modules/@swarm-dao/core
+ls -la node_modules/@guyghost/swarm-dao-core
 # Should point to packages/core
 ```
 
 If missing, recreate it:
 ```bash
-mkdir -p node_modules/@swarm-dao
-ln -s ../../packages/core node_modules/@swarm-dao/core
+mkdir -p node_modules/@guyghost
+ln -s ../../packages/core node_modules/@guyghost/swarm-dao-core
 ```
 
 ### OpenCode: "Plugin not found"

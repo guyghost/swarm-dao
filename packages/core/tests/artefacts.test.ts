@@ -10,7 +10,7 @@ import {
   generateImplementationPlan,
   generateTestPlan,
   generateReleasePacket,
-} from "@swarm-dao/core";
+} from "@guyghost/swarm-dao-core";
 
 describe("delivery/artefacts", () => {
   const mockProposal = {

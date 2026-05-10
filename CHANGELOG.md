@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Initial unified architecture combining pi-swarm-dao and opencode-dao
-- **Core** (`@swarm-dao/core`): Pure business logic for AI agent governance
+- **Core** (`@guyghost/swarm-dao-core`): Pure business logic for AI agent governance
   - 4-layer architecture: Governance, Intelligence, Delivery, Control
   - 7 default specialized agents with weighted voting
   - Proposal lifecycle: open → deliberating → approved → controlled → executed
@@ -21,9 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Outcome tracking with ratings and metrics
   - Health score dashboard
 - **Adapters**:
-  - Pi adapter (`@swarm-dao/pi-adapter`) with 20+ tools and `/dao` command
-  - OpenCode adapter (`@swarm-dao/opencode-adapter`) with 15+ tools
-- **CLI** (`@swarm-dao/cli`): Standalone `swarm-dao` binary
+  - Pi adapter (`@guyghost/swarm-dao-pi-adapter`) with 20+ tools and `/dao` command
+  - OpenCode adapter (`@guyghost/swarm-dao-opencode-adapter`) with 15+ tools
+- **CLI** (`@guyghost/swarm-dao-cli`): Standalone `swarm-dao` binary
   - `init`, `setup`, `propose`, `list`, `show`, `vote`, `config`, `audit`, `status`
 - **Integrations**:
   - GitHub: create branch, open PR, sync issues

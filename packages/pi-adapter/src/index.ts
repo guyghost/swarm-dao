@@ -15,7 +15,7 @@ import type {
   HostAdapter,
   DAOAgent,
   SwarmProgressUpdate,
-} from "@swarm-dao/core";
+} from "@guyghost/swarm-dao-core";
 import {
   // Persistence
   loadState,
@@ -84,7 +84,7 @@ import {
   // Types
   PROPOSAL_TYPES,
   PROPOSAL_TYPE_LABELS,
-} from "@swarm-dao/core";
+} from "@guyghost/swarm-dao-core";
 
 // ── Pi Host Adapter Implementation ───────────────────────────
 
@@ -452,7 +452,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
       if (!proposal) return toolResult(`Proposal #${params.proposalId} not found.`);
       if (proposal.status !== "executed") return toolResult(`Proposal #${proposal.id} is ${proposal.status}, must be executed.`);
 
-      const { addRating } = await import("@swarm-dao/core");
+      const { addRating } = await import("@guyghost/swarm-dao-core");
       addRating(proposal.id, { proposalId: proposal.id, rater: "user", score: Number(params.score) as 1 | 2 | 3 | 4 | 5, comment: params.comment, ratedAt: new Date().toISOString() });
       await saveState();
       return toolResult(`# ⭐ Rating Recorded — #${proposal.id}\n\n**Score:** ${params.score}/5\n**Comment:** ${params.comment}`);

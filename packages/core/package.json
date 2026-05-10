@@ -1,5 +1,5 @@
 {
-  "name": "@swarm-dao/core",
+  "name": "@guyghost/swarm-dao-core",
   "version": "0.1.0",
   "description": "Swarm DAO core — pure business logic for AI agent governance",
   "type": "module",

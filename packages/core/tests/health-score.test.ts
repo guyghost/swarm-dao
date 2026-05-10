@@ -7,7 +7,7 @@ import {
   getHealthTrend,
   formatHealthTrend,
   DEFAULT_HEALTH_WEIGHTS,
-} from "@swarm-dao/core";
+} from "@guyghost/swarm-dao-core";
 
 describe("health-score", () => {
   it("returns insufficient data for empty proposals", () => {

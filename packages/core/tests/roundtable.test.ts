@@ -1,6 +1,6 @@
 import { describe, it, expect } from "bun:test";
-import { formatRoundTableResults } from "@swarm-dao/core";
-import type { RoundTableSuggestion } from "@swarm-dao/core";
+import { formatRoundTableResults } from "@guyghost/swarm-dao-core";
+import type { RoundTableSuggestion } from "@guyghost/swarm-dao-core";
 
 describe("intelligence/roundtable", () => {
   it("formats round table results", () => {

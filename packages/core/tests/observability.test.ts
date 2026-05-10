@@ -28,7 +28,7 @@ import {
   initializeDefaultAlertRules,
   formatAlerts,
   resetAlerts,
-} from "@swarm-dao/core";
+} from "@guyghost/swarm-dao-core";
 
 describe("observability/metrics", () => {
   beforeEach(() => {

@@ -12,7 +12,7 @@ import {
   getAuditLog,
   getDaoRoot,
   padId,
-} from "@swarm-dao/core";
+} from "@guyghost/swarm-dao-core";
 
 describe("persistence", () => {
   beforeEach(() => {

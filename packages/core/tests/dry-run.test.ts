@@ -8,7 +8,7 @@ import {
   createInitialState,
   setState,
   captureSnapshot,
-} from "@swarm-dao/core";
+} from "@guyghost/swarm-dao-core";
 
 describe("delivery/dry-run", () => {
   beforeEach(() => {

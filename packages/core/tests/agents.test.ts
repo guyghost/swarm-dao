@@ -9,7 +9,7 @@ import {
   promoteBestVariant,
   formatPromptComparison,
   resetPromptRegistries,
-} from "@swarm-dao/core";
+} from "@guyghost/swarm-dao-core";
 
 describe("agents/prompts", () => {
   beforeEach(() => {

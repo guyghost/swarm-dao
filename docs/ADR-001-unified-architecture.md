@@ -32,10 +32,10 @@ Create a **unified monorepo** (`swarm-dao`) with a three-layer architecture:
 
 | Package | Responsibility | Host Dependencies |
 |---------|---------------|-------------------|
-| `@swarm-dao/core` | Types, governance, scoring, gates, audit, delivery | None |
-| `@swarm-dao/pi-adapter` | Bridge Pi ExtensionAPI → core | `@earendil-works/pi-coding-agent` |
-| `@swarm-dao/opencode-adapter` | Bridge OpenCode Plugin → core | `@opencode-ai/plugin` |
-| `@swarm-dao/cli` | Standalone CLI | None (uses core) |
+| `@guyghost/swarm-dao-core` | Types, governance, scoring, gates, audit, delivery | None |
+| `@guyghost/swarm-dao-pi-adapter` | Bridge Pi ExtensionAPI → core | `@earendil-works/pi-coding-agent` |
+| `@guyghost/swarm-dao-opencode-adapter` | Bridge OpenCode Plugin → core | `@opencode-ai/plugin` |
+| `@guyghost/swarm-dao-cli` | Standalone CLI | None (uses core) |
 
 ### HostAdapter Interface
 

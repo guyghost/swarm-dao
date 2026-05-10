@@ -18,9 +18,9 @@ import {
   getAuditLog,
   getAllAuditLog,
   initializeAgents,
-} from "@swarm-dao/core";
-import type { ProposalType, VotePosition } from "@swarm-dao/core";
-import { PROPOSAL_TYPES } from "@swarm-dao/core";
+} from "@guyghost/swarm-dao-core";
+import type { ProposalType, VotePosition } from "@guyghost/swarm-dao-core";
+import { PROPOSAL_TYPES } from "@guyghost/swarm-dao-core";
 
 // ── Helpers ─────────────────────────────────────────────────
 

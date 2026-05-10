@@ -15,8 +15,8 @@ import {
   createInitialState,
   DEFAULT_CONFIG,
   PROPOSAL_TYPES,
-} from "@swarm-dao/core";
-import { setState } from "@swarm-dao/core";
+} from "@guyghost/swarm-dao-core";
+import { setState } from "@guyghost/swarm-dao-core";
 
 // ── Agents ──────────────────────────────────────────────────
 

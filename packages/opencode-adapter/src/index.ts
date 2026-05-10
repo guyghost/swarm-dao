@@ -11,7 +11,7 @@ import type {
   HostAdapter,
   DAOAgent,
   ProposalType,
-} from "@swarm-dao/core";
+} from "@guyghost/swarm-dao-core";
 import {
   loadState,
   getState,
@@ -62,7 +62,7 @@ import {
   executeAmendment,
   PROPOSAL_TYPES,
   PROPOSAL_TYPE_LABELS,
-} from "@swarm-dao/core";
+} from "@guyghost/swarm-dao-core";
 
 const schema = tool.schema;
 

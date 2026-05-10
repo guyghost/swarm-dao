@@ -20,7 +20,7 @@ mkdir -p my-host-adapter/src
 
 ```typescript
 // packages/my-host-adapter/src/index.ts
-import type { HostAdapter, AgentOutput, DAOAgent, Proposal } from "@swarm-dao/core";
+import type { HostAdapter, AgentOutput, DAOAgent, Proposal } from "@guyghost/swarm-dao-core";
 
 const myAdapter: HostAdapter = {
   hostId: "my-host",
@@ -86,7 +86,7 @@ Use your host's API to register the core tools:
 ```typescript
 import {
   getState, createProposal, getProposal, /* ... */
-} from "@swarm-dao/core";
+} from "@guyghost/swarm-dao-core";
 
 // Register dao_setup
 host.registerTool("dao_setup", async () => {

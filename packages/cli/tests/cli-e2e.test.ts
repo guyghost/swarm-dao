@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { main } from "@swarm-dao/cli";
+import { main } from "@guyghost/swarm-dao-cli";
 import { promises as fs } from "fs";
 import path from "path";
 import { tmpdir } from "os";

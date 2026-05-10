@@ -16,8 +16,8 @@ bun install
 bun add typebox
 
 # Link workspace package (Bun workspaces may need manual symlink)
-mkdir -p node_modules/@swarm-dao
-ln -s ../../packages/core node_modules/@swarm-dao/core
+mkdir -p node_modules/@guyghost
+ln -s ../../packages/core node_modules/@guyghost/swarm-dao-core
 
 # Register Pi extension
 mkdir -p .pi/extensions
@@ -68,10 +68,10 @@ Inside Pi:
 
 | Package | Description |
 |---------|-------------|
-| `@swarm-dao/core` | Pure business logic (~3000 lines) |
-| `@swarm-dao/pi-adapter` | Bridge to Pi coding agent |
-| `@swarm-dao/opencode-adapter` | Bridge to OpenCode |
-| `@swarm-dao/cli` | Standalone CLI (`swarm-dao`) |
+| `@guyghost/swarm-dao-core` | Pure business logic (~3000 lines) |
+| `@guyghost/swarm-dao-pi-adapter` | Bridge to Pi coding agent |
+| `@guyghost/swarm-dao-opencode-adapter` | Bridge to OpenCode |
+| `@guyghost/swarm-dao-cli` | Standalone CLI (`swarm-dao`) |
 
 ## 4-Layer Governance
 
@@ -251,7 +251,7 @@ See [docs/EXTENSION-GUIDE.md](docs/EXTENSION-GUIDE.md).
 Quick overview:
 
 ```typescript
-import type { HostAdapter } from "@swarm-dao/core";
+import type { HostAdapter } from "@guyghost/swarm-dao-core";
 
 const myAdapter: HostAdapter = {
   hostId: "my-host",

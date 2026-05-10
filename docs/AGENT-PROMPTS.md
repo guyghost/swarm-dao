@@ -41,7 +41,7 @@ Prompts live in `agents/<agent-id>.md` with YAML frontmatter.
 ### Via A/B Testing
 
 ```typescript
-import { createPromptVariant, registerAgentPrompts, recordPromptInvocation } from "@swarm-dao/core";
+import { createPromptVariant, registerAgentPrompts, recordPromptInvocation } from "@guyghost/swarm-dao-core";
 
 // Create two variants
 const v1 = createPromptVariant("strategist", "v1", "Standard", "Prompt A...", 70);
@@ -104,7 +104,7 @@ import {
   getSystemPrompt,
   recordPromptInvocation,
   formatPromptComparison,
-} from "@swarm-dao/core";
+} from "@guyghost/swarm-dao-core";
 
 // Define variants
 const standard = createPromptVariant(
