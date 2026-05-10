@@ -3,21 +3,60 @@
   "version": "0.1.0",
   "description": "Swarm DAO core — pure business logic for AI agent governance",
   "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
   "exports": {
-    ".": "./src/index.ts",
-    "./types": "./src/types/index.ts",
-    "./governance": "./src/governance/index.ts",
-    "./intelligence": "./src/intelligence/index.ts",
-    "./control": "./src/control/index.ts",
-    "./delivery": "./src/delivery/index.ts",
-    "./persistence": "./src/persistence.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./types": {
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/types/index.js"
+    },
+    "./governance": {
+      "types": "./dist/governance/index.d.ts",
+      "import": "./dist/governance/index.js"
+    },
+    "./intelligence": {
+      "types": "./dist/intelligence/index.d.ts",
+      "import": "./dist/intelligence/index.js"
+    },
+    "./control": {
+      "types": "./dist/control/index.d.ts",
+      "import": "./dist/control/index.js"
+    },
+    "./delivery": {
+      "types": "./dist/delivery/index.d.ts",
+      "import": "./dist/delivery/index.js"
+    },
+    "./persistence": {
+      "types": "./dist/persistence.d.ts",
+      "import": "./dist/persistence.js"
+    }
   },
   "scripts": {
+    "build": "tsc",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {},
   "devDependencies": {
     "@types/bun": "latest"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/guyghost/swarm-dao.git",
+    "directory": "packages/core"
+  },
+  "bugs": {
+    "url": "https://github.com/guyghost/swarm-dao/issues"
+  },
+  "homepage": "https://github.com/guyghost/swarm-dao#readme",
+  "publishConfig": {
+    "access": "public"
   }
 }

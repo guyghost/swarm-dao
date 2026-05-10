@@ -10,7 +10,9 @@
     "build": "bun run --filter '*' build",
     "test": "bun run --filter '*' test",
     "lint": "bun run --filter '*' lint",
-    "typecheck": "bun run --filter '*' typecheck"
+    "typecheck": "bun run --filter '*' typecheck",
+    "prepare": "bun run build",
+    "prepublishOnly": "bun run build"
   },
   "devDependencies": {
     "typescript": "^5.4.0"

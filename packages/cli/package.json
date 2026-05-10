@@ -3,20 +3,41 @@
   "version": "0.1.0",
   "description": "Swarm DAO standalone CLI",
   "type": "module",
+  "main": "./dist/cli.js",
+  "types": "./dist/cli.d.ts",
+  "files": [
+    "dist"
+  ],
   "bin": {
-    "swarm-dao": "./src/cli.ts"
+    "swarm-dao": "./dist/cli.js"
   },
   "exports": {
-    ".": "./src/cli.ts"
+    ".": {
+      "types": "./dist/cli.d.ts",
+      "import": "./dist/cli.js"
+    }
   },
   "scripts": {
+    "build": "tsc",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@swarm-dao/core": "workspace:*"
+    "@swarm-dao/core": "^0.1.0"
   },
   "devDependencies": {
     "@types/bun": "latest"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/guyghost/swarm-dao.git",
+    "directory": "packages/cli"
+  },
+  "bugs": {
+    "url": "https://github.com/guyghost/swarm-dao/issues"
+  },
+  "homepage": "https://github.com/guyghost/swarm-dao#readme",
+  "publishConfig": {
+    "access": "public"
   }
 }
