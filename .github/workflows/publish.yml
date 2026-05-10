@@ -1,0 +1,71 @@
+name: Publish to npm
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Setup Node.js for npm auth
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Type check all packages
+        run: bun run --filter '*' typecheck
+
+      - name: Build all packages
+        run: bun run --filter '*' build
+
+      - name: Publish @swarm-dao/core
+        run: |
+          cd packages/core
+          node ../../scripts/prepare-dist.mjs
+          cd dist
+          npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish @swarm-dao/pi-adapter
+        run: |
+          cd packages/pi-adapter
+          node ../../scripts/prepare-dist.mjs
+          cd dist
+          npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish @swarm-dao/opencode-adapter
+        run: |
+          cd packages/opencode-adapter
+          node ../../scripts/prepare-dist.mjs
+          cd dist
+          npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish @swarm-dao/cli
+        run: |
+          cd packages/cli
+          node ../../scripts/prepare-dist.mjs
+          cd dist
+          npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
