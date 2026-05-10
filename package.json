@@ -12,9 +12,11 @@
     "lint": "bun run --filter '*' lint",
     "typecheck": "bun run --filter '*' typecheck",
     "prepare": "bun run build",
-    "prepublishOnly": "bun run build"
+    "changeset": "changeset",
+    "release": "bun test && changeset publish"
   },
   "devDependencies": {
+    "@changesets/cli": "^2.31.0",
     "typescript": "^5.4.0"
   },
   "engines": {
