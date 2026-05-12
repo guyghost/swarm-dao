@@ -30,7 +30,7 @@ export interface PromptRegistry {
 const registries = new Map<string, PromptRegistry>();
 
 export function createPromptVariant(
-  agentId: string,
+  _agentId: string,
   variantId: string,
   name: string,
   systemPrompt: string,
@@ -138,26 +138,29 @@ export function compareVariants(agentId: string): { variant: PromptVariant; scor
   const registry = registries.get(agentId);
   if (!registry) return [];
 
-  return Array.from(registry.variants.values()).map((variant) => {
-    const m = variant.metrics;
-    const totalVotes = m.votesFor + m.votesAgainst + m.votesAbstain;
+  return Array.from(registry.variants.values())
+    .map((variant) => {
+      const m = variant.metrics;
+      const totalVotes = m.votesFor + m.votesAgainst + m.votesAbstain;
 
-    // Composite score: approval rate * confidence * invocations factor
-    const approvalRate = totalVotes > 0 ? m.votesFor / totalVotes : 0;
-    const confidenceFactor = m.avgConfidence / 10; // normalize 0-10 to 0-1
-    const volumeFactor = Math.min(1, m.invocations / 10); // normalize to 0-1
+      // Composite score: approval rate * confidence * invocations factor
+      const approvalRate = totalVotes > 0 ? m.votesFor / totalVotes : 0;
+      const confidenceFactor = m.avgConfidence / 10; // normalize 0-10 to 0-1
+      const volumeFactor = Math.min(1, m.invocations / 10); // normalize to 0-1
 
-    const score = approvalRate * 0.4 + confidenceFactor * 0.3 + volumeFactor * 0.3;
+      const score = approvalRate * 0.4 + confidenceFactor * 0.3 + volumeFactor * 0.3;
 
-    return { variant, score };
-  }).sort((a, b) => b.score - a.score);
+      return { variant, score };
+    })
+    .sort((a, b) => b.score - a.score);
 }
 
 export function promoteBestVariant(agentId: string): PromptVariant | undefined {
   const comparison = compareVariants(agentId);
   if (comparison.length === 0) return undefined;
 
-  const best = comparison[0]!;
+  const best = comparison[0];
+  if (!best) return undefined;
   const registry = registries.get(agentId);
   if (registry) {
     registry.currentVariant = best.variant.id;
@@ -181,7 +184,8 @@ export function formatPromptComparison(agentId: string): string {
     output += `| ${variant.name} | ${variant.weight}% | ${m.invocations} | ${Math.round(m.avgResponseTimeMs)}ms | ${approval} | ${m.avgConfidence.toFixed(1)} | ${score.toFixed(2)} |\n`;
   }
 
-  const best = comparison[0]!;
+  const best = comparison[0];
+  if (!best) return output;
   output += `\n**Best variant:** ${best.variant.name} (score: ${best.score.toFixed(2)})`;
 
   return output;

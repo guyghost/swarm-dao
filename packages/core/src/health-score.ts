@@ -2,7 +2,14 @@
 // Swarm DAO Core — Health Score & Dashboard
 // ============================================================
 
-import type { Proposal, ProposalOutcome, HealthScore, HealthMetric, HealthWeights, HealthSnapshot } from "./types/index.js";
+import type {
+  HealthMetric,
+  HealthScore,
+  HealthSnapshot,
+  HealthWeights,
+  Proposal,
+  ProposalOutcome,
+} from "./types/index.js";
 
 export const DEFAULT_HEALTH_WEIGHTS: HealthWeights = {
   passRate: 25,
@@ -45,14 +52,14 @@ export function computeHealthScore(
 
   // Avg rating: average of outcome ratings
   const allRatings = Object.values(outcomes).flatMap((o) => o.ratings);
-  const avgRatingRaw = allRatings.length > 0
-    ? allRatings.reduce((sum, r) => sum + r.score, 0) / allRatings.length * 20 // scale 1-5 to 0-100
-    : 0;
+  const avgRatingRaw =
+    allRatings.length > 0
+      ? (allRatings.reduce((sum, r) => sum + r.score, 0) / allRatings.length) * 20 // scale 1-5 to 0-100
+      : 0;
 
   // Deliberation depth: avg agent outputs per proposal
-  const avgOutputs = proposals.length > 0
-    ? proposals.reduce((sum, p) => sum + (p.agentOutputs?.length || 0), 0) / proposals.length
-    : 0;
+  const avgOutputs =
+    proposals.length > 0 ? proposals.reduce((sum, p) => sum + (p.agentOutputs?.length || 0), 0) / proposals.length : 0;
   const deliberationDepthRaw = Math.min(100, avgOutputs * 15); // 7 agents = ~100%
 
   // Participation: % of proposals that reached deliberation
@@ -161,7 +168,10 @@ export function generateDashboard(
 
   output += `## Proposal Pipeline\n`;
   for (const [status, count] of Object.entries(byStatus)) {
-    const emoji = { open: "📝", deliberating: "🗳️", approved: "✅", controlled: "🛡️", rejected: "❌", executed: "🚀", failed: "💥" }[status] || "•";
+    const emoji =
+      { open: "📝", deliberating: "🗳️", approved: "✅", controlled: "🛡️", rejected: "❌", executed: "🚀", failed: "💥" }[
+        status
+      ] || "•";
     output += `- ${emoji} ${status}: ${count}\n`;
   }
 

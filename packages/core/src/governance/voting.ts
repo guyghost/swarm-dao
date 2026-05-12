@@ -2,7 +2,7 @@
 // Swarm DAO Core — Vote Parsing & Tally
 // ============================================================
 
-import type { Vote, VotePosition, Proposal, DAOConfig, TallyResult, AgentOutput } from "../types/index.js";
+import type { AgentOutput, DAOConfig, Proposal, TallyResult, Vote, VotePosition } from "../types/index.js";
 
 // ── Vote Parsing ─────────────────────────────────────────────
 
@@ -41,37 +41,28 @@ export function tallyVotes(proposal: Proposal, config: DAOConfig): TallyResult {
   const votes = proposal.votes || [];
   const totalAgents = proposal.agentOutputs?.length || votes.length;
 
-  const weightedFor = votes
-    .filter((v) => v.position === "for")
-    .reduce((sum, v) => sum + v.weight, 0);
+  const weightedFor = votes.filter((v) => v.position === "for").reduce((sum, v) => sum + v.weight, 0);
 
-  const weightedAgainst = votes
-    .filter((v) => v.position === "against")
-    .reduce((sum, v) => sum + v.weight, 0);
+  const weightedAgainst = votes.filter((v) => v.position === "against").reduce((sum, v) => sum + v.weight, 0);
 
-  const weightedAbstain = votes
-    .filter((v) => v.position === "abstain")
-    .reduce((sum, v) => sum + v.weight, 0);
+  const weightedAbstain = votes.filter((v) => v.position === "abstain").reduce((sum, v) => sum + v.weight, 0);
 
   const totalVotingWeight = weightedFor + weightedAgainst + weightedAbstain;
   const votingAgents = votes.filter((v) => v.position !== "abstain").length;
 
   // Quorum check: % of total agent weight that participated
-  const totalPossibleWeight = totalAgents > 0
-    ? votes.reduce((sum, v) => sum + v.weight, 0) + (totalAgents - votes.length) * 1
-    : totalVotingWeight;
+  const totalPossibleWeight =
+    totalAgents > 0
+      ? votes.reduce((sum, v) => sum + v.weight, 0) + (totalAgents - votes.length) * 1
+      : totalVotingWeight;
 
-  const quorumPercent = totalPossibleWeight > 0
-    ? Math.round((totalVotingWeight / totalPossibleWeight) * 100)
-    : 0;
+  const quorumPercent = totalPossibleWeight > 0 ? Math.round((totalVotingWeight / totalPossibleWeight) * 100) : 0;
 
   const quorumMet = quorumPercent >= config.quorumPercent;
 
   // Approval: % of non-abstain weight that voted for
   const decisiveWeight = weightedFor + weightedAgainst;
-  const approvalScore = decisiveWeight > 0
-    ? Math.round((weightedFor / decisiveWeight) * 100)
-    : 0;
+  const approvalScore = decisiveWeight > 0 ? Math.round((weightedFor / decisiveWeight) * 100) : 0;
 
   const approved = quorumMet && approvalScore >= config.approvalThreshold;
 

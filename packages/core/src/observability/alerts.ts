@@ -2,7 +2,7 @@
 // Swarm DAO Core — Alerting System
 // ============================================================
 
-import { getGauge, getCounter, getHistogram } from "./metrics.js";
+import { getCounter, getGauge, getHistogram } from "./metrics.js";
 
 export type AlertSeverity = "info" | "warning" | "critical";
 export type AlertCondition = "gt" | "lt" | "eq" | "gte" | "lte";
@@ -73,12 +73,18 @@ export function resolveAlert(alertId: string): boolean {
 
 function evaluateCondition(value: number, condition: AlertCondition, threshold: number): boolean {
   switch (condition) {
-    case "gt": return value > threshold;
-    case "lt": return value < threshold;
-    case "eq": return value === threshold;
-    case "gte": return value >= threshold;
-    case "lte": return value <= threshold;
-    default: return false;
+    case "gt":
+      return value > threshold;
+    case "lt":
+      return value < threshold;
+    case "eq":
+      return value === threshold;
+    case "gte":
+      return value >= threshold;
+    case "lte":
+      return value <= threshold;
+    default:
+      return false;
   }
 }
 
@@ -134,9 +140,11 @@ export function formatAlert(alert: Alert): string {
   const emoji = { info: "ℹ️", warning: "⚠️", critical: "🚨" }[alert.severity];
   const status = alert.status === "firing" ? "🔥 FIRING" : "✅ RESOLVED";
 
-  return `${emoji} **${alert.name}** — ${status}\n` +
+  return (
+    `${emoji} **${alert.name}** — ${status}\n` +
     `Metric: \`${alert.metric}\` = ${alert.value} (threshold: ${alert.condition} ${alert.threshold})\n` +
-    `Triggered: ${alert.triggeredAt}${alert.resolvedAt ? ` | Resolved: ${alert.resolvedAt}` : ""}`;
+    `Triggered: ${alert.triggeredAt}${alert.resolvedAt ? ` | Resolved: ${alert.resolvedAt}` : ""}`
+  );
 }
 
 export function formatAlerts(): string {
@@ -145,7 +153,7 @@ export function formatAlerts(): string {
 
   let output = "# 🚨 Active Alerts\n\n";
   for (const alert of active) {
-    output += formatAlert(alert) + "\n\n";
+    output += `${formatAlert(alert)}\n\n`;
   }
   return output;
 }

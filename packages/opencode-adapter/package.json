@@ -17,6 +17,7 @@
   "scripts": {
     "build": "tsc",
     "test": "bun test",
+    "lint": "biome check .",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "bun run build"
   },

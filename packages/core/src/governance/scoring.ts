@@ -2,12 +2,12 @@
 // Swarm DAO Core — Composite & RICE Scoring
 // ============================================================
 
-import type { AxisScore, CompositeScore, AgentOutput, RICEScore, RiskZone } from "../types/index.js";
-import { SCORING_WEIGHTS, RISK_ZONE_LABELS } from "../types/index.js";
+import type { AgentOutput, AxisScore, CompositeScore, RICEScore, RiskZone } from "../types/index.js";
+import { RISK_ZONE_LABELS, SCORING_WEIGHTS } from "../types/index.js";
 
 // ── Composite Score ──────────────────────────────────────────
 
-const SCORE_PATTERN = /##\s*Composite Score Inputs \(0-10\)\s*\n([\s\S]*?)(?=\n##|$)/i;
+const _SCORE_PATTERN = /##\s*Composite Score Inputs \(0-10\)\s*\n([\s\S]*?)(?=\n##|$)/i;
 const AXIS_PATTERNS: Record<keyof AxisScore, RegExp> = {
   userImpact: /userImpact[:\s]+(\d+(?:\.\d+)?)/i,
   businessImpact: /businessImpact[:\s]+(\d+(?:\.\d+)?)/i,
@@ -21,6 +21,7 @@ export function parseScoresFromOutput(content: string): Partial<AxisScore> {
   for (const [axis, pattern] of Object.entries(AXIS_PATTERNS)) {
     const match = content?.match(pattern);
     if (match) {
+      // biome-ignore lint/suspicious/noExplicitAny: dynamic axis key assignment on partial record
       (scores as any)[axis] = Math.min(10, Math.max(0, parseFloat(match[1] ?? "0")));
     }
   }
@@ -32,12 +33,13 @@ export function calculateCompositeScore(outputs: AgentOutput[]): CompositeScore 
     .filter((o) => !o.error && o.content)
     .map((o) => parseScoresFromOutput(o.content));
 
-  const validScores = allScores.filter((s) =>
-    s.userImpact !== undefined &&
-    s.businessImpact !== undefined &&
-    s.effort !== undefined &&
-    s.securityRisk !== undefined &&
-    s.confidence !== undefined,
+  const validScores = allScores.filter(
+    (s) =>
+      s.userImpact !== undefined &&
+      s.businessImpact !== undefined &&
+      s.effort !== undefined &&
+      s.securityRisk !== undefined &&
+      s.confidence !== undefined,
   );
 
   if (validScores.length === 0) {
@@ -126,13 +128,17 @@ export function parseRICEFromOutput(content: string): Partial<RICEScore> {
   };
 }
 
-export function rankByRICE(proposals: { id: number; riceScore?: RICEScore }[]): { id: number; riceScore: RICEScore; rank: number }[] {
+export function rankByRICE(
+  proposals: { id: number; riceScore?: RICEScore }[],
+): { id: number; riceScore: RICEScore; rank: number }[] {
   const scored = proposals
-    .filter((p) => p.riceScore !== undefined)
-    .map((p) => ({ id: p.id, riceScore: p.riceScore!, rank: 0 }));
+    .filter((p): p is { id: number; riceScore: RICEScore } => p.riceScore !== undefined)
+    .map((p) => ({ id: p.id, riceScore: p.riceScore, rank: 0 }));
 
   scored.sort((a, b) => b.riceScore.riceScore - a.riceScore.riceScore);
-  scored.forEach((item, index) => { item.rank = index + 1; });
+  scored.forEach((item, index) => {
+    item.rank = index + 1;
+  });
 
   return scored;
 }

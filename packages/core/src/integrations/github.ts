@@ -40,7 +40,11 @@ function getAuthHeaders(): Record<string, string> {
 }
 
 function slugify(title: string): string {
-  return title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40);
+  return title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 40);
 }
 
 export function ghBranchNameFor(proposal: Proposal): string {
@@ -53,22 +57,22 @@ export async function ghCreateBranch(
 ): Promise<{ ref: string; sha: string } | null> {
   if (!isGitHubEnabled()) return null;
 
-  const base = baseBranch || config!.defaultBranch || "main";
+  const base = baseBranch || config?.defaultBranch || "main";
 
   // Get base branch SHA
-  const refRes = await fetch(`${getApiBase()}/repos/${config!.owner}/${config!.repo}/git/ref/heads/${base}`, {
+  const refRes = await fetch(`${getApiBase()}/repos/${config?.owner}/${config?.repo}/git/ref/heads/${base}`, {
     headers: getAuthHeaders(),
   });
   if (!refRes.ok) {
     console.error(`Failed to get ref for ${base}: ${refRes.status}`);
     return null;
   }
-  const refData = await refRes.json() as { object?: { sha: string } };
+  const refData = (await refRes.json()) as { object?: { sha: string } };
   const sha = refData.object?.sha;
   if (!sha) return null;
 
   // Create branch
-  const createRes = await fetch(`${getApiBase()}/repos/${config!.owner}/${config!.repo}/git/refs`, {
+  const createRes = await fetch(`${getApiBase()}/repos/${config?.owner}/${config?.repo}/git/refs`, {
     method: "POST",
     headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
     body: JSON.stringify({ ref: `refs/heads/${branchName}`, sha }),
@@ -95,14 +99,14 @@ export async function ghCreatePullRequest(
 
   const body = buildPRBody(proposal, options.linkedIssue);
 
-  const res = await fetch(`${getApiBase()}/repos/${config!.owner}/${config!.repo}/pulls`, {
+  const res = await fetch(`${getApiBase()}/repos/${config?.owner}/${config?.repo}/pulls`, {
     method: "POST",
     headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
     body: JSON.stringify({
       title: proposal.title,
       body,
       head: options.headBranch,
-      base: options.baseBranch || config!.defaultBranch || "main",
+      base: options.baseBranch || config?.defaultBranch || "main",
       draft: options.draft ?? false,
     }),
   });
@@ -112,7 +116,7 @@ export async function ghCreatePullRequest(
     return null;
   }
 
-  const data = await res.json() as { number: number; html_url: string };
+  const data = (await res.json()) as { number: number; html_url: string };
   return { number: data.number, url: data.html_url };
 }
 
@@ -123,14 +127,14 @@ export async function ghCreateIssue(
 ): Promise<{ number: number; url: string } | null> {
   if (!isGitHubEnabled()) return null;
 
-  const res = await fetch(`${getApiBase()}/repos/${config!.owner}/${config!.repo}/issues`, {
+  const res = await fetch(`${getApiBase()}/repos/${config?.owner}/${config?.repo}/issues`, {
     method: "POST",
     headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
     body: JSON.stringify({ title, body, labels: labels ?? ["dao-proposal"] }),
   });
 
   if (!res.ok) return null;
-  const data = await res.json() as { number: number; html_url: string };
+  const data = (await res.json()) as { number: number; html_url: string };
   return { number: data.number, url: data.html_url };
 }
 
@@ -140,7 +144,7 @@ export async function ghUpdateIssue(
 ): Promise<boolean> {
   if (!isGitHubEnabled()) return false;
 
-  const res = await fetch(`${getApiBase()}/repos/${config!.owner}/${config!.repo}/issues/${issueNumber}`, {
+  const res = await fetch(`${getApiBase()}/repos/${config?.owner}/${config?.repo}/issues/${issueNumber}`, {
     method: "PATCH",
     headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
     body: JSON.stringify(updates),

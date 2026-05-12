@@ -1,13 +1,13 @@
-import { describe, it, expect, beforeEach } from "bun:test";
+import { beforeEach, describe, expect, it } from "bun:test";
 import {
+  compareVariants,
   createPromptVariant,
-  registerAgentPrompts,
+  formatPromptComparison,
   getPromptVariant,
   getSystemPrompt,
-  recordPromptInvocation,
-  compareVariants,
   promoteBestVariant,
-  formatPromptComparison,
+  recordPromptInvocation,
+  registerAgentPrompts,
   resetPromptRegistries,
 } from "@guyghost/swarm-dao-core";
 
@@ -30,7 +30,7 @@ describe("agents/prompts", () => {
 
     const registry = getPromptVariant("strategist", "v1");
     expect(registry).toBeDefined();
-    expect(registry!.name).toBe("Standard");
+    expect(registry?.name).toBe("Standard");
   });
 
   it("returns system prompt with variant", () => {
@@ -46,9 +46,11 @@ describe("agents/prompts", () => {
     const v1 = createPromptVariant("strategist", "v1", "Standard", "Variant prompt", 100);
     registerAgentPrompts("strategist", [v1]);
 
+    // biome-ignore lint/suspicious/noExplicitAny: test mock agent satisfies partial DAOAgent shape
     const prompt = getSystemPrompt(agent as any, "v1");
     expect(prompt).toBe("Variant prompt");
 
+    // biome-ignore lint/suspicious/noExplicitAny: test mock agent satisfies partial DAOAgent shape
     const defaultPrompt = getSystemPrompt(agent as any);
     expect(defaultPrompt).toBe("Variant prompt"); // v1 is only variant, so it's selected
   });
@@ -63,6 +65,7 @@ describe("agents/prompts", () => {
       systemPrompt: "Default prompt",
     };
 
+    // biome-ignore lint/suspicious/noExplicitAny: test mock agent satisfies partial DAOAgent shape
     const prompt = getSystemPrompt(agent as any);
     expect(prompt).toBe("Default prompt");
   });
@@ -111,7 +114,7 @@ describe("agents/prompts", () => {
     recordPromptInvocation("strategist", "v2", 1000, { position: "against", confidence: 2 });
 
     const best = promoteBestVariant("strategist");
-    expect(best!.id).toBe("v1");
+    expect(best?.id).toBe("v1");
   });
 
   it("formats prompt comparison", () => {

@@ -2,15 +2,13 @@
 // Swarm DAO Core — Audit Trail
 // ============================================================
 
-import type { AuditEntry, Proposal } from "../types/index.js";
-import { getState, recordAudit as persistRecordAudit, getAuditLog, getAllAuditLog } from "../persistence.js";
+import { getAllAuditLog, getAuditLog, recordAudit as persistRecordAudit } from "../persistence.js";
+import type { AuditEntry } from "../types/index.js";
 
-export { persistRecordAudit as recordAudit, getAuditLog, getAllAuditLog };
+export { getAllAuditLog, getAuditLog, persistRecordAudit as recordAudit };
 
 export function formatAuditTrail(entries: AuditEntry[], proposalId?: number): string {
-  const header = proposalId !== undefined
-    ? `# Audit Trail — Proposal #${proposalId}`
-    : "# DAO Audit Trail";
+  const header = proposalId !== undefined ? `# Audit Trail — Proposal #${proposalId}` : "# DAO Audit Trail";
 
   if (entries.length === 0) {
     return `${header}\n\nNo audit entries yet.`;

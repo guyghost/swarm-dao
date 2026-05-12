@@ -9,7 +9,8 @@ export const DEFAULT_AGENTS: DAOAgent[] = [
     id: "strategist",
     name: "Product Strategist",
     role: "Vision, objectives, hypotheses",
-    description: "Evaluates proposals against product vision and strategic objectives. Identifies misalignment risks and opportunity costs.",
+    description:
+      "Evaluates proposals against product vision and strategic objectives. Identifies misalignment risks and opportunity costs.",
     weight: 3,
     systemPrompt: `You are the Product Strategist in a DAO governance system.
 
@@ -48,7 +49,8 @@ for | against | abstain
     id: "researcher",
     name: "Research Agent",
     role: "Market, competition, user signals",
-    description: "Gathers and analyzes market data, competitive landscape, and user feedback to inform proposal evaluation.",
+    description:
+      "Gathers and analyzes market data, competitive landscape, and user feedback to inform proposal evaluation.",
     weight: 2,
     systemPrompt: `You are the Research Agent in a DAO governance system.
 
@@ -87,7 +89,8 @@ for | against | abstain
     id: "architect",
     name: "Solution Architect",
     role: "Technical options, tradeoffs",
-    description: "Evaluates technical feasibility, architecture impact, and implementation options. Identifies technical debt and scalability concerns.",
+    description:
+      "Evaluates technical feasibility, architecture impact, and implementation options. Identifies technical debt and scalability concerns.",
     weight: 3,
     systemPrompt: `You are the Solution Architect in a DAO governance system.
 
@@ -127,7 +130,8 @@ for | against | abstain
     id: "critic",
     name: "Critic / Risk Agent",
     role: "Risk scoring, objections, guardrails",
-    description: "Identifies risks, raises objections, and ensures guardrails are in place. The devil's advocate of the swarm.",
+    description:
+      "Identifies risks, raises objections, and ensures guardrails are in place. The devil's advocate of the swarm.",
     weight: 3,
     systemPrompt: `You are the Critic / Risk Agent in a DAO governance system.
 
@@ -160,7 +164,10 @@ for | against | abstain
 ## Risk Score (1-10)
 [Overall risk assessment]`,
     riskLevel: "high",
-    councils: [{ council: "security-council", role: "lead" }, { council: "product-council", role: "member" }],
+    councils: [
+      { council: "security-council", role: "lead" },
+      { council: "product-council", role: "member" },
+    ],
     enabled: true,
   },
   {
@@ -207,7 +214,8 @@ for | against | abstain
     id: "spec-writer",
     name: "Spec Writer",
     role: "PRD, user stories, acceptance criteria",
-    description: "Analyzes proposals for specification completeness. Evaluates whether requirements are clear and testable.",
+    description:
+      "Analyzes proposals for specification completeness. Evaluates whether requirements are clear and testable.",
     weight: 1,
     systemPrompt: `You are the Spec Writer in a DAO governance system.
 
@@ -247,7 +255,8 @@ for | against | abstain
     id: "delivery",
     name: "Delivery Agent",
     role: "Implementation plan, tasks, CI/CD",
-    description: "Evaluates delivery feasibility, estimates effort, and plans implementation. Considers CI/CD and deployment impact.",
+    description:
+      "Evaluates delivery feasibility, estimates effort, and plans implementation. Considers CI/CD and deployment impact.",
     weight: 1,
     systemPrompt: `You are the Delivery Agent in a DAO governance system.
 

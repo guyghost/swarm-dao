@@ -28,7 +28,7 @@ export function isBitbucketEnabled(): boolean {
 }
 
 function getAuthHeaders(): Record<string, string> {
-  const auth = Buffer.from(`${config!.username}:${config!.token}`).toString("base64");
+  const auth = Buffer.from(`${config?.username}:${config?.token}`).toString("base64");
   return {
     Authorization: `Basic ${auth}`,
     "Content-Type": "application/json",
@@ -36,7 +36,11 @@ function getAuthHeaders(): Record<string, string> {
 }
 
 function slugify(title: string): string {
-  return title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40);
+  return title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 40);
 }
 
 export function bbBranchNameFor(proposal: Proposal): string {
@@ -49,24 +53,24 @@ export async function bbCreateBranch(
 ): Promise<{ ref: string; sha: string } | null> {
   if (!isBitbucketEnabled()) return null;
 
-  const base = baseBranch || config!.defaultBranch || "main";
+  const base = baseBranch || config?.defaultBranch || "main";
 
   // Get base branch commit SHA
   const refRes = await fetch(
-    `https://api.bitbucket.org/2.0/repositories/${config!.workspace}/${config!.repo}/refs/branches/${base}`,
+    `https://api.bitbucket.org/2.0/repositories/${config?.workspace}/${config?.repo}/refs/branches/${base}`,
     { headers: getAuthHeaders() },
   );
   if (!refRes.ok) {
     console.error(`Failed to get ref: ${refRes.status}`);
     return null;
   }
-  const refData = await refRes.json() as { target: { hash: string } };
+  const refData = (await refRes.json()) as { target: { hash: string } };
   const sha = refData.target?.hash;
   if (!sha) return null;
 
   // Create branch (Bitbucket calls refs)
   const createRes = await fetch(
-    `https://api.bitbucket.org/2.0/repositories/${config!.workspace}/${config!.repo}/refs/branches`,
+    `https://api.bitbucket.org/2.0/repositories/${config?.workspace}/${config?.repo}/refs/branches`,
     {
       method: "POST",
       headers: getAuthHeaders(),
@@ -94,7 +98,7 @@ export async function bbCreatePullRequest(
   const body = buildPRBody(proposal);
 
   const res = await fetch(
-    `https://api.bitbucket.org/2.0/repositories/${config!.workspace}/${config!.repo}/pullrequests`,
+    `https://api.bitbucket.org/2.0/repositories/${config?.workspace}/${config?.repo}/pullrequests`,
     {
       method: "POST",
       headers: getAuthHeaders(),
@@ -102,7 +106,7 @@ export async function bbCreatePullRequest(
         title: proposal.title,
         description: body,
         source: { branch: { name: options.sourceBranch } },
-        destination: { branch: { name: options.targetBranch || config!.defaultBranch || "main" } },
+        destination: { branch: { name: options.targetBranch || config?.defaultBranch || "main" } },
       }),
     },
   );
@@ -112,7 +116,7 @@ export async function bbCreatePullRequest(
     return null;
   }
 
-  const data = await res.json() as { id: number; links: { html: { href: string } } };
+  const data = (await res.json()) as { id: number; links: { html: { href: string } } };
   return { id: data.id, url: data.links.html.href };
 }
 

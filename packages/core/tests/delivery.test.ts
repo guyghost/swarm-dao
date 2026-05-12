@@ -1,12 +1,12 @@
-import { describe, it, expect, beforeEach } from "bun:test";
+import { beforeEach, describe, expect, it } from "bun:test";
 import {
-  generateDeliveryPlan,
-  formatPlan,
-  validateProposalQuality,
-  verifyExecution,
   createInitialState,
+  formatPlan,
+  generateDeliveryPlan,
   initializeAgents,
   setState,
+  validateProposalQuality,
+  verifyExecution,
 } from "@guyghost/swarm-dao-core";
 
 describe("delivery/plans", () => {

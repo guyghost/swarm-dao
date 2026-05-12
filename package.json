@@ -16,6 +16,7 @@
     "release": "bun test && changeset publish"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.0.0",
     "@changesets/cli": "^2.31.0",
     "typescript": "^5.4.0"
   },

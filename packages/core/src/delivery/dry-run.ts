@@ -1,14 +1,8 @@
-// ============================================================
-// Swarm DAO Core — Dry-Run & Rollback
-// ============================================================
-
-import { promises as fs } from "fs";
-import path from "path";
-import type { Proposal, DryRunResult, ExecutionSnapshot } from "../types/index.js";
-import { getState, captureSnapshot, getSnapshot } from "../persistence.js";
+import { captureSnapshot, getSnapshot, getState } from "../persistence.js";
+import type { DryRunResult, ExecutionSnapshot, Proposal } from "../types/index.js";
 
 export function performDryRun(proposal: Proposal): DryRunResult {
-  const state = getState();
+  const _state = getState();
 
   // Analyze what would change
   const filesAffected: string[] = [];
@@ -66,7 +60,7 @@ export function formatDryRun(result: DryRunResult): string {
 // ── Snapshot Management ─────────────────────────────────────
 
 export async function createExecutionSnapshot(proposal: Proposal, cwd: string): Promise<ExecutionSnapshot> {
-  const { exec } = await import("child_process");
+  const { exec } = await import("node:child_process");
 
   const gitInfo = await new Promise<{ branch: string; sha: string }>((resolve) => {
     exec("git branch --show-current && git rev-parse HEAD", { cwd }, (err, stdout) => {
@@ -117,7 +111,5 @@ export function performRollback(proposalId: number): { success: boolean; message
 }
 
 export function formatRollback(result: { success: boolean; message: string }): string {
-  return result.success
-    ? `# ⏪ Rollback Successful\n\n${result.message}`
-    : `# ❌ Rollback Failed\n\n${result.message}`;
+  return result.success ? `# ⏪ Rollback Successful\n\n${result.message}` : `# ❌ Rollback Failed\n\n${result.message}`;
 }

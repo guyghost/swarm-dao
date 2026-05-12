@@ -1,5 +1,12 @@
-import { describe, it, expect, beforeEach } from "bun:test";
-import { runGates, formatControlResult, createInitialState, initializeAgents, DEFAULT_CONFIG, setState } from "@guyghost/swarm-dao-core";
+import { beforeEach, describe, expect, it } from "bun:test";
+import {
+  createInitialState,
+  DEFAULT_CONFIG,
+  formatControlResult,
+  initializeAgents,
+  runGates,
+  setState,
+} from "@guyghost/swarm-dao-core";
 
 describe("control/gates", () => {
   beforeEach(() => {
@@ -17,9 +24,7 @@ describe("control/gates", () => {
       description: "Test proposal",
       proposedBy: "test",
       status: "approved" as const,
-      votes: [
-        { agentId: "a", agentName: "A", position: "for" as const, reasoning: "Good", weight: 3 },
-      ],
+      votes: [{ agentId: "a", agentName: "A", position: "for" as const, reasoning: "Good", weight: 3 }],
       agentOutputs: [],
       acceptanceCriteria: ["Test passes"],
       successMetrics: ["Latency < 100ms"],
@@ -39,12 +44,8 @@ describe("control/gates", () => {
       allGatesPassed: true,
       blockerCount: 0,
       warningCount: 0,
-      gates: [
-        { gateId: "quorum", name: "Quorum", passed: true, severity: "blocker" as const, message: "Quorum met" },
-      ],
-      checklist: [
-        { id: "sec", category: "security" as const, label: "Security", checked: true, autoChecked: true },
-      ],
+      gates: [{ gateId: "quorum", name: "Quorum", passed: true, severity: "blocker" as const, message: "Quorum met" }],
+      checklist: [{ id: "sec", category: "security" as const, label: "Security", checked: true, autoChecked: true }],
     };
     const formatted = formatControlResult(result);
     expect(formatted).toContain("ALL GATES PASSED");

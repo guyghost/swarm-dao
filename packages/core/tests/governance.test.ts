@@ -1,22 +1,20 @@
-import { describe, it, expect, beforeEach } from "bun:test";
+import { beforeEach, describe, expect, it } from "bun:test";
 import {
-  initializeAgents,
-  formatAgentsTable,
-  parseVoteFromOutput,
-  tallyVotes,
   calculateCompositeScore,
   calculateRICEScore,
   classifyRiskZone,
-  transitionProposal,
-  statusLabel,
-  validateAmendmentPayload,
-  previewAmendment,
-  executeAmendment,
   createInitialState,
   DEFAULT_CONFIG,
-  PROPOSAL_TYPES,
+  executeAmendment,
+  formatAgentsTable,
+  initializeAgents,
+  parseVoteFromOutput,
+  setState,
+  statusLabel,
+  tallyVotes,
+  transitionProposal,
+  validateAmendmentPayload,
 } from "@guyghost/swarm-dao-core";
-import { setState } from "@guyghost/swarm-dao-core";
 
 // ── Agents ──────────────────────────────────────────────────
 
@@ -43,8 +41,8 @@ describe("governance/voting", () => {
     const output = `## Analysis\nGood idea.\n\n## Vote\nfor\n\n## Reasoning\nLow risk, high impact.`;
     const vote = parseVoteFromOutput("strategist", "Product Strategist", 3, output);
     expect(vote).toBeDefined();
-    expect(vote!.position).toBe("for");
-    expect(vote!.weight).toBe(3);
+    expect(vote?.position).toBe("for");
+    expect(vote?.weight).toBe(3);
   });
 
   it("tallies votes correctly", () => {
@@ -97,7 +95,7 @@ describe("governance/scoring", () => {
 
   it("calculates RICE score", () => {
     const score = calculateRICEScore(1000, 5, 80, 2);
-    expect(score.riceScore).toBe(1000 * 5 * 0.8 / 2);
+    expect(score.riceScore).toBe((1000 * 5 * 0.8) / 2);
   });
 });
 
@@ -167,7 +165,8 @@ describe("governance/amendments", () => {
     const result = executeAmendment(payload);
     expect(result.success).toBe(true);
 
-    const state = setState(setState as any) || { agents: [] };
+    // biome-ignore lint/suspicious/noExplicitAny: test-only state reset hack
+    const _state = setState(setState as any) || { agents: [] };
     // Weight should be updated in state
   });
 });

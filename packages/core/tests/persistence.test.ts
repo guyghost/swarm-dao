@@ -1,17 +1,16 @@
-import { describe, it, expect, beforeEach } from "bun:test";
+import { beforeEach, describe, expect, it } from "bun:test";
 import {
-  createInitialState,
-  setState,
-  getState,
-  createProposal,
-  getProposal,
-  listProposals,
   addVote,
-  updateProposalStatus,
-  recordAudit,
+  createInitialState,
+  createProposal,
   getAuditLog,
   getDaoRoot,
+  getProposal,
+  listProposals,
   padId,
+  recordAudit,
+  setState,
+  updateProposalStatus,
 } from "@guyghost/swarm-dao-core";
 
 describe("persistence", () => {
@@ -35,14 +34,14 @@ describe("persistence", () => {
   it("adds votes", () => {
     const p = createProposal("Vote test", "product-feature", "Test", "user");
     addVote(p.id, { agentId: "a", agentName: "A", position: "for", reasoning: "Yes", weight: 3 });
-    expect(getProposal(p.id)!.votes.length).toBe(1);
+    expect(getProposal(p.id)?.votes.length).toBe(1);
   });
 
   it("updates proposal status", () => {
     const p = createProposal("Status test", "product-feature", "Test", "user");
     updateProposalStatus(p.id, "executed");
-    expect(getProposal(p.id)!.status).toBe("executed");
-    expect(getProposal(p.id)!.resolvedAt).toBeDefined();
+    expect(getProposal(p.id)?.status).toBe("executed");
+    expect(getProposal(p.id)?.resolvedAt).toBeDefined();
   });
 
   it("records audit entries", () => {

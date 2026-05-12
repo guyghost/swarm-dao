@@ -55,13 +55,16 @@ export const RISK_ZONE_LABELS: Record<RiskZone, string> = {
   red: "🔴 Red",
 };
 
-export const RISK_ZONE_DEFINITIONS: Record<RiskZone, {
-  criteria: string;
-  process: string;
-  humanApprovals: number;
-  requiresSecurityReview: boolean;
-  requiresFormalVote: boolean;
-}> = {
+export const RISK_ZONE_DEFINITIONS: Record<
+  RiskZone,
+  {
+    criteria: string;
+    process: string;
+    humanApprovals: number;
+    requiresSecurityReview: boolean;
+    requiresFormalVote: boolean;
+  }
+> = {
   green: {
     criteria: "Minor UI, docs, text, light instrumentation",
     process: "Agent auto-approval + async human review",
@@ -95,10 +98,10 @@ export interface TypeQuorumConfig {
 
 export const TYPE_QUORUM: Record<ProposalType, TypeQuorumConfig> = {
   "governance-change": { quorumPercent: 70, approvalPercent: 66, description: "Governance / Policy" },
-  "product-feature":   { quorumPercent: 60, approvalPercent: 55, description: "Product Roadmap" },
-  "security-change":   { quorumPercent: 75, approvalPercent: 70, description: "Security-sensitive" },
-  "technical-change":  { quorumPercent: 60, approvalPercent: 55, description: "Technical / Architecture" },
-  "release-change":    { quorumPercent: 50, approvalPercent: 51, description: "Routine Release" },
+  "product-feature": { quorumPercent: 60, approvalPercent: 55, description: "Product Roadmap" },
+  "security-change": { quorumPercent: 75, approvalPercent: 70, description: "Security-sensitive" },
+  "technical-change": { quorumPercent: 60, approvalPercent: 55, description: "Technical / Architecture" },
+  "release-change": { quorumPercent: 50, approvalPercent: 51, description: "Routine Release" },
 };
 
 // ── Pipeline Stages ──────────────────────────────────────────
@@ -116,8 +119,16 @@ export type PipelineStage =
   | "postmortem";
 
 export const PIPELINE_STAGES: PipelineStage[] = [
-  "intake", "qualification", "analysis", "critique", "scoring",
-  "council", "vote", "spec", "execution-gate", "postmortem",
+  "intake",
+  "qualification",
+  "analysis",
+  "critique",
+  "scoring",
+  "council",
+  "vote",
+  "spec",
+  "execution-gate",
+  "postmortem",
 ];
 
 export const PIPELINE_STAGE_LABELS: Record<PipelineStage, string> = {
@@ -136,24 +147,24 @@ export const PIPELINE_STAGE_LABELS: Record<PipelineStage, string> = {
 // ── Composite Scoring ────────────────────────────────────────
 
 export interface AxisScore {
-  userImpact: number;      // 30%
-  businessImpact: number;  // 20%
-  effort: number;          // 15% (inverted)
-  securityRisk: number;    // 20% (inverted)
-  confidence: number;      // 15%
+  userImpact: number; // 30%
+  businessImpact: number; // 20%
+  effort: number; // 15% (inverted)
+  securityRisk: number; // 20% (inverted)
+  confidence: number; // 15%
 }
 
 export const SCORING_WEIGHTS: Record<keyof AxisScore, number> = {
-  userImpact: 0.30,
-  businessImpact: 0.20,
+  userImpact: 0.3,
+  businessImpact: 0.2,
   effort: 0.15,
-  securityRisk: 0.20,
+  securityRisk: 0.2,
   confidence: 0.15,
 };
 
 export interface CompositeScore {
   axes: AxisScore;
-  weighted: number;       // 0-100
+  weighted: number; // 0-100
   riskZone: RiskZone;
   breakdown: string;
 }
@@ -203,14 +214,7 @@ export interface AcceptanceCriterion {
 
 // ── Proposal Status ──────────────────────────────────────────
 
-export type ProposalStatus =
-  | "open"
-  | "deliberating"
-  | "approved"
-  | "controlled"
-  | "rejected"
-  | "executed"
-  | "failed";
+export type ProposalStatus = "open" | "deliberating" | "approved" | "controlled" | "rejected" | "executed" | "failed";
 
 // ── Voting ───────────────────────────────────────────────────
 
@@ -394,12 +398,7 @@ export interface AmendmentOrigin {
   agentId?: string;
 }
 
-export type AmendmentState =
-  | "pending-vote"
-  | "approved-pending-human"
-  | "approved"
-  | "executed"
-  | "rolled-back";
+export type AmendmentState = "pending-vote" | "approved-pending-human" | "approved" | "executed" | "rolled-back";
 
 export interface AmendmentSnapshot {
   agents: DAOAgent[];
@@ -743,7 +742,13 @@ export interface RiskReport {
   proposalId: number;
   overallRiskScore: number;
   riskLevel: AgentRiskLevel;
-  risks: { category: string; description: string; severity: "low" | "medium" | "high" | "critical"; likelihood: "low" | "medium" | "high"; mitigation: string }[];
+  risks: {
+    category: string;
+    description: string;
+    severity: "low" | "medium" | "high" | "critical";
+    likelihood: "low" | "medium" | "high";
+    mitigation: string;
+  }[];
   permissions: string[];
   dataSurfaces: string[];
   guardrails: string[];
@@ -752,7 +757,14 @@ export interface RiskReport {
 export interface PRDLite {
   proposalId: number;
   objective: string;
-  userStories: { id: string; title: string; asA: string; iWant: string; soThat: string; acceptanceCriteria: string[] }[];
+  userStories: {
+    id: string;
+    title: string;
+    asA: string;
+    iWant: string;
+    soThat: string;
+    acceptanceCriteria: string[];
+  }[];
   inScope: string[];
   outOfScope: string[];
   metrics: { name: string; baseline: string; target: string }[];
@@ -761,7 +773,11 @@ export interface PRDLite {
 
 export interface ImplementationPlan {
   proposalId: number;
-  phases: { number: number; name: string; tasks: { id: string; title: string; effort: string; dependencies: string[] }[] }[];
+  phases: {
+    number: number;
+    name: string;
+    tasks: { id: string; title: string; effort: string; dependencies: string[] }[];
+  }[];
   branchStrategy: string;
   estimatedDuration: string;
   criticalPath: string[];
@@ -842,11 +858,7 @@ export interface HostAdapter {
   }): Promise<AgentOutput>;
 
   /** Spawn multiple agents concurrently (up to maxConcurrent) */
-  spawnAgents(params: {
-    agents: DAOAgent[];
-    proposal: Proposal;
-    maxConcurrent: number;
-  }): Promise<AgentOutput[]>;
+  spawnAgents(params: { agents: DAOAgent[]; proposal: Proposal; maxConcurrent: number }): Promise<AgentOutput[]>;
 
   /** Log a message to the host's logging system */
   log(params: { level: "info" | "warn" | "error"; message: string; service: string }): Promise<void>;
@@ -861,7 +873,10 @@ export interface HostAdapter {
   writeFile(path: string, content: string): Promise<void>;
 
   /** Execute a shell command */
-  exec(command: string, options?: { cwd?: string; timeout?: number }): Promise<{ stdout: string; stderr: string; exitCode: number }>;
+  exec(
+    command: string,
+    options?: { cwd?: string; timeout?: number },
+  ): Promise<{ stdout: string; stderr: string; exitCode: number }>;
 
   /** Check if the host has a specific capability */
   hasCapability(capability: string): boolean;

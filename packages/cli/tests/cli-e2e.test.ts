@@ -1,8 +1,8 @@
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { promises as fs } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { main } from "@guyghost/swarm-dao-cli";
-import { promises as fs } from "fs";
-import path from "path";
-import { tmpdir } from "os";
 
 async function runCLI(args: string[], cwd: string): Promise<{ code: number; stdout: string; stderr: string }> {
   const stdout: string[] = [];
@@ -11,8 +11,16 @@ async function runCLI(args: string[], cwd: string): Promise<{ code: number; stdo
   const originalStdoutWrite = process.stdout.write;
   const originalStderrWrite = process.stderr.write;
 
-  process.stdout.write = (chunk: any) => { stdout.push(String(chunk)); return true; };
-  process.stderr.write = (chunk: any) => { stderr.push(String(chunk)); return true; };
+  // biome-ignore lint/suspicious/noExplicitAny: overriding Node.js write signature for capture
+  process.stdout.write = (chunk: any) => {
+    stdout.push(String(chunk));
+    return true;
+  };
+  // biome-ignore lint/suspicious/noExplicitAny: overriding Node.js write signature for capture
+  process.stderr.write = (chunk: any) => {
+    stderr.push(String(chunk));
+    return true;
+  };
 
   try {
     const code = await main(args, cwd);
@@ -44,7 +52,10 @@ describe("CLI E2E", () => {
     expect(setup.code).toBe(0);
     expect(setup.stdout).toContain("7 agents");
 
-    const propose = await runCLI(["propose", "--title=Test Feature", "--type=product-feature", "--description=Add test"], testDir);
+    const propose = await runCLI(
+      ["propose", "--title=Test Feature", "--type=product-feature", "--description=Add test"],
+      testDir,
+    );
     expect(propose.code).toBe(0);
     expect(propose.stdout).toContain("Proposal #1");
 

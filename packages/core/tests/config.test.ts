@@ -1,13 +1,13 @@
-import { describe, it, expect } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import {
-  DEFAULT_PROJECT_CONFIG,
-  shouldSuggestProposal,
-  isCriticalPath,
   canEditWithoutProposal,
-  validateWeights,
+  DEFAULT_PROJECT_CONFIG,
   filterEnabledAgents,
+  initializeAgents,
+  isCriticalPath,
+  shouldSuggestProposal,
+  validateWeights,
 } from "@guyghost/swarm-dao-core";
-import { initializeAgents } from "@guyghost/swarm-dao-core";
 
 describe("config", () => {
   it("has correct defaults", () => {
@@ -36,13 +36,18 @@ describe("config", () => {
 
   it("validates health weights", () => {
     expect(validateWeights({ passRate: 25, avgRating: 25, deliberationDepth: 25, participation: 25 }).valid).toBe(true);
-    expect(validateWeights({ passRate: 30, avgRating: 30, deliberationDepth: 30, participation: 30 }).valid).toBe(false);
+    expect(validateWeights({ passRate: 30, avgRating: 30, deliberationDepth: 30, participation: 30 }).valid).toBe(
+      false,
+    );
     expect(validateWeights({ passRate: -5 }).valid).toBe(false);
   });
 
   it("filters enabled agents", () => {
     const agents = initializeAgents();
-    const filtered = filterEnabledAgents(agents, { mode: "opt-in", agentOverrides: { researcher: { enabled: false } } });
+    const filtered = filterEnabledAgents(agents, {
+      mode: "opt-in",
+      agentOverrides: { researcher: { enabled: false } },
+    });
     expect(filtered.length).toBe(6);
     expect(filtered.find((a) => a.id === "researcher")).toBeUndefined();
   });

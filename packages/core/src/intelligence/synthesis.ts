@@ -2,11 +2,11 @@
 // Swarm DAO Core — Deliberation Synthesis
 // ============================================================
 
-import type { Proposal, DAOAgent, AgentOutput, TallyResult } from "../types/index.js";
+import type { AgentOutput, DAOAgent, Proposal, TallyResult } from "../types/index.js";
 
 export function synthesize(
   proposal: Proposal,
-  agents: DAOAgent[],
+  _agents: DAOAgent[],
   outputs: AgentOutput[],
   tally?: TallyResult,
 ): string {
@@ -54,7 +54,7 @@ export function synthesize(
   // Key themes
   const allReasoning = outputs
     .filter((o) => o.vote?.reasoning)
-    .map((o) => o.vote!.reasoning)
+    .map((o) => o.vote?.reasoning)
     .join(" ");
 
   const themes = extractThemes(allReasoning);
@@ -84,9 +84,9 @@ function extractThemes(text: string): string[] {
     "Performance impact": ["performance", "latency", "slow", "bottleneck"],
     "User experience": ["ux", "user", "experience", "usability"],
     "Technical debt": ["debt", "legacy", "refactor", "cleanup"],
-    "Scalability": ["scale", "scaling", "concurrent", "load"],
+    Scalability: ["scale", "scaling", "concurrent", "load"],
     "Maintenance burden": ["maintain", "support", "operational"],
-    "Alignment": ["vision", "strategy", "roadmap", "goal"],
+    Alignment: ["vision", "strategy", "roadmap", "goal"],
   };
 
   const lowerText = text.toLowerCase();

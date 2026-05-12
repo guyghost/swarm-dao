@@ -2,8 +2,8 @@
 // Swarm DAO Core — Proposal Execution
 // ============================================================
 
-import type { Proposal, ExecutionSnapshot, ExecutionVerification, VerificationStatus } from "../types/index.js";
-import { getState, captureSnapshot, storeVerification } from "../persistence.js";
+import { captureSnapshot, getState, storeVerification } from "../persistence.js";
+import type { ExecutionSnapshot, ExecutionVerification, Proposal, VerificationStatus } from "../types/index.js";
 import { generateDeliveryPlan } from "./plans.js";
 
 export interface ExecutionResult {

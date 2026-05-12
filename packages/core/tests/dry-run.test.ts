@@ -1,13 +1,13 @@
-import { describe, it, expect, beforeEach } from "bun:test";
+import { beforeEach, describe, expect, it } from "bun:test";
 import {
-  performDryRun,
-  formatDryRun,
   canRollback,
-  performRollback,
-  formatRollback,
-  createInitialState,
-  setState,
   captureSnapshot,
+  createInitialState,
+  formatDryRun,
+  formatRollback,
+  performDryRun,
+  performRollback,
+  setState,
 } from "@guyghost/swarm-dao-core";
 
 describe("delivery/dry-run", () => {
@@ -59,7 +59,15 @@ describe("delivery/dry-run", () => {
 
   it("formats dry-run result", () => {
     const result = performDryRun({
-      id: 1, title: "Test", type: "product-feature", description: "", proposedBy: "", status: "approved", votes: [], agentOutputs: [], createdAt: "",
+      id: 1,
+      title: "Test",
+      type: "product-feature",
+      description: "",
+      proposedBy: "",
+      status: "approved",
+      votes: [],
+      agentOutputs: [],
+      createdAt: "",
     });
     const formatted = formatDryRun(result);
     expect(formatted).toContain("Dry-Run");

@@ -1,12 +1,11 @@
-import { describe, it, expect } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import {
   computeHealthScore,
-  formatHealthScore,
-  generateDashboard,
-  validateWeights,
-  getHealthTrend,
-  formatHealthTrend,
   DEFAULT_HEALTH_WEIGHTS,
+  formatHealthScore,
+  formatHealthTrend,
+  generateDashboard,
+  getHealthTrend,
 } from "@guyghost/swarm-dao-core";
 
 describe("health-score", () => {
@@ -18,13 +17,54 @@ describe("health-score", () => {
 
   it("computes health score", () => {
     const proposals = [
-      { id: 1, title: "A", type: "product-feature" as const, description: "", proposedBy: "", status: "executed" as const, votes: [], agentOutputs: [{ agentId: "a", agentName: "A", role: "r", content: "", durationMs: 0 }], createdAt: "" },
-      { id: 2, title: "B", type: "product-feature" as const, description: "", proposedBy: "", status: "rejected" as const, votes: [], agentOutputs: [], createdAt: "" },
-      { id: 3, title: "C", type: "product-feature" as const, description: "", proposedBy: "", status: "executed" as const, votes: [], agentOutputs: [{ agentId: "a", agentName: "A", role: "r", content: "", durationMs: 0 }, { agentId: "b", agentName: "B", role: "r", content: "", durationMs: 0 }], createdAt: "" },
+      {
+        id: 1,
+        title: "A",
+        type: "product-feature" as const,
+        description: "",
+        proposedBy: "",
+        status: "executed" as const,
+        votes: [],
+        agentOutputs: [{ agentId: "a", agentName: "A", role: "r", content: "", durationMs: 0 }],
+        createdAt: "",
+      },
+      {
+        id: 2,
+        title: "B",
+        type: "product-feature" as const,
+        description: "",
+        proposedBy: "",
+        status: "rejected" as const,
+        votes: [],
+        agentOutputs: [],
+        createdAt: "",
+      },
+      {
+        id: 3,
+        title: "C",
+        type: "product-feature" as const,
+        description: "",
+        proposedBy: "",
+        status: "executed" as const,
+        votes: [],
+        agentOutputs: [
+          { agentId: "a", agentName: "A", role: "r", content: "", durationMs: 0 },
+          { agentId: "b", agentName: "B", role: "r", content: "", durationMs: 0 },
+        ],
+        createdAt: "",
+      },
     ];
 
     const outcomes = {
-      1: { proposalId: 1, ratings: [{ proposalId: 1, rater: "user", score: 4, comment: "Good", ratedAt: "" }], metrics: [], overallScore: 4, status: "tracked" as const, createdAt: "", updatedAt: "" },
+      1: {
+        proposalId: 1,
+        ratings: [{ proposalId: 1, rater: "user", score: 4, comment: "Good", ratedAt: "" }],
+        metrics: [],
+        overallScore: 4,
+        status: "tracked" as const,
+        createdAt: "",
+        updatedAt: "",
+      },
     };
 
     const score = computeHealthScore(proposals, outcomes, DEFAULT_HEALTH_WEIGHTS);
@@ -42,13 +82,31 @@ describe("health-score", () => {
 
   it("generates dashboard", () => {
     const proposals = [
-      { id: 1, title: "A", type: "product-feature" as const, description: "", proposedBy: "", status: "open" as const, votes: [], agentOutputs: [], createdAt: "" },
-      { id: 2, title: "B", type: "product-feature" as const, description: "", proposedBy: "", status: "executed" as const, votes: [], agentOutputs: [], createdAt: "" },
+      {
+        id: 1,
+        title: "A",
+        type: "product-feature" as const,
+        description: "",
+        proposedBy: "",
+        status: "open" as const,
+        votes: [],
+        agentOutputs: [],
+        createdAt: "",
+      },
+      {
+        id: 2,
+        title: "B",
+        type: "product-feature" as const,
+        description: "",
+        proposedBy: "",
+        status: "executed" as const,
+        votes: [],
+        agentOutputs: [],
+        createdAt: "",
+      },
     ];
 
-    const dashboard = generateDashboard(proposals, {}, [
-      { id: "a", name: "Agent A", weight: 3 },
-    ]);
+    const dashboard = generateDashboard(proposals, {}, [{ id: "a", name: "Agent A", weight: 3 }]);
 
     expect(dashboard).toContain("DAO Dashboard");
     expect(dashboard).toContain("open: 1");

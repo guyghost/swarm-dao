@@ -1,15 +1,15 @@
-import { describe, it, expect } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import {
-  generateAllArtefacts,
   formatAllArtefacts,
   formatArtefactsSummary,
-  generateDecisionBrief,
   generateADR,
-  generateRiskReport,
-  generatePRDLite,
+  generateAllArtefacts,
+  generateDecisionBrief,
   generateImplementationPlan,
-  generateTestPlan,
+  generatePRDLite,
   generateReleasePacket,
+  generateRiskReport,
+  generateTestPlan,
 } from "@guyghost/swarm-dao-core";
 
 describe("delivery/artefacts", () => {

@@ -33,13 +33,17 @@ function getApiBase(): string {
 
 function getAuthHeaders(): Record<string, string> {
   return {
-    "PRIVATE-TOKEN": config!.token,
+    "PRIVATE-TOKEN": config?.token ?? "",
     "Content-Type": "application/json",
   };
 }
 
 function slugify(title: string): string {
-  return title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40);
+  return title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 40);
 }
 
 export function glBranchNameFor(proposal: Proposal): string {
@@ -52,20 +56,23 @@ export async function glCreateBranch(
 ): Promise<{ ref: string; sha: string } | null> {
   if (!isGitLabEnabled()) return null;
 
-  const base = baseBranch || config!.defaultBranch || "main";
+  const base = baseBranch || config?.defaultBranch || "main";
 
-  const res = await fetch(`${getApiBase()}/projects/${encodeURIComponent(config!.projectId)}/repository/branches`, {
-    method: "POST",
-    headers: getAuthHeaders(),
-    body: JSON.stringify({ branch: branchName, ref: base }),
-  });
+  const res = await fetch(
+    `${getApiBase()}/projects/${encodeURIComponent(config?.projectId ?? "")}/repository/branches`,
+    {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ branch: branchName, ref: base }),
+    },
+  );
 
   if (!res.ok) {
     console.error(`Failed to create branch: ${res.status}`);
     return null;
   }
 
-  const data = await res.json() as { name: string; commit: { id: string } };
+  const data = (await res.json()) as { name: string; commit: { id: string } };
   return { ref: `refs/heads/${data.name}`, sha: data.commit.id };
 }
 
@@ -80,12 +87,12 @@ export async function glCreateMergeRequest(
 
   const body = buildMRBody(proposal);
 
-  const res = await fetch(`${getApiBase()}/projects/${encodeURIComponent(config!.projectId)}/merge_requests`, {
+  const res = await fetch(`${getApiBase()}/projects/${encodeURIComponent(config?.projectId ?? "")}/merge_requests`, {
     method: "POST",
     headers: getAuthHeaders(),
     body: JSON.stringify({
       source_branch: options.sourceBranch,
-      target_branch: options.targetBranch || config!.defaultBranch || "main",
+      target_branch: options.targetBranch || config?.defaultBranch || "main",
       title: proposal.title,
       description: body,
     }),
@@ -96,7 +103,7 @@ export async function glCreateMergeRequest(
     return null;
   }
 
-  const data = await res.json() as { iid: number; web_url: string };
+  const data = (await res.json()) as { iid: number; web_url: string };
   return { iid: data.iid, url: data.web_url };
 }
 
@@ -107,14 +114,14 @@ export async function glCreateIssue(
 ): Promise<{ iid: number; url: string } | null> {
   if (!isGitLabEnabled()) return null;
 
-  const res = await fetch(`${getApiBase()}/projects/${encodeURIComponent(config!.projectId)}/issues`, {
+  const res = await fetch(`${getApiBase()}/projects/${encodeURIComponent(config?.projectId ?? "")}/issues`, {
     method: "POST",
     headers: getAuthHeaders(),
     body: JSON.stringify({ title, description: body, labels: labels?.join(",") }),
   });
 
   if (!res.ok) return null;
-  const data = await res.json() as { iid: number; web_url: string };
+  const data = (await res.json()) as { iid: number; web_url: string };
   return { iid: data.iid, url: data.web_url };
 }
 

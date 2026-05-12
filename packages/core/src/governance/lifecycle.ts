@@ -3,7 +3,7 @@
 // ============================================================
 
 import type { Proposal, ProposalStatus, RiskZone } from "../types/index.js";
-import { RISK_ZONE_DEFINITIONS, PROPOSAL_COUNCIL } from "../types/index.js";
+import { PROPOSAL_COUNCIL, RISK_ZONE_DEFINITIONS } from "../types/index.js";
 
 // ── Transitions ──────────────────────────────────────────────
 
@@ -21,7 +21,10 @@ export function canTransition(from: ProposalStatus, to: ProposalStatus): boolean
   return VALID_TRANSITIONS[from]?.includes(to) ?? false;
 }
 
-export function transitionProposal(proposal: Proposal, action: "deliberate" | "approve" | "reject" | "control" | "execute" | "fail"): { success: boolean; newStatus?: ProposalStatus; error?: string } {
+export function transitionProposal(
+  proposal: Proposal,
+  action: "deliberate" | "approve" | "reject" | "control" | "execute" | "fail",
+): { success: boolean; newStatus?: ProposalStatus; error?: string } {
   const transitions: Record<string, Record<string, ProposalStatus>> = {
     open: { deliberate: "deliberating" },
     deliberating: { approve: "approved", reject: "rejected" },
@@ -52,7 +55,17 @@ export function classifyRiskZone(proposal: Proposal): RiskZone {
 
   // Check for sensitive keywords in title/description
   const text = `${proposal.title} ${proposal.description}`.toLowerCase();
-  const redKeywords = ["auth", "permission", "security", "credential", "secret", "token", "password", "encryption", "firewall"];
+  const redKeywords = [
+    "auth",
+    "permission",
+    "security",
+    "credential",
+    "secret",
+    "token",
+    "password",
+    "encryption",
+    "firewall",
+  ];
   if (redKeywords.some((k) => text.includes(k))) {
     return "red";
   }

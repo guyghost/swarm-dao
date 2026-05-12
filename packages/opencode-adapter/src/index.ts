@@ -2,67 +2,55 @@
 // Swarm DAO — OpenCode Adapter
 // ============================================================
 
+import type { AgentOutput, DAOAgent, HostAdapter, ProposalType } from "@guyghost/swarm-dao-core";
+import {
+  addVote,
+  buildDispatchInstructions,
+  calculateCompositeScore,
+  classifyRiskZone,
+  computeHealthScore,
+  createProposal,
+  executeProposal,
+  formatAllArtefacts,
+  formatAuditTrail,
+  formatCompositeScore,
+  formatControlResult,
+  formatDryRun,
+  formatHealthScore,
+  formatPlan,
+  formatRollback,
+  formatRoundTableResults,
+  formatTallyResult,
+  generateAllArtefacts,
+  generateDashboard,
+  getAllAuditLog,
+  getOrCreateState,
+  getPlan,
+  getProposal,
+  getState,
+  initializeAgents,
+  initStorage,
+  loadState,
+  PROPOSAL_TYPE_LABELS,
+  PROPOSAL_TYPES,
+  parseVoteFromOutput,
+  performDryRun,
+  performRollback,
+  recordAudit,
+  runGates,
+  runRoundTable,
+  saveState,
+  setState,
+  storeAgentOutput,
+  storeCompositeScore,
+  storeSynthesis,
+  synthesize,
+  tallyVotes,
+  transitionProposal,
+  validateAmendmentPayload,
+} from "@guyghost/swarm-dao-core";
 import type { Plugin, PluginInput } from "@opencode-ai/plugin";
 import { tool } from "@opencode-ai/plugin";
-
-import type {
-  Proposal,
-  AgentOutput,
-  HostAdapter,
-  DAOAgent,
-  ProposalType,
-} from "@guyghost/swarm-dao-core";
-import {
-  loadState,
-  getState,
-  setState,
-  getOrCreateState,
-  saveState,
-  initStorage,
-  createProposal,
-  getProposal,
-  addVote,
-  storeAgentOutput,
-  storeSynthesis,
-  storeCompositeScore,
-  updateProposalStatus,
-  recordAudit,
-  getAllAuditLog,
-  getAuditLog,
-  initializeAgents,
-  parseVoteFromOutput,
-  tallyVotes,
-  formatTallyResult,
-  calculateCompositeScore,
-  formatCompositeScore,
-  classifyRiskZone,
-  transitionProposal,
-  runGates,
-  formatControlResult,
-  formatAuditTrail,
-  buildDispatchInstructions,
-  synthesize,
-  executeProposal,
-  generateDeliveryPlan,
-  formatPlan,
-  getPlan,
-  generateAllArtefacts,
-  formatAllArtefacts,
-  performDryRun,
-  formatDryRun,
-  performRollback,
-  formatRollback,
-  computeHealthScore,
-  formatHealthScore,
-  generateDashboard,
-  runRoundTable,
-  formatRoundTableResults,
-  validateAmendmentPayload,
-  previewAmendment,
-  executeAmendment,
-  PROPOSAL_TYPES,
-  PROPOSAL_TYPE_LABELS,
-} from "@guyghost/swarm-dao-core";
 
 const schema = tool.schema;
 
@@ -87,7 +75,7 @@ function createOpenCodeHostAdapter(ctx: PluginInput): HostAdapter {
         error: "OpenCode agent spawning requires manual dispatch via task tool",
       };
     },
-    async spawnAgents(params) {
+    async spawnAgents(_params) {
       return [];
     },
     async log(params) {
@@ -105,18 +93,18 @@ function createOpenCodeHostAdapter(ctx: PluginInput): HostAdapter {
       return ctx.directory;
     },
     async readFile(path: string) {
-      const fs = await import("fs/promises");
+      const fs = await import("node:fs/promises");
       return fs.readFile(path, "utf-8");
     },
     async writeFile(path: string, content: string) {
-      const fs = await import("fs/promises");
+      const fs = await import("node:fs/promises");
       await fs.writeFile(path, content, "utf-8");
     },
     async exec(command, options) {
-      const { exec } = await import("child_process");
+      const { exec } = await import("node:child_process");
       return new Promise((resolve) => {
         exec(command, { cwd: options?.cwd, timeout: options?.timeout }, (error, stdout, stderr) => {
-          resolve({ stdout, stderr, exitCode: error ? (error.code as number ?? 1) : 0 });
+          resolve({ stdout, stderr, exitCode: error ? ((error.code as number) ?? 1) : 0 });
         });
       });
     },
@@ -143,7 +131,8 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
         args: {
           useDefaults: schema.boolean({ description: "Use default agents (default: true)" }),
         },
-        async execute(args: any, context: any) {
+        // biome-ignore lint/suspicious/noExplicitAny: plugin tool execute signature uses dynamic args/context
+        async execute(_args: any, context: any) {
           const workDir = context.directory;
           await initStorage(workDir);
           const state = getOrCreateState(workDir);
@@ -174,33 +163,9 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
           successMetrics: schema.array(schema.string(), { description: "Success metrics" }),
           affectedPaths: schema.array(schema.string(), { description: "File paths authorized for editing" }),
         },
-        async execute(args: any, context: any) {
-          const state = getState();
-          if (!state.initialized) return "DAO not initialized. Run dao_setup first.";
-
-          const proposal = createProposal(args.title, args.type, args.description, "user", args.context);
-          proposal.problemStatement = args.problemStatement;
-          if (args.acceptanceCriteria) proposal.acceptanceCriteria = args.acceptanceCriteria;
-          if (args.successMetrics) proposal.successMetrics = args.successMetrics;
-          if (args.affectedPaths) proposal.affectedPaths = args.affectedPaths;
-
-          proposal.riskZone = classifyRiskZone(proposal);
-          await saveState();
-
-          recordAudit(proposal.id, "governance", "proposal_created", "user", `Proposal "${args.title}" created`);
-          await saveState();
-
-          return `# 📋 Proposal Created — #${proposal.id}\n\n**Title:** ${args.title}\n**Type:** ${PROPOSAL_TYPE_LABELS[args.type as ProposalType]}\n**Zone:** ${proposal.riskZone ?? "unknown"}\n\nRun \`dao_deliberate proposalId=${proposal.id}\` to deliberate.`;
-        },
-      }),
-
-      // ── dao_deliberate ───────────────────────────────────
-      dao_deliberate: tool({
-        description: "Plan swarm deliberation. Returns dispatch plan for sub-agents.",
-        args: {
-          proposalId: schema.number(),
-        },
-        async execute(args: any, context: any) {
+        // biome-ignore lint/suspicious/noExplicitAny: plugin tool execute signature uses dynamic args/context
+        // biome-ignore lint/suspicious/noExplicitAny: plugin tool execute signature uses dynamic args/context
+        async execute(args: any, _context: any) {
           const state = getState();
           if (!state.initialized) return "DAO not initialized.";
 
@@ -213,7 +178,13 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
           const instructions = buildDispatchInstructions(proposal, state.agents);
           const plan = `## 🐝 Dispatch Plan — Proposal #${proposal.id}\n\n${instructions.map((inst) => `### @${inst.agentId}\n${inst.prompt.slice(0, 300)}...\n`).join("\n")}\n\nAfter collecting outputs, run \`dao_record_outputs proposalId=${proposal.id} outputs=[...]\``;
 
-          recordAudit(proposal.id, "intelligence", "deliberation_dispatched", "system", `${instructions.length} agents`);
+          recordAudit(
+            proposal.id,
+            "intelligence",
+            "deliberation_dispatched",
+            "system",
+            `${instructions.length} agents`,
+          );
           await saveState();
 
           return plan;
@@ -235,7 +206,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
             { description: "Outputs from each sub-agent" },
           ),
         },
-        async execute(args: any, context: any) {
+        async execute(args: any, _context: any) {
           const state = getState();
           if (!state.initialized) return "DAO not initialized.";
 
@@ -284,10 +255,22 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
 
           if (tally.approved) {
             transitionProposal(proposal, "approve");
-            recordAudit(proposal.id, "intelligence", "deliberation_approved", "system", `Approved: ${tally.approvalScore}%`);
+            recordAudit(
+              proposal.id,
+              "intelligence",
+              "deliberation_approved",
+              "system",
+              `Approved: ${tally.approvalScore}%`,
+            );
           } else {
             transitionProposal(proposal, "reject");
-            recordAudit(proposal.id, "intelligence", "deliberation_rejected", "system", `Rejected: ${tally.approvalScore}%`);
+            recordAudit(
+              proposal.id,
+              "intelligence",
+              "deliberation_rejected",
+              "system",
+              `Rejected: ${tally.approvalScore}%`,
+            );
           }
 
           await saveState();
@@ -300,7 +283,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
       dao_control: tool({
         description: "Run quality control gates",
         args: { proposalId: schema.number() },
-        async execute(args: any, context: any) {
+        async execute(args: any, _context: any) {
           const state = getState();
           if (!state.initialized) return "DAO not initialized.";
 
@@ -326,8 +309,8 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
       dao_execute: tool({
         description: "Execute an approved or controlled proposal",
         args: { proposalId: schema.number() },
-        async execute(args: any, context: any) {
-          const state = getState();
+        async execute(args: any, _context: any) {
+          const _state = getState();
           const proposal = getProposal(args.proposalId);
           if (!proposal) return `Proposal #${args.proposalId} not found.`;
           if (proposal.status !== "approved" && proposal.status !== "controlled") {
@@ -348,7 +331,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
       dao_list: tool({
         description: "List all DAO proposals",
         args: {},
-        async execute(args: any, context: any) {
+        async execute(_args: any, _context: any) {
           const state = getState();
           if (!state.initialized) return "DAO not initialized.";
           if (state.proposals.length === 0) return "No proposals yet.";
@@ -365,7 +348,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
       dao_agents: tool({
         description: "List all DAO agents",
         args: {},
-        async execute(args: any, context: any) {
+        async execute(_args: any, _context: any) {
           const state = getState();
           if (!state.initialized) return "DAO not initialized.";
           return `# DAO Agents\n\n${formatAgentsTable(state.agents)}`;
@@ -376,7 +359,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
       dao_plan: tool({
         description: "Get delivery plan",
         args: { proposalId: schema.number() },
-        async execute(args: any, context: any) {
+        async execute(args: any, _context: any) {
           const plan = getPlan(args.proposalId);
           if (!plan) return "No plan yet. Run deliberation first.";
           return formatPlan(plan);
@@ -387,7 +370,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
       dao_artefacts: tool({
         description: "View auto-generated artefacts for a proposal",
         args: { proposalId: schema.number() },
-        async execute(args: any, context: any) {
+        async execute(args: any, _context: any) {
           const proposal = getProposal(args.proposalId);
           if (!proposal) return `Proposal #${args.proposalId} not found.`;
           const artefacts = generateAllArtefacts(proposal);
@@ -399,7 +382,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
       dao_dry_run: tool({
         description: "Preview execution without applying changes",
         args: { proposalId: schema.number() },
-        async execute(args: any, context: any) {
+        async execute(args: any, _context: any) {
           const proposal = getProposal(args.proposalId);
           if (!proposal) return `Proposal #${args.proposalId} not found.`;
           const result = performDryRun(proposal);
@@ -414,7 +397,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
       dao_rollback: tool({
         description: "Revert proposal execution to pre-execution snapshot",
         args: { proposalId: schema.number() },
-        async execute(args: any, context: any) {
+        async execute(args: any, _context: any) {
           const result = performRollback(args.proposalId);
           await saveState();
           return formatRollback(result);
@@ -425,12 +408,12 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
       dao_dashboard: tool({
         description: "View outcome tracking dashboard",
         args: {},
-        async execute(args: any, context: any) {
+        async execute(_args: any, _context: any) {
           const state = getState();
           if (!state.initialized) return "DAO not initialized.";
           const dashboard = generateDashboard(state.proposals, state.outcomes, state.agents);
           const health = computeHealthScore(state.proposals, state.outcomes, state.config.healthWeights);
-          return dashboard + "\n\n" + formatHealthScore(health);
+          return `${dashboard}\n\n${formatHealthScore(health)}`;
         },
       }),
 
@@ -438,7 +421,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
       dao_roundtable: tool({
         description: "Ask every agent to suggest a proposal idea",
         args: {},
-        async execute(args: any, context: any) {
+        async execute(_args: any, _context: any) {
           const state = getState();
           if (!state.initialized) return "DAO not initialized.";
 
@@ -453,7 +436,13 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
               proposal.riskZone = classifyRiskZone(proposal);
               s.proposalId = proposal.id;
               proposalIds.set(s.agentId, proposal.id);
-              recordAudit(proposal.id, "intelligence", "roundtable_proposal_created", s.agentId, `Auto-created from round table`);
+              recordAudit(
+                proposal.id,
+                "intelligence",
+                "roundtable_proposal_created",
+                s.agentId,
+                `Auto-created from round table`,
+              );
             } catch (err: any) {
               s.error = `Failed to create proposal: ${err?.message ?? err}`;
             }
@@ -468,7 +457,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
       dao_audit: tool({
         description: "View audit trail",
         args: { proposalId: schema.number({ description: "Optional proposal ID" }) },
-        async execute(args: any, context: any) {
+        async execute(args: any, _context: any) {
           const entries = args.proposalId
             ? getAllAuditLog().filter((e) => e.proposalId === args.proposalId)
             : getAllAuditLog();
@@ -482,7 +471,14 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
         args: {
           title: schema.string(),
           description: schema.string(),
-          amendmentType: schema.enum(["agent-update", "agent-add", "agent-remove", "config-update", "quorum-update", "gate-update"]),
+          amendmentType: schema.enum([
+            "agent-update",
+            "agent-add",
+            "agent-remove",
+            "config-update",
+            "quorum-update",
+            "gate-update",
+          ]),
           agentId: schema.string(),
           agentChanges: schema.string(),
           newAgentId: schema.string(),
@@ -494,7 +490,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
           addGates: schema.array(schema.string()),
           removeGates: schema.array(schema.string()),
         },
-        async execute(args: any, context: any) {
+        async execute(args: any, _context: any) {
           const state = getState();
           if (!state.initialized) return "DAO not initialized.";
 
@@ -507,7 +503,14 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
               case "agent-add":
                 payload = {
                   type: "agent-add",
-                  agent: { id: args.newAgentId, name: args.newAgentName, role: args.newAgentRole, weight: args.newAgentWeight, description: "Custom agent", systemPrompt: "" },
+                  agent: {
+                    id: args.newAgentId,
+                    name: args.newAgentName,
+                    role: args.newAgentRole,
+                    weight: args.newAgentWeight,
+                    description: "Custom agent",
+                    systemPrompt: "",
+                  },
                 };
                 break;
               case "agent-remove":
@@ -523,8 +526,9 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
                 payload = { type: "gate-update", addGates: args.addGates, removeGates: args.removeGates };
                 break;
             }
-          } catch (err: any) {
-            return `Error: ${err.message}`;
+          } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            return `Error: ${message}`;
           }
 
           const validation = validateAmendmentPayload(payload);

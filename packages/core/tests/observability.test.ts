@@ -1,33 +1,29 @@
-import { describe, it, expect, beforeEach } from "bun:test";
+import { beforeEach, describe, expect, it } from "bun:test";
 import {
+  createAlertRule,
   createCounter,
   createGauge,
   createHistogram,
-  getCounter,
-  getGauge,
-  getHistogram,
-  resetMetrics,
   DAO_METRICS,
-  recordProposalCreated,
-  recordProposalApproved,
-  recordProposalRejected,
-  recordProposalExecuted,
+  evaluateRules,
+  finishSpan,
+  formatAlerts,
   formatMetrics,
   formatMetricsPrometheus,
-  startSpan,
-  finishSpan,
-  getTrace,
-  getActiveSpans,
-  resetTracing,
-  traced,
   formatTrace,
-  createAlertRule,
-  evaluateRules,
   getActiveAlerts,
-  resolveAlert,
+  getActiveSpans,
+  getGauge,
+  getTrace,
   initializeDefaultAlertRules,
-  formatAlerts,
+  recordProposalApproved,
+  recordProposalCreated,
+  recordProposalRejected,
   resetAlerts,
+  resetMetrics,
+  resetTracing,
+  startSpan,
+  traced,
 } from "@guyghost/swarm-dao-core";
 
 describe("observability/metrics", () => {
@@ -108,7 +104,7 @@ describe("observability/tracing", () => {
 
     const trace = getTrace(parent.traceId);
     expect(trace).toBeDefined();
-    expect(trace!.spans.length).toBe(2);
+    expect(trace?.spans.length).toBe(2);
 
     finishSpan(child.id);
     finishSpan(parent.id);
@@ -122,7 +118,9 @@ describe("observability/tracing", () => {
 
   it("traced wrapper handles errors", async () => {
     try {
-      await traced("test-op", async () => { throw new Error("fail"); });
+      await traced("test-op", async () => {
+        throw new Error("fail");
+      });
       expect(false).toBe(true); // should not reach
     } catch {
       expect(getActiveSpans().length).toBe(0);
@@ -177,7 +175,7 @@ describe("observability/alerts", () => {
 
   it("resolves alerts", () => {
     createGauge("test_agent_count", "");
-    const rule = createAlertRule({
+    const _rule = createAlertRule({
       name: "No Agents",
       description: "No agents",
       metric: "test_agent_count",

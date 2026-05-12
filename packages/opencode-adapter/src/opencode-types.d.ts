@@ -10,30 +10,40 @@ declare module "@opencode-ai/plugin" {
         log: (params: { service: string; level: string; message: string }) => Promise<void>;
       };
     };
+    // biome-ignore lint/suspicious/noExplicitAny: stub type for external module
     $: any;
+    // biome-ignore lint/suspicious/noExplicitAny: stub type for external module
     worktree: any;
   }
 
-  export interface Plugin {
-    (ctx: PluginInput): Promise<{
-      tool?: Record<string, any>;
-      hooks?: Record<string, any>;
-    }>;
-  }
+  export type Plugin = (ctx: PluginInput) => Promise<{
+    // biome-ignore lint/suspicious/noExplicitAny: stub type for external module
+    tool?: Record<string, any>;
+    // biome-ignore lint/suspicious/noExplicitAny: stub type for external module
+    hooks?: Record<string, any>;
+  }>;
 
   export const tool: {
     schema: {
+      // biome-ignore lint/suspicious/noExplicitAny: stub types for external module
       string: (opts?: Record<string, unknown>) => any;
+      // biome-ignore lint/suspicious/noExplicitAny: stub types for external module
       number: (opts?: Record<string, unknown>) => any;
+      // biome-ignore lint/suspicious/noExplicitAny: stub types for external module
       boolean: (opts?: Record<string, unknown>) => any;
+      // biome-ignore lint/suspicious/noExplicitAny: stub types for external module
       array: (schema: any, opts?: Record<string, unknown>) => any;
+      // biome-ignore lint/suspicious/noExplicitAny: stub types for external module
       object: (schema: Record<string, any>, opts?: Record<string, unknown>) => any;
+      // biome-ignore lint/suspicious/noExplicitAny: stub types for external module
       enum: (values: string[], opts?: Record<string, unknown>) => any;
     };
     <TArgs = Record<string, unknown>>(opts: {
       description: string;
+      // biome-ignore lint/suspicious/noExplicitAny: stub types for external module
       args?: Record<string, any>;
       execute: (args: TArgs, context: { directory: string }) => Promise<string>;
+      // biome-ignore lint/suspicious/noExplicitAny: stub types for external module
     }): any;
   };
 }

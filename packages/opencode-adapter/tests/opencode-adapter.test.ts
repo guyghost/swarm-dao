@@ -1,4 +1,4 @@
-import { describe, it, expect } from "bun:test";
+import { describe, expect, it } from "bun:test";
 
 describe("opencode-adapter", () => {
   it("exports OpenCodeDAO plugin", async () => {

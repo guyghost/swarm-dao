@@ -2,8 +2,8 @@
 // Swarm DAO Core — Self-Amending DAO
 // ============================================================
 
-import type { AmendmentPayload, DAOAgent, DAOConfig, AmendmentSnapshot } from "../types/index.js";
 import { getState } from "../persistence.js";
+import type { AmendmentPayload, AmendmentSnapshot } from "../types/index.js";
 
 export interface AmendmentValidation {
   valid: boolean;
@@ -58,11 +58,21 @@ export function validateAmendmentPayload(payload: AmendmentPayload): AmendmentVa
       if (!payload.changes || Object.keys(payload.changes).length === 0) {
         errors.push("At least one config change is required");
       }
-      const validConfigFields = ["quorumPercent", "approvalThreshold", "defaultModel", "maxConcurrent", "riskThreshold", "healthWeights"];
+      const validConfigFields = [
+        "quorumPercent",
+        "approvalThreshold",
+        "defaultModel",
+        "maxConcurrent",
+        "riskThreshold",
+        "healthWeights",
+      ];
       for (const key of Object.keys(payload.changes)) {
         if (!validConfigFields.includes(key)) errors.push(`Unknown config field: ${key}`);
       }
-      if (payload.changes.quorumPercent !== undefined && (payload.changes.quorumPercent < 1 || payload.changes.quorumPercent > 100)) {
+      if (
+        payload.changes.quorumPercent !== undefined &&
+        (payload.changes.quorumPercent < 1 || payload.changes.quorumPercent > 100)
+      ) {
         errors.push("quorumPercent must be 1-100");
       }
       break;
@@ -74,7 +84,10 @@ export function validateAmendmentPayload(payload: AmendmentPayload): AmendmentVa
       break;
     }
     case "gate-update": {
-      if ((!payload.addGates || payload.addGates.length === 0) && (!payload.removeGates || payload.removeGates.length === 0)) {
+      if (
+        (!payload.addGates || payload.addGates.length === 0) &&
+        (!payload.removeGates || payload.removeGates.length === 0)
+      ) {
         errors.push("At least one gate to add or remove is required");
       }
       break;
@@ -103,22 +116,40 @@ export function previewAmendment(payload: AmendmentPayload): AmendmentPreviewDif
         return diffs;
       }
       for (const [key, value] of Object.entries(payload.changes)) {
-        diffs.push({ field: `${agent.id}.${key}`, before: String((agent as any)[key] ?? "(not set)"), after: String(value) });
+        diffs.push({
+          field: `${agent.id}.${key}`,
+          // biome-ignore lint/suspicious/noExplicitAny: dynamic property access for diff comparison
+          before: String((agent as any)[key] ?? "(not set)"),
+          after: String(value),
+        });
       }
       break;
     }
     case "agent-add": {
-      diffs.push({ field: `agents.${payload.agent.id}`, before: "(none)", after: `${payload.agent.name} (w=${payload.agent.weight})` });
+      diffs.push({
+        field: `agents.${payload.agent.id}`,
+        before: "(none)",
+        after: `${payload.agent.name} (w=${payload.agent.weight})`,
+      });
       break;
     }
     case "agent-remove": {
       const agent = state.agents.find((a) => a.id === payload.agentId);
-      diffs.push({ field: `agents.${payload.agentId}`, before: agent ? `${agent.name} (w=${agent.weight})` : "(not found)", after: "(removed)" });
+      diffs.push({
+        field: `agents.${payload.agentId}`,
+        before: agent ? `${agent.name} (w=${agent.weight})` : "(not found)",
+        after: "(removed)",
+      });
       break;
     }
     case "config-update": {
       for (const [key, value] of Object.entries(payload.changes)) {
-        diffs.push({ field: `config.${key}`, before: String((state.config as any)[key] ?? "(not set)"), after: String(value) });
+        diffs.push({
+          field: `config.${key}`,
+          // biome-ignore lint/suspicious/noExplicitAny: dynamic property access for diff comparison
+          before: String((state.config as any)[key] ?? "(not set)"),
+          after: String(value),
+        });
       }
       break;
     }
@@ -128,7 +159,9 @@ export function previewAmendment(payload: AmendmentPayload): AmendmentPreviewDif
         diffs.push({
           field: `typeQuorum.${type}`,
           before: before ? `${before.quorumPercent}% / ${before.approvalPercent}%` : "(default)",
-          after: quorum ? `${quorum.quorumPercent ?? before?.quorumPercent}% / ${quorum.approvalPercent ?? before?.approvalPercent}%` : "(no change)",
+          after: quorum
+            ? `${quorum.quorumPercent ?? before?.quorumPercent}% / ${quorum.approvalPercent ?? before?.approvalPercent}%`
+            : "(no change)",
         });
       }
       break;
@@ -195,6 +228,7 @@ export function executeAmendment(payload: AmendmentPayload): AmendmentExecutionR
           state.config.typeQuorum[type as keyof typeof state.config.typeQuorum] = {
             ...state.config.typeQuorum[type as keyof typeof state.config.typeQuorum],
             ...quorum,
+            // biome-ignore lint/suspicious/noExplicitAny: partial spread of quorum settings
           } as any;
         }
         break;
@@ -217,8 +251,9 @@ export function executeAmendment(payload: AmendmentPayload): AmendmentExecutionR
     }
 
     return { success: true, snapshot };
-  } catch (err: any) {
-    return { success: false, error: err.message, snapshot };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { success: false, error: message, snapshot };
   }
 }
 

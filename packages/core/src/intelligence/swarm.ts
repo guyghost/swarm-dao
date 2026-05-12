@@ -2,7 +2,7 @@
 // Swarm DAO Core — Swarm Dispatch
 // ============================================================
 
-import type { DAOAgent, Proposal, AgentOutput, HostAdapter } from "../types/index.js";
+import type { AgentOutput, DAOAgent, HostAdapter, Proposal } from "../types/index.js";
 
 export interface SwarmProgressUpdate {
   agentId: string;
@@ -34,9 +34,11 @@ ${proposal.description}
 
 ${proposal.problemStatement ? `**Problem Statement:**\n${proposal.problemStatement}\n\n` : ""}
 ${proposal.context ? `**Context:**\n${proposal.context}\n\n` : ""}
-${Array.isArray(proposal.acceptanceCriteria) && proposal.acceptanceCriteria.length > 0
-    ? `**Acceptance Criteria:**\n${proposal.acceptanceCriteria.map((ac, i) => `- ${typeof ac === "string" ? ac : ac.id}: ${typeof ac === "string" ? ac : `${ac.given} / ${ac.when} / ${ac.then}`}`).join("\n")}\n\n`
-    : ""}
+${
+  Array.isArray(proposal.acceptanceCriteria) && proposal.acceptanceCriteria.length > 0
+    ? `**Acceptance Criteria:**\n${proposal.acceptanceCriteria.map((ac, _i) => `- ${typeof ac === "string" ? ac : ac.id}: ${typeof ac === "string" ? ac : `${ac.given} / ${ac.when} / ${ac.then}`}`).join("\n")}\n\n`
+    : ""
+}
 ${proposal.successMetrics?.length ? `**Success Metrics:**\n${proposal.successMetrics.map((m) => `- ${m}`).join("\n")}\n\n` : ""}
 
 Evaluate this proposal carefully. Provide your analysis, vote, and scoring.`;
@@ -57,7 +59,9 @@ export function formatDispatchPlan(proposal: Proposal, instructions: DispatchIns
 **Agents to spawn:** ${instructions.length}
 
 ## Instructions
-${instructions.map((inst) => `### @${inst.agentId} (${inst.agentName})
+${instructions
+  .map(
+    (inst) => `### @${inst.agentId} (${inst.agentName})
 - Model: ${inst.model ?? "default"}
 - Timeout: ${inst.timeoutMs}ms
 
@@ -65,7 +69,9 @@ Spawn this sub-agent with the following task:
 \`\`\`
 ${inst.prompt.slice(0, 500)}${inst.prompt.length > 500 ? "..." : ""}
 \`\`\`
-`).join("\n")}
+`,
+  )
+  .join("\n")}
 
 ## Next Step
 After collecting all outputs, call \`dao_record_outputs\` with the collected responses.`;
@@ -90,7 +96,8 @@ export async function dispatchSwarm(
     const batch = instructions.slice(i, i + maxConcurrent);
 
     const batchPromises = batch.map(async (inst) => {
-      const agent = agents.find((a) => a.id === inst.agentId)!;
+      const agent = agents.find((a) => a.id === inst.agentId);
+      if (!agent) throw new Error(`Agent ${inst.agentId} not found`);
 
       onUpdate?.({
         agentId: inst.agentId,
@@ -116,14 +123,15 @@ export async function dispatchSwarm(
         });
 
         return output;
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : "Unknown error";
         const errorOutput: AgentOutput = {
           agentId: inst.agentId,
           agentName: inst.agentName,
           role: agent.role,
           content: "",
           durationMs: 0,
-          error: err.message || "Unknown error",
+          error: message,
         };
         outputs.push(errorOutput);
 

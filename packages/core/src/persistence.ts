@@ -2,28 +2,28 @@
 // Swarm DAO Core — Persistence (.dao/ local file store)
 // ============================================================
 
-import { promises as fs } from "fs";
-import path from "path";
+import { promises as fs } from "node:fs";
+import path from "node:path";
+import { recordProposalExecuted, recordVoteCast } from "./observability/metrics.js";
 import type {
-  DAOState,
-  DAOAgent,
-  Proposal,
-  ControlCheckResult,
-  DeliveryPlan,
+  AgentOutput,
   AuditEntry,
-  DecisionRecord,
-  ProposalStatus,
   CompositeScore,
-  ProposalOutcome,
+  ControlCheckResult,
+  DAOAgent,
+  DAOArtefacts,
+  DAOState,
+  DecisionRecord,
+  DeliveryPlan,
   ExecutionSnapshot,
   ExecutionVerification,
-  DAOArtefacts,
+  Proposal,
+  ProposalOutcome,
+  ProposalStatus,
   StorageSettings,
   Vote,
-  AgentOutput,
 } from "./types/index.js";
 import { createInitialState } from "./types/index.js";
-import { recordProposalCreated, recordVoteCast, recordProposalExecuted } from "./observability/metrics.js";
 
 let state: DAOState | null = null;
 
@@ -71,7 +71,9 @@ export async function migrateFromLegacy(cwd: string): Promise<boolean> {
   try {
     await fs.access(newRoot);
     return false;
-  } catch { /* .dao doesn't exist */ }
+  } catch {
+    /* .dao doesn't exist */
+  }
 
   try {
     await fs.access(legacyRoot);
@@ -103,7 +105,9 @@ export async function migrateFromLegacy(cwd: string): Promise<boolean> {
     await fs.access(oldStatePath);
     await fs.rename(oldStatePath, newStatePath);
     console.log("  ✓ Renamed dao-state.json → state.json");
-  } catch { /* no old state */ }
+  } catch {
+    /* no old state */
+  }
 
   // Migrate proposal IDs to 3-digit padding
   try {
@@ -120,7 +124,9 @@ export async function migrateFromLegacy(cwd: string): Promise<boolean> {
         console.log(`  ✓ Renamed ${file} → ${paddedName}`);
       }
     }
-  } catch { /* no proposals yet */ }
+  } catch {
+    /* no proposals yet */
+  }
 
   console.log("  ✓ Migration complete");
   try {
@@ -169,6 +175,11 @@ export async function loadState(cwd: string): Promise<DAOState | null> {
   }
   if (!loaded) return null;
 
+  // Ensure arrays exist (guard against corrupted/legacy state.json)
+  if (!loaded.proposals) loaded.proposals = [];
+  if (!loaded.agents) loaded.agents = [];
+  if (!loaded.auditLog) loaded.auditLog = [];
+
   // Reconcile with sidecars
   try {
     const sidecars = await loadProposalsFromDisk(daoRoot);
@@ -178,7 +189,9 @@ export async function loadState(cwd: string): Promise<DAOState | null> {
       for (const sc of sidecars) byId.set(sc.id, sc);
       loaded.proposals = Array.from(byId.values()).sort((a, b) => a.id - b.id);
     }
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 
   state = loaded;
   return state;
@@ -199,7 +212,9 @@ export async function loadProposalsFromDisk(daoRoot: string): Promise<Proposal[]
       const raw = await fs.readFile(path.join(dir, file), "utf-8");
       const p = JSON.parse(raw) as Proposal;
       if (typeof p?.id === "number") out.push(p);
-    } catch { /* skip malformed */ }
+    } catch {
+      /* skip malformed */
+    }
   }
   return out;
 }
@@ -211,13 +226,14 @@ export async function saveProposal(proposalId: number): Promise<string | null> {
   const dir = getProposalsDir(state.daoRoot);
   await fs.mkdir(dir, { recursive: true });
   const filePath = getProposalPath(state.daoRoot, proposalId);
-  await fs.writeFile(filePath, JSON.stringify(proposal, null, 2) + "\n", "utf-8");
+  await fs.writeFile(filePath, `${JSON.stringify(proposal, null, 2)}\n`, "utf-8");
   return filePath;
 }
 
 export async function saveState(): Promise<void> {
   if (!state) return;
   if (!state.daoRoot) return;
+  if (!state.proposals) state.proposals = [];
   const daoRoot = state.daoRoot;
   const statePath = path.join(daoRoot, STATE_FILE);
 
@@ -230,10 +246,12 @@ export async function saveState(): Promise<void> {
     await fs.mkdir(dir, { recursive: true });
     await Promise.all(
       state.proposals.map((p) =>
-        fs.writeFile(getProposalPath(daoRoot, p.id), JSON.stringify(p, null, 2) + "\n", "utf-8").catch(() => {}),
+        fs.writeFile(getProposalPath(daoRoot, p.id), `${JSON.stringify(p, null, 2)}\n`, "utf-8").catch(() => {}),
       ),
     );
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 
   await saveDecisions();
 
@@ -243,33 +261,43 @@ export async function saveState(): Promise<void> {
     const currentIds = new Set(state.proposals.map((p) => `${padId(p.id)}.json`));
     const orphans = entries.filter((e) => e.endsWith(".json") && !currentIds.has(e));
     for (const orphan of orphans) {
-      try { await fs.unlink(path.join(dir, orphan)); } catch { /* ignore */ }
+      try {
+        await fs.unlink(path.join(dir, orphan));
+      } catch {
+        /* ignore */
+      }
     }
-  } catch { /* ENOENT */ }
+  } catch {
+    /* ENOENT */
+  }
 }
 
 export async function saveDecisions(): Promise<void> {
-  if (!state || !state.daoRoot) return;
+  if (!state?.daoRoot || !state.proposals) return;
   const decisionsDir = getDecisionsDir(state.daoRoot);
   await fs.mkdir(decisionsDir, { recursive: true });
 
   const resolved = state.proposals.filter((p) => p.status !== "open" && p.status !== "deliberating");
   const decisions = resolved
-    .map((p): DecisionRecord => ({
-      id: p.id,
-      title: p.title,
-      type: p.type,
-      status: p.status,
-      riskZone: p.riskZone,
-      createdAt: p.createdAt,
-      resolvedAt: p.resolvedAt,
-    }))
+    .map(
+      (p): DecisionRecord => ({
+        id: p.id,
+        title: p.title,
+        type: p.type,
+        status: p.status,
+        riskZone: p.riskZone,
+        createdAt: p.createdAt,
+        resolvedAt: p.resolvedAt,
+      }),
+    )
     .sort((a, b) => a.id - b.id);
 
-  await fs.writeFile(path.join(decisionsDir, "index.json"), JSON.stringify(decisions, null, 2) + "\n", "utf-8");
+  await fs.writeFile(path.join(decisionsDir, "index.json"), `${JSON.stringify(decisions, null, 2)}\n`, "utf-8");
   await Promise.all(
     decisions.map((d) =>
-      fs.writeFile(path.join(decisionsDir, `${padId(d.id)}.json`), JSON.stringify(d, null, 2) + "\n", "utf-8").catch(() => {}),
+      fs
+        .writeFile(path.join(decisionsDir, `${padId(d.id)}.json`), `${JSON.stringify(d, null, 2)}\n`, "utf-8")
+        .catch(() => {}),
     ),
   );
 }
@@ -286,7 +314,10 @@ export function getStorageSettings(daoRoot: string): StorageSettings {
   }
 }
 
-export async function updateStorageSettings(daoRoot: string, updates: Partial<StorageSettings>): Promise<StorageSettings> {
+export async function updateStorageSettings(
+  daoRoot: string,
+  updates: Partial<StorageSettings>,
+): Promise<StorageSettings> {
   const current = getStorageSettings(daoRoot);
   const next = { ...current, ...updates };
   const configPath = path.join(daoRoot, CONFIG_FILE);
@@ -541,4 +572,4 @@ export function getArtefacts(proposalId: number): DAOArtefacts | undefined {
 }
 
 // Re-export types for convenience
-export type { Vote, AgentOutput } from "./types/index.js";
+export type { AgentOutput, Vote } from "./types/index.js";

@@ -2,7 +2,7 @@
 // Swarm DAO Core — Round Table (Agents suggest proposals)
 // ============================================================
 
-import type { DAOAgent, ProposalType, HostAdapter } from "../types/index.js";
+import type { DAOAgent, HostAdapter, ProposalType } from "../types/index.js";
 import { PROPOSAL_TYPES } from "../types/index.js";
 
 export interface RoundTableSuggestion {
@@ -58,7 +58,7 @@ export async function runRoundTable(
             agentOutputs: [],
             createdAt: new Date().toISOString(),
           },
-          systemPrompt: agent.systemPrompt + "\n\n" + SUGGESTION_PROMPT,
+          systemPrompt: `${agent.systemPrompt}\n\n${SUGGESTION_PROMPT}`,
           timeoutMs: 60_000,
         });
 
@@ -71,12 +71,13 @@ export async function runRoundTable(
         };
         suggestions.push(suggestion);
         return suggestion;
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : "Unknown error";
         const suggestion: RoundTableSuggestion = {
           agentId: agent.id,
           agentName: agent.name,
           content: "",
-          error: err.message || "Unknown error",
+          error: message,
         };
         suggestions.push(suggestion);
         return suggestion;
@@ -108,7 +109,7 @@ function parseSuggestion(content: string): { title: string; type: ProposalType; 
 
 export function formatRoundTableResults(
   suggestions: RoundTableSuggestion[],
-  proposalIds?: Map<string, number>,
+  _proposalIds?: Map<string, number>,
   proposalTitles?: Map<number, string>,
 ): string {
   let output = "# 🎯 Round Table Results\n\n";
@@ -121,9 +122,9 @@ export function formatRoundTableResults(
 
   for (const s of valid) {
     output += `## ${s.agentName} (@${s.agentId})\n`;
-    output += `**Title:** ${s.parsed!.title}\n`;
-    output += `**Type:** ${s.parsed!.type}\n`;
-    output += `**Description:** ${s.parsed!.description}\n`;
+    output += `**Title:** ${s.parsed?.title}\n`;
+    output += `**Type:** ${s.parsed?.type}\n`;
+    output += `**Description:** ${s.parsed?.description}\n`;
     if (s.proposalId && proposalTitles) {
       output += `**Created:** Proposal #${s.proposalId}\n`;
     }

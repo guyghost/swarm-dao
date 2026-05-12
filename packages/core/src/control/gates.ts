@@ -2,7 +2,7 @@
 // Swarm DAO Core — Quality Control Gates
 // ============================================================
 
-import type { Proposal, DAOConfig, GateResult, ControlCheckResult, ChecklistItem } from "../types/index.js";
+import type { ChecklistItem, ControlCheckResult, DAOConfig, GateResult, Proposal } from "../types/index.js";
 import { TYPE_QUORUM } from "../types/index.js";
 
 // ── Gate Definitions ─────────────────────────────────────────
@@ -11,7 +11,10 @@ interface GateDefinition {
   id: string;
   name: string;
   severity: "blocker" | "warning" | "info";
-  check: (proposal: Proposal, config: DAOConfig) => { passed: boolean; message: string; details?: Record<string, unknown> };
+  check: (
+    proposal: Proposal,
+    config: DAOConfig,
+  ) => { passed: boolean; message: string; details?: Record<string, unknown> };
 }
 
 const GATES: GateDefinition[] = [
@@ -19,14 +22,16 @@ const GATES: GateDefinition[] = [
     id: "quorum-quality",
     name: "Quorum Quality",
     severity: "blocker",
-    check: (proposal, config) => {
+    check: (proposal, _config) => {
       const votes = proposal.votes || [];
       const totalWeight = votes.reduce((sum, v) => sum + v.weight, 0);
       const totalPossible = totalWeight; // Simplified
       const quorumMet = totalPossible > 0; // Actual quorum check done during tally
       return {
         passed: quorumMet,
-        message: quorumMet ? `Quorum met (${votes.length} agents voted)` : `Quorum not met (${votes.length} agents voted)`,
+        message: quorumMet
+          ? `Quorum met (${votes.length} agents voted)`
+          : `Quorum not met (${votes.length} agents voted)`,
       };
     },
   },
@@ -42,9 +47,7 @@ const GATES: GateDefinition[] = [
         if (match) riskScores.push(parseInt(match[1] ?? "0", 10));
       }
 
-      const avgRisk = riskScores.length > 0
-        ? riskScores.reduce((a, b) => a + b, 0) / riskScores.length
-        : 0;
+      const avgRisk = riskScores.length > 0 ? riskScores.reduce((a, b) => a + b, 0) / riskScores.length : 0;
 
       const passed = avgRisk <= config.riskThreshold;
       return {
@@ -91,7 +94,9 @@ const GATES: GateDefinition[] = [
       const hasAC = Array.isArray(proposal.acceptanceCriteria) && (proposal.acceptanceCriteria?.length ?? 0) > 0;
       return {
         passed: hasAC,
-        message: hasAC ? `${proposal.acceptanceCriteria?.length ?? 0} acceptance criteria defined` : "No acceptance criteria defined",
+        message: hasAC
+          ? `${proposal.acceptanceCriteria?.length ?? 0} acceptance criteria defined`
+          : "No acceptance criteria defined",
       };
     },
   },
@@ -99,7 +104,7 @@ const GATES: GateDefinition[] = [
     id: "dependency-readiness",
     name: "Dependency Readiness",
     severity: "info",
-    check: (proposal, _config) => {
+    check: (_proposal, _config) => {
       return { passed: true, message: "Dependencies not tracked in core — verify manually" };
     },
   },
@@ -107,7 +112,7 @@ const GATES: GateDefinition[] = [
     id: "dependency-conflict",
     name: "Dependency Conflict",
     severity: "warning",
-    check: (proposal, _config) => {
+    check: (_proposal, _config) => {
       return { passed: true, message: "No dependency conflicts detected" };
     },
   },
@@ -120,7 +125,10 @@ const GATES: GateDefinition[] = [
       if (proposal.riskZone === "red" && !proposal.dryRunAt) {
         return { passed: false, message: "Dry-run required for red-zone proposals" };
       }
-      return { passed: true, message: proposal.dryRunAt ? `Dry-run completed at ${proposal.dryRunAt}` : "Dry-run not required" };
+      return {
+        passed: true,
+        message: proposal.dryRunAt ? `Dry-run completed at ${proposal.dryRunAt}` : "Dry-run not required",
+      };
     },
   },
   {
@@ -142,13 +150,49 @@ const GATES: GateDefinition[] = [
 
 function generateChecklist(proposal: Proposal): ChecklistItem[] {
   const items: ChecklistItem[] = [
-    { id: "security-review", category: "security", label: "Security review completed", checked: proposal.type !== "security-change", autoChecked: true },
+    {
+      id: "security-review",
+      category: "security",
+      label: "Security review completed",
+      checked: proposal.type !== "security-change",
+      autoChecked: true,
+    },
     { id: "data-handling", category: "compliance", label: "Data handling reviewed", checked: true, autoChecked: true },
-    { id: "compliance-check", category: "compliance", label: "Compliance requirements met", checked: true, autoChecked: true },
-    { id: "specs-written", category: "quality", label: "Specifications written", checked: Array.isArray(proposal.acceptanceCriteria) && proposal.acceptanceCriteria.length > 0, autoChecked: true },
-    { id: "architecture-reviewed", category: "quality", label: "Architecture reviewed", checked: proposal.agentOutputs.some((o) => o.agentId === "architect"), autoChecked: true },
-    { id: "rollback-plan", category: "operational", label: "Rollback plan defined", checked: Array.isArray(proposal.rollbackConditions) && proposal.rollbackConditions.length > 0, autoChecked: true },
-    { id: "monitoring-plan", category: "operational", label: "Monitoring plan defined", checked: Array.isArray(proposal.successMetrics) && proposal.successMetrics.length > 0, autoChecked: true },
+    {
+      id: "compliance-check",
+      category: "compliance",
+      label: "Compliance requirements met",
+      checked: true,
+      autoChecked: true,
+    },
+    {
+      id: "specs-written",
+      category: "quality",
+      label: "Specifications written",
+      checked: Array.isArray(proposal.acceptanceCriteria) && proposal.acceptanceCriteria.length > 0,
+      autoChecked: true,
+    },
+    {
+      id: "architecture-reviewed",
+      category: "quality",
+      label: "Architecture reviewed",
+      checked: proposal.agentOutputs.some((o) => o.agentId === "architect"),
+      autoChecked: true,
+    },
+    {
+      id: "rollback-plan",
+      category: "operational",
+      label: "Rollback plan defined",
+      checked: Array.isArray(proposal.rollbackConditions) && proposal.rollbackConditions.length > 0,
+      autoChecked: true,
+    },
+    {
+      id: "monitoring-plan",
+      category: "operational",
+      label: "Monitoring plan defined",
+      checked: Array.isArray(proposal.successMetrics) && proposal.successMetrics.length > 0,
+      autoChecked: true,
+    },
   ];
   return items;
 }

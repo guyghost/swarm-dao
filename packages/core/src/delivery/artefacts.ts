@@ -3,16 +3,15 @@
 // ============================================================
 
 import type {
-  Proposal,
+  ADR,
   DAOArtefacts,
   DecisionBrief,
-  ADR,
-  RiskReport,
-  PRDLite,
   ImplementationPlan,
-  TestPlan,
+  PRDLite,
+  Proposal,
   ReleasePacket,
-  ArtefactFileIndex,
+  RiskReport,
+  TestPlan,
 } from "../types/index.js";
 
 // ── Decision Brief ───────────────────────────────────────────
@@ -31,7 +30,10 @@ function generateDecisionBrief(proposal: Proposal): DecisionBrief {
     summary: proposal.synthesis || "No synthesis available",
     approvalScore,
     quorumPercent: 60,
-    decision: proposal.status === "approved" || proposal.status === "controlled" || proposal.status === "executed" ? "approved" : "rejected",
+    decision:
+      proposal.status === "approved" || proposal.status === "controlled" || proposal.status === "executed"
+        ? "approved"
+        : "rejected",
     date: proposal.createdAt,
     keyAgents: proposal.votes?.map((v) => ({ name: v.agentName, position: v.position, weight: v.weight })) ?? [],
   };
@@ -81,10 +83,28 @@ function formatADR(adr: ADR): string {
 function generateRiskReport(proposal: Proposal): RiskReport {
   const risks = [];
   if (proposal.type === "security-change") {
-    risks.push({ category: "Security", description: "Security-sensitive change requires extra review", severity: "high" as const, likelihood: "medium" as const, mitigation: "Security council review + penetration testing" });
+    risks.push({
+      category: "Security",
+      description: "Security-sensitive change requires extra review",
+      severity: "high" as const,
+      likelihood: "medium" as const,
+      mitigation: "Security council review + penetration testing",
+    });
   }
-  risks.push({ category: "Implementation", description: "Implementation may take longer than estimated", severity: "medium" as const, likelihood: "high" as const, mitigation: "Break into smaller tasks, add buffer time" });
-  risks.push({ category: "Adoption", description: "Users may not adopt the new feature", severity: "low" as const, likelihood: "medium" as const, mitigation: "User testing and feedback loops" });
+  risks.push({
+    category: "Implementation",
+    description: "Implementation may take longer than estimated",
+    severity: "medium" as const,
+    likelihood: "high" as const,
+    mitigation: "Break into smaller tasks, add buffer time",
+  });
+  risks.push({
+    category: "Adoption",
+    description: "Users may not adopt the new feature",
+    severity: "low" as const,
+    likelihood: "medium" as const,
+    mitigation: "User testing and feedback loops",
+  });
 
   return {
     proposalId: proposal.id,
@@ -107,14 +127,33 @@ function generatePRDLite(proposal: Proposal): PRDLite {
   const ac = Array.isArray(proposal.acceptanceCriteria)
     ? proposal.acceptanceCriteria.map((c, i) => {
         const text = typeof c === "string" ? c : `${c.given} / ${c.when} / ${c.then}`;
-        return { id: `US-${i + 1}`, title: text, asA: "user", iWant: text, soThat: "I can be more productive", acceptanceCriteria: [text] };
+        return {
+          id: `US-${i + 1}`,
+          title: text,
+          asA: "user",
+          iWant: text,
+          soThat: "I can be more productive",
+          acceptanceCriteria: [text],
+        };
       })
     : [];
 
   return {
     proposalId: proposal.id,
     objective: proposal.problemStatement || proposal.description,
-    userStories: ac.length > 0 ? ac : [{ id: "US-1", title: proposal.title, asA: "user", iWant: proposal.description, soThat: "it solves my problem", acceptanceCriteria: ["Feature works as described"] }],
+    userStories:
+      ac.length > 0
+        ? ac
+        : [
+            {
+              id: "US-1",
+              title: proposal.title,
+              asA: "user",
+              iWant: proposal.description,
+              soThat: "it solves my problem",
+              acceptanceCriteria: ["Feature works as described"],
+            },
+          ],
     inScope: [proposal.title],
     outOfScope: ["Features not mentioned in proposal"],
     metrics: proposal.successMetrics?.map((m) => ({ name: m, baseline: "TBD", target: m })) ?? [],
@@ -136,7 +175,10 @@ function generateImplementationPlan(proposal: Proposal): ImplementationPlan {
       { number: 2, name: "Implementation", tasks: [{ id: "T2", title: "Build", effort: "m", dependencies: ["T1"] }] },
       { number: 3, name: "Testing", tasks: [{ id: "T3", title: "Test", effort: "s", dependencies: ["T2"] }] },
     ],
-    branchStrategy: `feature/dao-${proposal.id}-${proposal.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 30)}`,
+    branchStrategy: `feature/dao-${proposal.id}-${proposal.title
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .slice(0, 30)}`,
     estimatedDuration: "1-2 weeks",
     criticalPath: ["T1", "T2", "T3"],
   };
@@ -153,7 +195,9 @@ function generateTestPlan(proposal: Proposal): TestPlan {
     proposalId: proposal.id,
     unitTests: [{ target: "Core logic", description: `Test ${proposal.title} functionality` }],
     integrationTests: [{ target: "API surface", description: "Test integration with existing systems" }],
-    e2eTests: [{ scenario: "User journey", steps: `1. Navigate to feature\n2. Use ${proposal.title}\n3. Verify result` }],
+    e2eTests: [
+      { scenario: "User journey", steps: `1. Navigate to feature\n2. Use ${proposal.title}\n3. Verify result` },
+    ],
     nonRegressionChecks: ["Existing tests still pass", "No performance degradation"],
     testEnvironments: ["local", "staging"],
   };
@@ -219,18 +263,18 @@ export function formatArtefactsSummary(artefacts: DAOArtefacts): string {
 
 // Export individual formatters
 export {
-  formatDecisionBrief,
   formatADR,
-  formatRiskReport,
-  formatPRDLite,
+  formatDecisionBrief,
   formatImplementationPlan,
-  formatTestPlan,
+  formatPRDLite,
   formatReleasePacket,
-  generateDecisionBrief,
+  formatRiskReport,
+  formatTestPlan,
   generateADR,
-  generateRiskReport,
-  generatePRDLite,
+  generateDecisionBrief,
   generateImplementationPlan,
-  generateTestPlan,
+  generatePRDLite,
   generateReleasePacket,
+  generateRiskReport,
+  generateTestPlan,
 };

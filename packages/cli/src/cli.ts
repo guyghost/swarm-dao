@@ -1,38 +1,43 @@
 #!/usr/bin/env bun
+
 // ============================================================
 // Swarm DAO — Standalone CLI
 // ============================================================
 
-import {
-  loadState,
-  setState,
-  getOrCreateState,
-  saveState,
-  getState,
-  initStorage,
-  createProposal,
-  listProposals,
-  getProposal,
-  addVote,
-  recordAudit,
-  getAuditLog,
-  getAllAuditLog,
-  initializeAgents,
-} from "@guyghost/swarm-dao-core";
 import type { ProposalType, VotePosition } from "@guyghost/swarm-dao-core";
-import { PROPOSAL_TYPES } from "@guyghost/swarm-dao-core";
+import {
+  addVote,
+  createProposal,
+  getAllAuditLog,
+  getAuditLog,
+  getOrCreateState,
+  getProposal,
+  getState,
+  initializeAgents,
+  initStorage,
+  listProposals,
+  loadState,
+  PROPOSAL_TYPES,
+  recordAudit,
+  saveState,
+  setState,
+} from "@guyghost/swarm-dao-core";
 
 // ── Helpers ─────────────────────────────────────────────────
 
 class CliError extends Error {}
-function err(msg: string): never { throw new CliError(msg); }
-function info(msg: string): void { process.stdout.write(msg + "\n"); }
+function err(msg: string): never {
+  throw new CliError(msg);
+}
+function info(msg: string): void {
+  process.stdout.write(`${msg}\n`);
+}
 
 function parseFlags(args: string[]): { flags: Record<string, string | true>; positional: string[] } {
   const flags: Record<string, string | true> = {};
   const positional: string[] = [];
   for (let i = 0; i < args.length; i++) {
-    const a = args[i]!;
+    const a = args[i] as string;
     if (a.startsWith("--")) {
       const eq = a.indexOf("=");
       if (eq !== -1) {
@@ -198,9 +203,7 @@ async function cmdConfig(cwd: string): Promise<void> {
 
 async function cmdAudit(cwd: string, flags: Record<string, string | true>): Promise<void> {
   await ensureLoaded(cwd);
-  const entries = typeof flags.proposal === "string"
-    ? getAuditLog(Number(flags.proposal))
-    : getAllAuditLog();
+  const entries = typeof flags.proposal === "string" ? getAuditLog(Number(flags.proposal)) : getAllAuditLog();
   if (entries.length === 0) {
     info("(no audit entries)");
     return;
@@ -310,8 +313,9 @@ export async function main(argv: string[], cwd: string = process.cwd()): Promise
         process.stderr.write(`unknown command: ${cmd}\n\n${HELP}`);
         return 1;
     }
-  } catch (e: any) {
-    process.stderr.write(`error: ${e?.message ?? String(e)}\n`);
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e);
+    process.stderr.write(`error: ${message}\n`);
     return 1;
   }
 }

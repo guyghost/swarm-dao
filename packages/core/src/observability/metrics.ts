@@ -44,7 +44,10 @@ export interface Histogram {
 
 class CounterImpl implements Counter {
   values: MetricValue[] = [];
-  constructor(public name: string, public description: string) {}
+  constructor(
+    public name: string,
+    public description: string,
+  ) {}
 
   increment(labels?: Record<string, string>): void {
     this.values.push({
@@ -58,12 +61,14 @@ class CounterImpl implements Counter {
   getCount(labels?: Record<string, string>): number {
     return this.values.filter((v) => matchesLabels(v.labels, labels)).length;
   }
-
 }
 
 class GaugeImpl implements Gauge {
   values: MetricValue[] = [];
-  constructor(public name: string, public description: string) {}
+  constructor(
+    public name: string,
+    public description: string,
+  ) {}
 
   set(value: number, labels?: Record<string, string>): void {
     this.values.push({
@@ -76,14 +81,17 @@ class GaugeImpl implements Gauge {
 
   getValue(labels?: Record<string, string>): number {
     const matching = this.values.filter((v) => matchesLabels(v.labels, labels));
-    return matching.length > 0 ? matching[matching.length - 1]!.value : 0;
+    return matching.length > 0 ? (matching[matching.length - 1]?.value ?? 0) : 0;
   }
-
 }
 
 class HistogramImpl implements Histogram {
   values: MetricValue[] = [];
-  constructor(public name: string, public description: string, public buckets: number[] = [10, 50, 100, 250, 500, 1000, 2500, 5000, 10000]) {}
+  constructor(
+    public name: string,
+    public description: string,
+    public buckets: number[] = [10, 50, 100, 250, 500, 1000, 2500, 5000, 10000],
+  ) {}
 
   observe(value: number, labels?: Record<string, string>): void {
     this.values.push({
@@ -117,7 +125,6 @@ class HistogramImpl implements Histogram {
     counts["+Inf"] = matching.length;
     return counts;
   }
-
 }
 
 // ── Registry ─────────────────────────────────────────────────
@@ -200,21 +207,19 @@ export function recordProposalCreated(type: string): void {
   );
 }
 
-export function recordProposalApproved(id: number, type: string): void {
+export function recordProposalApproved(_id: number, type: string): void {
   DAO_METRICS.proposalsApproved.increment({ type });
   updateApprovalRate();
 }
 
-export function recordProposalRejected(id: number, type: string): void {
+export function recordProposalRejected(_id: number, type: string): void {
   DAO_METRICS.proposalsRejected.increment({ type });
   updateApprovalRate();
 }
 
-export function recordProposalExecuted(id: number, type: string): void {
+export function recordProposalExecuted(_id: number, type: string): void {
   DAO_METRICS.proposalsExecuted.increment({ type });
-  DAO_METRICS.activeProposals.set(
-    Math.max(0, DAO_METRICS.activeProposals.getValue() - 1),
-  );
+  DAO_METRICS.activeProposals.set(Math.max(0, DAO_METRICS.activeProposals.getValue() - 1));
 }
 
 export function recordVoteCast(agentId: string, position: string, weight: number): void {

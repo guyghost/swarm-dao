@@ -2,10 +2,9 @@
 // Swarm DAO Core — Configuration System
 // ============================================================
 
-import { promises as fs } from "fs";
-import path from "path";
-import type { DAOConfig, DAOAgent } from "./types/index.js";
-import { DEFAULT_CONFIG } from "./types/index.js";
+import { promises as fs } from "node:fs";
+import path from "node:path";
+import type { DAOAgent, DAOConfig } from "./types/index.js";
 
 export type ActivationMode = "opt-in" | "suggest" | "enforce";
 
@@ -56,24 +55,37 @@ export function mergeConfig(base: DAOConfig, overrides: Partial<DAOConfig>): DAO
 
 export function filterEnabledAgents(agents: DAOAgent[], config: ProjectConfig): DAOAgent[] {
   if (!config.agentOverrides) return agents;
-  return agents.filter((agent) => {
-    const override = config.agentOverrides?.[agent.id];
-    return override?.enabled !== false;
-  }).map((agent) => {
-    const override = config.agentOverrides?.[agent.id];
-    return override ? { ...agent, ...override } : agent;
-  });
+  return agents
+    .filter((agent) => {
+      const override = config.agentOverrides?.[agent.id];
+      return override?.enabled !== false;
+    })
+    .map((agent) => {
+      const override = config.agentOverrides?.[agent.id];
+      return override ? { ...agent, ...override } : agent;
+    });
 }
 
 // ── Mode Logic ───────────────────────────────────────────────
 
 export function shouldSuggestProposal(text: string): boolean {
   const triggers = [
-    "feature", "add", "implement", "create",
-    "refactor", "rewrite", "migrate",
-    "security", "auth", "permission",
-    "release", "deploy", "ship",
-    "dark mode", "onboarding", "api",
+    "feature",
+    "add",
+    "implement",
+    "create",
+    "refactor",
+    "rewrite",
+    "migrate",
+    "security",
+    "auth",
+    "permission",
+    "release",
+    "deploy",
+    "ship",
+    "dark mode",
+    "onboarding",
+    "api",
   ];
   const lower = text.toLowerCase();
   return triggers.some((t) => lower.includes(t));
@@ -82,7 +94,12 @@ export function shouldSuggestProposal(text: string): boolean {
 export function isCriticalPath(filePath: string, criticalPaths: string[]): boolean {
   for (const pattern of criticalPaths) {
     const regex = new RegExp(
-      "^" + pattern.replace(/\*\*/g, "<<<DOUBLESTAR>>>").replace(/\*/g, "[^/]*").replace(/<<<DOUBLESTAR>>>/g, ".*") + "$"
+      "^" +
+        pattern
+          .replace(/\*\*/g, "<<<DOUBLESTAR>>>")
+          .replace(/\*/g, "[^/]*")
+          .replace(/<<<DOUBLESTAR>>>/g, ".*") +
+        "$",
     );
     if (regex.test(filePath)) return true;
   }
@@ -99,7 +116,7 @@ export function canEditWithoutProposal(
   if (mode === "enforce") {
     if (!isCriticalPath(filePath, criticalPaths)) return true;
     return approvedPaths.some((ap) => {
-      const regex = new RegExp("^" + ap.replace(/\*\*/g, ".*").replace(/\*/g, "[^/]*") + "$");
+      const regex = new RegExp(`^${ap.replace(/\*\*/g, ".*").replace(/\*/g, "[^/]*")}$`);
       return regex.test(filePath);
     });
   }

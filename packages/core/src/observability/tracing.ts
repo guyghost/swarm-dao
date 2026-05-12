@@ -28,8 +28,8 @@ export interface Trace {
   rootSpan: Span;
 }
 
-let activeSpans = new Map<string, Span>();
-let traces = new Map<string, Trace>();
+const activeSpans = new Map<string, Span>();
+const traces = new Map<string, Trace>();
 
 function generateId(): string {
   return `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 9)}`;
@@ -184,8 +184,9 @@ export async function traced<T>(
     const result = await fn(span);
     finishSpan(span.id);
     return result;
-  } catch (error: any) {
-    finishSpan(span.id, error.message || String(error));
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    finishSpan(span.id, message);
     throw error;
   }
 }
