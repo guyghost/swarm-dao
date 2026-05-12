@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from "bun:test";
+import { promises as fs } from "node:fs";
 import {
   addVote,
   createInitialState,
@@ -6,7 +7,10 @@ import {
   getAuditLog,
   getDaoRoot,
   getProposal,
+  getState,
+  initStorage,
   listProposals,
+  loadState,
   padId,
   recordAudit,
   setState,
@@ -60,5 +64,44 @@ describe("persistence", () => {
 
   it("returns dao root path", () => {
     expect(getDaoRoot("/project")).toBe("/project/.dao");
+  });
+
+  it("loadState repairs corrupted state.json missing proposals, agents, and auditLog", async () => {
+    const cwd = `/tmp/dao-corruption-test-${Date.now()}`;
+
+    try {
+      // Create .dao/ directory
+      await initStorage(cwd);
+
+      // Write a malformed state.json missing proposals, agents, auditLog
+      const corruptedState = {
+        config: { quorumPercent: 60 },
+        nextProposalId: 1,
+        initialized: true,
+        nextAuditId: 1,
+        controlResults: {},
+        deliveryPlans: {},
+        artefacts: {},
+        outcomes: {},
+        snapshots: {},
+        verifications: {},
+        daoRoot: getDaoRoot(cwd),
+      };
+      const statePath = `${getDaoRoot(cwd)}/state.json`;
+      await fs.writeFile(statePath, JSON.stringify(corruptedState), "utf-8");
+
+      // Load the corrupted state
+      const loaded = await loadState(cwd);
+      expect(loaded).not.toBeNull();
+
+      // Assert repaired arrays
+      expect(getState().proposals).toEqual([]);
+      expect(getState().agents).toEqual([]);
+      expect(getState().auditLog).toEqual([]);
+    } finally {
+      // Clean up temp directory and reset state
+      setState(null);
+      await fs.rm(cwd, { recursive: true, force: true }).catch(() => {});
+    }
   });
 });

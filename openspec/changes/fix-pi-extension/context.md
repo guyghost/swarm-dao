@@ -55,6 +55,9 @@ Fix critical runtime errors in swarm-dao that affect the Pi extension, improve t
 | `packages/opencode-adapter/src/index.ts` | @codegen | Auto-fixed formatting, catch clauses, biome-ignore for execute signatures |
 | `packages/pi-adapter/tests/pi-adapter.test.ts` | @codegen | Auto-fixed formatting, biome-ignore for mock interfaces, unused import removed |
 | `packages/core/tests/*.test.ts` | @codegen | Auto-fixed formatting, biome-ignore for test mocks |
+| `packages/core/src/delivery/execution.ts` | @codegen | Defensive guard — `state.proposals?.length ?? 0` on snapshot stateSnapshot |
+| `packages/core/src/delivery/dry-run.ts` | @codegen | Defensive guard — `getState().agents?.length ?? 0` and `proposals?.length ?? 0` on createExecutionSnapshot |
+| `packages/core/tests/persistence.test.ts` | @codegen | Regression test — `loadState()` repairs corrupted state.json missing `proposals`/`agents`/`auditLog` |
 
 ## Inter-Agent Notes
 <!-- Format: [@source → @destination] Message -->

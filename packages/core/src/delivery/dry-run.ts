@@ -79,7 +79,10 @@ export async function createExecutionSnapshot(proposal: Proposal, cwd: string): 
     branch: gitInfo.branch,
     commitSha: gitInfo.sha,
     filesChanged: proposal.affectedPaths || [],
-    stateSnapshot: JSON.stringify({ agents: getState().agents.length, proposals: getState().proposals.length }),
+    stateSnapshot: JSON.stringify({
+      agents: getState().agents?.length ?? 0,
+      proposals: getState().proposals?.length ?? 0,
+    }),
   };
 
   captureSnapshot(proposal.id, snapshot);

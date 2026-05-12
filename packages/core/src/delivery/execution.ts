@@ -52,7 +52,7 @@ export function executeProposal(proposal: Proposal): ExecutionResult {
     filesChanged: [],
     stateSnapshot: JSON.stringify({
       agents: state.agents.length,
-      proposals: state.proposals.length,
+      proposals: state.proposals?.length ?? 0,
     }),
   };
   captureSnapshot(proposal.id, snapshot);
