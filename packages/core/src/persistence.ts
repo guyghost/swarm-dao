@@ -328,18 +328,18 @@ export async function updateStorageSettings(
 
 // ── Agent CRUD ───────────────────────────────────────────────
 
-export function addAgent(agent: DAOAgent): void {
+export async function addAgent(agent: DAOAgent): Promise<void> {
   const s = getState();
   s.agents.push(agent);
-  saveState().catch(console.error);
+  await saveState();
 }
 
-export function removeAgent(agentId: string): boolean {
+export async function removeAgent(agentId: string): Promise<boolean> {
   const s = getState();
   const index = s.agents.findIndex((a) => a.id === agentId);
   if (index === -1) return false;
   s.agents.splice(index, 1);
-  saveState().catch(console.error);
+  await saveState();
   return true;
 }
 
@@ -353,13 +353,13 @@ export function listAgents(): DAOAgent[] {
 
 // ── Proposal CRUD ────────────────────────────────────────────
 
-export function createProposal(
+export async function createProposal(
   title: string,
   type: string,
   description: string,
   proposedBy: string,
   context?: string,
-): Proposal {
+): Promise<Proposal> {
   const s = getState();
   const proposal: Proposal = {
     id: s.nextProposalId++,
@@ -374,7 +374,7 @@ export function createProposal(
     createdAt: new Date().toISOString(),
   };
   s.proposals.push(proposal);
-  saveState().catch(console.error);
+  await saveState();
   return proposal;
 }
 
@@ -386,7 +386,7 @@ export function listProposals(): Proposal[] {
   return getState().proposals;
 }
 
-export function updateProposalStatus(proposalId: number, status: ProposalStatus): boolean {
+export async function updateProposalStatus(proposalId: number, status: ProposalStatus): Promise<boolean> {
   const s = getState();
   const proposal = s.proposals.find((p) => p.id === proposalId);
   if (!proposal) return false;
@@ -397,61 +397,61 @@ export function updateProposalStatus(proposalId: number, status: ProposalStatus)
   if (status === "executed") {
     recordProposalExecuted(proposal.id, proposal.type);
   }
-  saveState().catch(console.error);
+  await saveState();
   return true;
 }
 
-export function addVote(proposalId: number, vote: Vote): boolean {
+export async function addVote(proposalId: number, vote: Vote): Promise<boolean> {
   const s = getState();
   const proposal = s.proposals.find((p) => p.id === proposalId);
   if (!proposal) return false;
   proposal.votes.push(vote);
   recordVoteCast(vote.agentId, vote.position, vote.weight);
-  saveState().catch(console.error);
+  await saveState();
   return true;
 }
 
-export function storeAgentOutput(proposalId: number, output: AgentOutput): boolean {
+export async function storeAgentOutput(proposalId: number, output: AgentOutput): Promise<boolean> {
   const s = getState();
   const proposal = s.proposals.find((p) => p.id === proposalId);
   if (!proposal) return false;
   proposal.agentOutputs.push(output);
-  saveState().catch(console.error);
+  await saveState();
   return true;
 }
 
-export function storeSynthesis(proposalId: number, synthesis: string): boolean {
+export async function storeSynthesis(proposalId: number, synthesis: string): Promise<boolean> {
   const s = getState();
   const proposal = s.proposals.find((p) => p.id === proposalId);
   if (!proposal) return false;
   proposal.synthesis = synthesis;
-  saveState().catch(console.error);
+  await saveState();
   return true;
 }
 
-export function storeCompositeScore(proposalId: number, score: CompositeScore | undefined): boolean {
+export async function storeCompositeScore(proposalId: number, score: CompositeScore | undefined): Promise<boolean> {
   const s = getState();
   const proposal = s.proposals.find((p) => p.id === proposalId);
   if (!proposal) return false;
   proposal.compositeScore = score;
-  saveState().catch(console.error);
+  await saveState();
   return true;
 }
 
-export function storeControlResult(proposalId: number, result: ControlCheckResult): void {
+export async function storeControlResult(proposalId: number, result: ControlCheckResult): Promise<void> {
   const s = getState();
   s.controlResults[proposalId] = result;
-  saveState().catch(console.error);
+  await saveState();
 }
 
 export function getControlResult(proposalId: number): ControlCheckResult | undefined {
   return getState().controlResults[proposalId];
 }
 
-export function storeDeliveryPlan(proposalId: number, plan: DeliveryPlan): void {
+export async function storeDeliveryPlan(proposalId: number, plan: DeliveryPlan): Promise<void> {
   const s = getState();
   s.deliveryPlans[proposalId] = plan;
-  saveState().catch(console.error);
+  await saveState();
 }
 
 export function getDeliveryPlan(proposalId: number): DeliveryPlan | undefined {
@@ -460,13 +460,13 @@ export function getDeliveryPlan(proposalId: number): DeliveryPlan | undefined {
 
 // ── Audit ────────────────────────────────────────────────────
 
-export function recordAudit(
+export async function recordAudit(
   proposalId: number,
   layer: AuditEntry["layer"],
   action: string,
   actor: string,
   details: string,
-): void {
+): Promise<void> {
   const s = getState();
   s.auditLog.push({
     id: s.nextAuditId++,
@@ -477,7 +477,7 @@ export function recordAudit(
     actor,
     details,
   });
-  saveState().catch(console.error);
+  await saveState();
 }
 
 export function getAuditLog(proposalId: number): AuditEntry[] {
@@ -494,7 +494,7 @@ export function getOutcome(proposalId: number): ProposalOutcome | undefined {
   return getState().outcomes[proposalId];
 }
 
-export function initOutcome(proposalId: number): ProposalOutcome {
+export async function initOutcome(proposalId: number): Promise<ProposalOutcome> {
   const s = getState();
   const existing = s.outcomes[proposalId];
   if (existing) return existing;
@@ -508,39 +508,39 @@ export function initOutcome(proposalId: number): ProposalOutcome {
     updatedAt: new Date().toISOString(),
   };
   s.outcomes[proposalId] = outcome;
-  saveState().catch(console.error);
+  await saveState();
   return outcome;
 }
 
-export function addRating(proposalId: number, rating: ProposalOutcome["ratings"][0]): void {
-  const outcome = initOutcome(proposalId);
+export async function addRating(proposalId: number, rating: ProposalOutcome["ratings"][0]): Promise<void> {
+  const outcome = await initOutcome(proposalId);
   outcome.ratings.push(rating);
   const scores = outcome.ratings.map((r) => r.score);
   outcome.overallScore = scores.reduce((a, b) => a + b, 0) / scores.length;
   outcome.updatedAt = new Date().toISOString();
-  saveState().catch(console.error);
+  await saveState();
 }
 
-export function addMetric(proposalId: number, metric: ProposalOutcome["metrics"][0]): void {
-  const outcome = initOutcome(proposalId);
+export async function addMetric(proposalId: number, metric: ProposalOutcome["metrics"][0]): Promise<void> {
+  const outcome = await initOutcome(proposalId);
   outcome.metrics.push(metric);
   outcome.updatedAt = new Date().toISOString();
-  saveState().catch(console.error);
+  await saveState();
 }
 
-export function markReviewed(proposalId: number): void {
-  const outcome = initOutcome(proposalId);
+export async function markReviewed(proposalId: number): Promise<void> {
+  const outcome = await initOutcome(proposalId);
   outcome.status = "reviewed";
   outcome.updatedAt = new Date().toISOString();
-  saveState().catch(console.error);
+  await saveState();
 }
 
 // ── Snapshots ────────────────────────────────────────────────
 
-export function captureSnapshot(proposalId: number, snapshot: ExecutionSnapshot): void {
+export async function captureSnapshot(proposalId: number, snapshot: ExecutionSnapshot): Promise<void> {
   const s = getState();
   s.snapshots[proposalId] = snapshot;
-  saveState().catch(console.error);
+  await saveState();
 }
 
 export function getSnapshot(proposalId: number): ExecutionSnapshot | undefined {
@@ -549,10 +549,10 @@ export function getSnapshot(proposalId: number): ExecutionSnapshot | undefined {
 
 // ── Verification ─────────────────────────────────────────────
 
-export function storeVerification(proposalId: number, verification: ExecutionVerification): void {
+export async function storeVerification(proposalId: number, verification: ExecutionVerification): Promise<void> {
   const s = getState();
   s.verifications[proposalId] = verification;
-  saveState().catch(console.error);
+  await saveState();
 }
 
 export function getVerification(proposalId: number): ExecutionVerification | undefined {
@@ -561,10 +561,10 @@ export function getVerification(proposalId: number): ExecutionVerification | und
 
 // ── Artefacts ────────────────────────────────────────────────
 
-export function storeArtefacts(proposalId: number, artefacts: DAOArtefacts): void {
+export async function storeArtefacts(proposalId: number, artefacts: DAOArtefacts): Promise<void> {
   const s = getState();
   s.artefacts[proposalId] = artefacts;
-  saveState().catch(console.error);
+  await saveState();
 }
 
 export function getArtefacts(proposalId: number): DAOArtefacts | undefined {

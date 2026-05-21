@@ -33,7 +33,7 @@ export function validateProposalQuality(proposal: Proposal): ProposalQualityVali
   return { valid: missing.length === 0, missing };
 }
 
-export function executeProposal(proposal: Proposal): ExecutionResult {
+export async function executeProposal(proposal: Proposal): Promise<ExecutionResult> {
   const state = getState();
 
   // Generate or retrieve delivery plan
@@ -55,7 +55,7 @@ export function executeProposal(proposal: Proposal): ExecutionResult {
       proposals: state.proposals?.length ?? 0,
     }),
   };
-  captureSnapshot(proposal.id, snapshot);
+  await captureSnapshot(proposal.id, snapshot);
 
   // Mark as executed
   proposal.status = "executed";
@@ -75,7 +75,7 @@ The delivery agent has prepared an implementation plan. Review the tasks and beg
   };
 }
 
-export function verifyExecution(
+export async function verifyExecution(
   proposal: Proposal,
   options: {
     filesChanged: string[];
@@ -86,7 +86,7 @@ export function verifyExecution(
     compilationOk?: boolean;
     gitClean?: boolean;
   },
-): ExecutionVerification {
+): Promise<ExecutionVerification> {
   const missingFiles = options.expectedFiles?.filter((f) => !options.filesChanged.includes(f)) ?? [];
 
   let status: VerificationStatus = "success";
@@ -108,7 +108,7 @@ export function verifyExecution(
     summary: `Verification ${status}: ${options.filesChanged.length} files changed, ${missingFiles.length} missing, tests ${options.testsPassed ?? 0}/${(options.testsPassed ?? 0) + (options.testsFailed ?? 0)}`,
   };
 
-  storeVerification(proposal.id, verification);
+  await storeVerification(proposal.id, verification);
   return verification;
 }
 
