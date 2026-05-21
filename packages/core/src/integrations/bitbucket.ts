@@ -61,8 +61,7 @@ export async function bbCreateBranch(
     { headers: getAuthHeaders() },
   );
   if (!refRes.ok) {
-    console.error(`Failed to get ref: ${refRes.status}`);
-    return null;
+    throw new Error(`Failed to get ref: ${refRes.status}`);
   }
   const refData = (await refRes.json()) as { target: { hash: string } };
   const sha = refData.target?.hash;
@@ -79,8 +78,7 @@ export async function bbCreateBranch(
   );
 
   if (!createRes.ok && createRes.status !== 409) {
-    console.error(`Failed to create branch: ${createRes.status}`);
-    return null;
+    throw new Error(`Failed to create branch: ${createRes.status}`);
   }
 
   return { ref: `refs/heads/${branchName}`, sha };
@@ -112,8 +110,7 @@ export async function bbCreatePullRequest(
   );
 
   if (!res.ok) {
-    console.error(`Failed to create PR: ${res.status}`);
-    return null;
+    throw new Error(`Failed to create PR: ${res.status}`);
   }
 
   const data = (await res.json()) as { id: number; links: { html: { href: string } } };

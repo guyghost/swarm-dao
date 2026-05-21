@@ -64,8 +64,7 @@ export async function ghCreateBranch(
     headers: getAuthHeaders(),
   });
   if (!refRes.ok) {
-    console.error(`Failed to get ref for ${base}: ${refRes.status}`);
-    return null;
+    throw new Error(`Failed to get ref for ${base}: ${refRes.status}`);
   }
   const refData = (await refRes.json()) as { object?: { sha: string } };
   const sha = refData.object?.sha;
@@ -79,8 +78,7 @@ export async function ghCreateBranch(
   });
 
   if (!createRes.ok && createRes.status !== 422) {
-    console.error(`Failed to create branch: ${createRes.status}`);
-    return null;
+    throw new Error(`Failed to create branch: ${createRes.status}`);
   }
 
   return { ref: `refs/heads/${branchName}`, sha };
@@ -112,8 +110,7 @@ export async function ghCreatePullRequest(
   });
 
   if (!res.ok) {
-    console.error(`Failed to create PR: ${res.status}`);
-    return null;
+    throw new Error(`Failed to create PR: ${res.status}`);
   }
 
   const data = (await res.json()) as { number: number; html_url: string };
