@@ -68,8 +68,7 @@ export async function glCreateBranch(
   );
 
   if (!res.ok) {
-    console.error(`Failed to create branch: ${res.status}`);
-    return null;
+    throw new Error(`Failed to create branch: ${res.status}`);
   }
 
   const data = (await res.json()) as { name: string; commit: { id: string } };
@@ -99,8 +98,7 @@ export async function glCreateMergeRequest(
   });
 
   if (!res.ok) {
-    console.error(`Failed to create MR: ${res.status}`);
-    return null;
+    throw new Error(`Failed to create MR: ${res.status}`);
   }
 
   const data = (await res.json()) as { iid: number; web_url: string };

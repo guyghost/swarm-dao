@@ -129,8 +129,8 @@ async function cmdPropose(cwd: string, flags: Record<string, string | true>): Pr
   }
 
   await ensureLoaded(cwd);
-  const p = createProposal(title, type, description, by);
-  recordAudit(p.id, "governance", "proposal-created", by, `via cli: ${title}`);
+  const p = await createProposal(title, type, description, by);
+  await recordAudit(p.id, "governance", "proposal-created", by, `via cli: ${title}`);
   await saveState();
   info(`✓ Proposal #${p.id} created (${p.status})`);
   info(`  ${p.title} | ${p.type}`);
@@ -262,8 +262,8 @@ async function cmdVote(cwd: string, positional: string[], flags: Record<string, 
   const p = getProposal(id);
   if (!p) err(`proposal #${id} not found`);
 
-  addVote(id, { agentId: agent, agentName: agent, position, reasoning, weight });
-  recordAudit(id, "governance", "vote-cast", agent, `${position} (w=${weight}): ${reasoning}`);
+  await addVote(id, { agentId: agent, agentName: agent, position, reasoning, weight });
+  await recordAudit(id, "governance", "vote-cast", agent, `${position} (w=${weight}): ${reasoning}`);
   await saveState();
   info(`✓ Vote recorded for #${id}: ${positionRaw} by ${agent}`);
 }

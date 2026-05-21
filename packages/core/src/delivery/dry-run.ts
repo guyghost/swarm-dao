@@ -1,7 +1,7 @@
 import { captureSnapshot, getSnapshot, getState } from "../persistence.js";
 import type { DryRunResult, ExecutionSnapshot, Proposal } from "../types/index.js";
 
-export function performDryRun(proposal: Proposal): DryRunResult {
+export async function performDryRun(proposal: Proposal): Promise<DryRunResult> {
   const _state = getState();
 
   // Analyze what would change
@@ -85,7 +85,7 @@ export async function createExecutionSnapshot(proposal: Proposal, cwd: string): 
     }),
   };
 
-  captureSnapshot(proposal.id, snapshot);
+  await captureSnapshot(proposal.id, snapshot);
   return snapshot;
 }
 

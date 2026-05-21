@@ -82,7 +82,7 @@ describe("delivery/execution", () => {
     expect(validation2.valid).toBe(true);
   });
 
-  it("verifies execution", () => {
+  it("verifies execution", async () => {
     const proposal = {
       id: 1,
       title: "Test",
@@ -95,7 +95,7 @@ describe("delivery/execution", () => {
       createdAt: new Date().toISOString(),
     };
 
-    const verification = verifyExecution(proposal, {
+    const verification = await verifyExecution(proposal, {
       filesChanged: ["src/feature.ts"],
       expectedFiles: ["src/feature.ts", "tests/feature.test.ts"],
       testsPassed: 5,
