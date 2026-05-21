@@ -3,7 +3,14 @@
 // ============================================================
 
 import { getState } from "../persistence.js";
-import type { AmendmentPayload, AmendmentSnapshot } from "../types/index.js";
+import {
+  type AmendmentPayload,
+  type AmendmentSnapshot,
+  type DAOAgent,
+  type DAOConfig,
+  type ProposalType,
+  TYPE_QUORUM,
+} from "../types/index.js";
 
 export interface AmendmentValidation {
   valid: boolean;
@@ -118,8 +125,7 @@ export function previewAmendment(payload: AmendmentPayload): AmendmentPreviewDif
       for (const [key, value] of Object.entries(payload.changes)) {
         diffs.push({
           field: `${agent.id}.${key}`,
-          // biome-ignore lint/suspicious/noExplicitAny: dynamic property access for diff comparison
-          before: String((agent as any)[key] ?? "(not set)"),
+          before: String(agent[key as keyof DAOAgent] ?? "(not set)"),
           after: String(value),
         });
       }
@@ -146,8 +152,7 @@ export function previewAmendment(payload: AmendmentPayload): AmendmentPreviewDif
       for (const [key, value] of Object.entries(payload.changes)) {
         diffs.push({
           field: `config.${key}`,
-          // biome-ignore lint/suspicious/noExplicitAny: dynamic property access for diff comparison
-          before: String((state.config as any)[key] ?? "(not set)"),
+          before: String(state.config[key as keyof DAOConfig] ?? "(not set)"),
           after: String(value),
         });
       }
@@ -225,11 +230,12 @@ export function executeAmendment(payload: AmendmentPayload): AmendmentExecutionR
       }
       case "quorum-update": {
         for (const [type, quorum] of Object.entries(payload.typeQuorum)) {
-          state.config.typeQuorum[type as keyof typeof state.config.typeQuorum] = {
-            ...state.config.typeQuorum[type as keyof typeof state.config.typeQuorum],
+          const proposalType = type as ProposalType;
+          const currentQuorum = state.config.typeQuorum[proposalType] || TYPE_QUORUM[proposalType];
+          state.config.typeQuorum[proposalType] = {
+            ...currentQuorum,
             ...quorum,
-            // biome-ignore lint/suspicious/noExplicitAny: partial spread of quorum settings
-          } as any;
+          };
         }
         break;
       }
