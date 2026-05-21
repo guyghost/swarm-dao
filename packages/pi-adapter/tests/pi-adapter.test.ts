@@ -23,7 +23,7 @@ interface MockCommand {
   name: string;
   description: string;
   // biome-ignore lint/suspicious/noExplicitAny: mock interface for test command handler
-  handler: (...args: any[]) => Promise<void>;
+  handler: (...args: any[]) => Promise<string | void>;
 }
 
 interface MockEvent {
@@ -204,6 +204,34 @@ describe("swarmDaoExtension", () => {
       expect(daoCommand).toBeDefined();
       expect(typeof daoCommand?.handler).toBe("function");
       expect(typeof daoCommand?.description).toBe("string");
+    });
+
+    it("/dao command returns uninitialized message when DAO is not set up", async () => {
+      const mod = await import("@guyghost/swarm-dao-pi-adapter");
+      const pi = createMockPi();
+      mod.default(pi);
+
+      const daoCommand = pi.commands.find((c) => c.name === "/dao");
+      const result = await daoCommand?.handler("", {});
+      expect(result).toContain("DAO not initialized");
+    });
+
+    it("/dao command returns dashboard when DAO is initialized", async () => {
+      const { initStorage, setState, getOrCreateState, initializeAgents } = await import("@guyghost/swarm-dao-core");
+      await initStorage(process.cwd());
+      const state = getOrCreateState(process.cwd());
+      state.initialized = true;
+      state.agents = initializeAgents();
+      setState(state);
+
+      const mod = await import("@guyghost/swarm-dao-pi-adapter");
+      const pi = createMockPi();
+      mod.default(pi);
+
+      const daoCommand = pi.commands.find((c) => c.name === "/dao");
+      const result = await daoCommand?.handler("", {});
+      expect(result).toContain("# Swarm DAO Dashboard");
+      expect(result).toContain(`Agents: ${state.agents.length}`);
     });
   });
 

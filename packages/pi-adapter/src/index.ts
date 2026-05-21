@@ -665,10 +665,15 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
   pi.registerCommand("/dao", {
     description: "Show DAO dashboard",
     handler: async (_args, _ctx) => {
-      const state = getState();
+      let state;
+      try {
+        state = getState();
+      } catch {
+        return "DAO not initialized. Run `dao_setup`.";
+      }
+
       if (!state.initialized) {
-        console.log("DAO not initialized. Run `dao_setup`.");
-        return;
+        return "DAO not initialized. Run `dao_setup`.";
       }
 
       const byStatus: Record<string, number> = {};
@@ -676,11 +681,12 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
         byStatus[p.status] = (byStatus[p.status] ?? 0) + 1;
       }
 
-      console.log(`# Swarm DAO Dashboard`);
-      console.log(`Agents: ${state.agents.length} | Proposals: ${state.proposals.length}`);
+      let output = `# Swarm DAO Dashboard\n`;
+      output += `Agents: ${state.agents.length} | Proposals: ${state.proposals.length}\n`;
       for (const [status, count] of Object.entries(byStatus)) {
-        console.log(`  ${status}: ${count}`);
+        output += `  ${status}: ${count}\n`;
       }
+      return output.trim();
     },
   });
 }

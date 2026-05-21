@@ -22,7 +22,10 @@ declare module "@earendil-works/pi-coding-agent" {
     }): void;
     registerCommand(
       name: string,
-      command: { description: string; handler: (args: string, ctx: ExtensionCommandContext) => Promise<void> },
+      command: {
+        description: string;
+        handler: (args: string, ctx: ExtensionCommandContext) => Promise<string | void>;
+      },
     ): void;
     on(
       event: "session_start" | "session_tree" | "before_agent_start",
