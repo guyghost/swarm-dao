@@ -143,6 +143,73 @@ function toolResult(content: string): {
   };
 }
 
+// ── Parameter Interfaces ─────────────────────────────────────
+
+interface DaoSetupParams {
+  useDefaults?: boolean;
+}
+
+interface DaoProposeParams {
+  title: string;
+  type: string;
+  description: string;
+  context?: string;
+  problemStatement?: string;
+  acceptanceCriteria?: string[];
+  successMetrics?: string[];
+  rollbackConditions?: string[];
+}
+
+interface DaoDeliberateParams {
+  proposalId: number;
+}
+
+interface DaoCheckParams {
+  proposalId: number;
+}
+
+interface DaoPlanParams {
+  proposalId: number;
+}
+
+interface DaoExecuteParams {
+  proposalId: number;
+}
+
+interface DaoAuditParams {
+  proposalId?: number;
+}
+
+interface DaoArtefactsParams {
+  proposalId: number;
+}
+
+interface DaoRateParams {
+  proposalId: number;
+  score: number;
+  comment: string;
+}
+
+interface DaoDashboardParams {}
+
+interface DaoDryRunParams {
+  proposalId: number;
+}
+
+interface DaoRollbackParams {
+  proposalId: number;
+}
+
+interface DaoRoundtableParams {}
+
+interface DaoUpdateProposalParams {
+  proposalId: number;
+  problemStatement?: string;
+  acceptanceCriteria?: string[];
+  successMetrics?: string[];
+  rollbackConditions?: string[];
+}
+
 // ── Main Extension Export ────────────────────────────────────
 
 export default function swarmDaoExtension(pi: ExtensionAPI) {
@@ -195,7 +262,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
     parameters: Type.Object({
       useDefaults: Type.Optional(Type.Boolean({ description: "Use default agents (default: true)" })),
     }),
-    async execute(_id, params: any) {
+    async execute(_id, params: DaoSetupParams) {
       const state = getState();
       if (state.initialized) {
         return toolResult(`DAO already initialized with ${state.agents.length} agents.`);
@@ -228,7 +295,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
       successMetrics: Type.Optional(Type.Array(Type.String())),
       rollbackConditions: Type.Optional(Type.Array(Type.String())),
     }),
-    async execute(_id, params: any) {
+    async execute(_id, params: DaoProposeParams) {
       const state = getState();
       if (!state.initialized) return toolResult("DAO not initialized. Run `dao_setup` first.");
 
@@ -259,7 +326,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
     parameters: Type.Object({
       proposalId: Type.Number(),
     }),
-    async execute(_id, params: any, _signal, onUpdate, ctx) {
+    async execute(_id, params: DaoDeliberateParams, _signal, onUpdate, ctx) {
       const state = getState();
       if (!state.initialized) return toolResult("DAO not initialized.");
 
@@ -362,7 +429,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
     label: "DAO Check",
     description: "Run quality control gates",
     parameters: Type.Object({ proposalId: Type.Number() }),
-    async execute(_id, params: any) {
+    async execute(_id, params: DaoCheckParams) {
       const state = getState();
       if (!state.initialized) return toolResult("DAO not initialized.");
 
@@ -391,7 +458,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
     label: "DAO Plan",
     description: "Get delivery plan",
     parameters: Type.Object({ proposalId: Type.Number() }),
-    async execute(_id, params: any) {
+    async execute(_id, params: DaoPlanParams) {
       const plan = getPlan(params.proposalId);
       if (!plan) return toolResult("No plan yet. Run deliberation first.");
       return toolResult(formatPlan(plan));
@@ -404,7 +471,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
     label: "DAO Execute",
     description: "Execute a controlled proposal",
     parameters: Type.Object({ proposalId: Type.Number() }),
-    async execute(_id, params: any) {
+    async execute(_id, params: DaoExecuteParams) {
       const _state = getState();
       const proposal = getProposal(params.proposalId);
       if (!proposal) return toolResult(`Proposal #${params.proposalId} not found.`);
@@ -428,7 +495,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
     label: "DAO Audit",
     description: "View audit trail",
     parameters: Type.Object({ proposalId: Type.Optional(Type.Number()) }),
-    async execute(_id, params: any) {
+    async execute(_id, params: DaoAuditParams) {
       const entries =
         params.proposalId !== undefined
           ? getAllAuditLog().filter((e) => e.proposalId === params.proposalId)
@@ -443,7 +510,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
     label: "DAO Artefacts",
     description: "View auto-generated artefacts for a proposal",
     parameters: Type.Object({ proposalId: Type.Number() }),
-    async execute(_id, params: any) {
+    async execute(_id, params: DaoArtefactsParams) {
       const proposal = getProposal(Number(params.proposalId));
       if (!proposal) return toolResult(`Proposal #${params.proposalId} not found.`);
       const artefacts = generateAllArtefacts(proposal);
@@ -461,7 +528,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
       score: Type.Number({ minimum: 1, maximum: 5 }),
       comment: Type.String(),
     }),
-    async execute(_id, params: any) {
+    async execute(_id, params: DaoRateParams) {
       const proposal = getProposal(Number(params.proposalId));
       if (!proposal) return toolResult(`Proposal #${params.proposalId} not found.`);
       if (proposal.status !== "executed")
@@ -488,7 +555,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
     label: "DAO Dashboard",
     description: "View outcome tracking dashboard",
     parameters: Type.Object({}),
-    async execute(_id, _params: any) {
+    async execute(_id, _params: DaoDashboardParams) {
       const state = getState();
       if (!state.initialized) return toolResult("DAO not initialized.");
       const dashboard = generateDashboard(state.proposals, state.outcomes, state.agents);
@@ -503,7 +570,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
     label: "DAO Dry Run",
     description: "Preview execution without applying changes",
     parameters: Type.Object({ proposalId: Type.Number() }),
-    async execute(_id, params: any) {
+    async execute(_id, params: DaoDryRunParams) {
       const proposal = getProposal(Number(params.proposalId));
       if (!proposal) return toolResult(`Proposal #${params.proposalId} not found.`);
       const result = performDryRun(proposal);
@@ -520,7 +587,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
     label: "DAO Rollback",
     description: "Revert proposal execution to pre-execution snapshot",
     parameters: Type.Object({ proposalId: Type.Number() }),
-    async execute(_id, params: any) {
+    async execute(_id, params: DaoRollbackParams) {
       const result = performRollback(Number(params.proposalId));
       await saveState();
       return toolResult(formatRollback(result));
@@ -533,7 +600,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
     label: "DAO Roundtable",
     description: "Ask every agent to suggest a proposal idea",
     parameters: Type.Object({}),
-    async execute(_id, _params: any, _signal, _onUpdate, ctx) {
+    async execute(_id, _params: DaoRoundtableParams, _signal, _onUpdate, ctx) {
       const state = getState();
       if (!state.initialized) return toolResult("DAO not initialized.");
 
@@ -579,7 +646,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
       successMetrics: Type.Optional(Type.Array(Type.String())),
       rollbackConditions: Type.Optional(Type.Array(Type.String())),
     }),
-    async execute(_id, params: any) {
+    async execute(_id, params: DaoUpdateProposalParams) {
       const proposal = getProposal(Number(params.proposalId));
       if (!proposal) return toolResult(`Proposal #${params.proposalId} not found.`);
       if (proposal.status !== "open") return toolResult(`Must be open (current: ${proposal.status})`);
