@@ -18,11 +18,10 @@ const AXIS_PATTERNS: Record<keyof AxisScore, RegExp> = {
 
 export function parseScoresFromOutput(content: string): Partial<AxisScore> {
   const scores: Partial<AxisScore> = {};
-  for (const [axis, pattern] of Object.entries(AXIS_PATTERNS)) {
+  for (const [axis, pattern] of Object.entries(AXIS_PATTERNS) as [keyof AxisScore, RegExp][]) {
     const match = content?.match(pattern);
     if (match) {
-      // biome-ignore lint/suspicious/noExplicitAny: dynamic axis key assignment on partial record
-      (scores as any)[axis] = Math.min(10, Math.max(0, parseFloat(match[1] ?? "0")));
+      scores[axis] = Math.min(10, Math.max(0, parseFloat(match[1] ?? "0")));
     }
   }
   return scores;
