@@ -3,7 +3,14 @@
 // ============================================================
 
 import { getState } from "../persistence.js";
-import type { AmendmentPayload, AmendmentSnapshot, TypeQuorumConfig } from "../types/index.js";
+import {
+  type AmendmentPayload,
+  type AmendmentSnapshot,
+  type DAOAgent,
+  type DAOConfig,
+  type ProposalType,
+  TYPE_QUORUM,
+} from "../types/index.js";
 
 export interface AmendmentValidation {
   valid: boolean;
@@ -118,7 +125,7 @@ export function previewAmendment(payload: AmendmentPayload): AmendmentPreviewDif
       for (const [key, value] of Object.entries(payload.changes)) {
         diffs.push({
           field: `${agent.id}.${key}`,
-          before: String(agent[key as keyof typeof agent] ?? "(not set)"),
+          before: String(agent[key as keyof DAOAgent] ?? "(not set)"),
           after: String(value),
         });
       }
@@ -145,7 +152,7 @@ export function previewAmendment(payload: AmendmentPayload): AmendmentPreviewDif
       for (const [key, value] of Object.entries(payload.changes)) {
         diffs.push({
           field: `config.${key}`,
-          before: String(state.config[key as keyof typeof state.config] ?? "(not set)"),
+          before: String(state.config[key as keyof DAOConfig] ?? "(not set)"),
           after: String(value),
         });
       }
@@ -223,11 +230,12 @@ export function executeAmendment(payload: AmendmentPayload): AmendmentExecutionR
       }
       case "quorum-update": {
         for (const [type, quorum] of Object.entries(payload.typeQuorum)) {
-          const current = state.config.typeQuorum[type as keyof typeof state.config.typeQuorum];
-          state.config.typeQuorum[type as keyof typeof state.config.typeQuorum] = {
-            ...current,
+          const proposalType = type as ProposalType;
+          const currentQuorum = state.config.typeQuorum[proposalType] || TYPE_QUORUM[proposalType];
+          state.config.typeQuorum[proposalType] = {
+            ...currentQuorum,
             ...quorum,
-          } as TypeQuorumConfig;
+          };
         }
         break;
       }
