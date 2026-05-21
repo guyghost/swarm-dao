@@ -24,33 +24,33 @@ describe("persistence", () => {
     setState(state);
   });
 
-  it("creates and retrieves proposals", () => {
-    const p1 = createProposal("Feature A", "product-feature", "Add A", "user");
+  it("creates and retrieves proposals", async () => {
+    const p1 = await createProposal("Feature A", "product-feature", "Add A", "user");
     expect(p1.id).toBe(1);
 
-    const p2 = createProposal("Feature B", "product-feature", "Add B", "user");
+    const p2 = await createProposal("Feature B", "product-feature", "Add B", "user");
     expect(p2.id).toBe(2);
 
     expect(getProposal(1)?.title).toBe("Feature A");
     expect(listProposals().length).toBe(2);
   });
 
-  it("adds votes", () => {
-    const p = createProposal("Vote test", "product-feature", "Test", "user");
-    addVote(p.id, { agentId: "a", agentName: "A", position: "for", reasoning: "Yes", weight: 3 });
+  it("adds votes", async () => {
+    const p = await createProposal("Vote test", "product-feature", "Test", "user");
+    await addVote(p.id, { agentId: "a", agentName: "A", position: "for", reasoning: "Yes", weight: 3 });
     expect(getProposal(p.id)?.votes.length).toBe(1);
   });
 
-  it("updates proposal status", () => {
-    const p = createProposal("Status test", "product-feature", "Test", "user");
-    updateProposalStatus(p.id, "executed");
+  it("updates proposal status", async () => {
+    const p = await createProposal("Status test", "product-feature", "Test", "user");
+    await updateProposalStatus(p.id, "executed");
     expect(getProposal(p.id)?.status).toBe("executed");
     expect(getProposal(p.id)?.resolvedAt).toBeDefined();
   });
 
-  it("records audit entries", () => {
-    const p = createProposal("Audit test", "product-feature", "Test", "user");
-    recordAudit(p.id, "governance", "test_action", "user", "details");
+  it("records audit entries", async () => {
+    const p = await createProposal("Audit test", "product-feature", "Test", "user");
+    await recordAudit(p.id, "governance", "test_action", "user", "details");
     const entries = getAuditLog(p.id);
     expect(entries.length).toBe(1);
     expect(entries[0].action).toBe("test_action");

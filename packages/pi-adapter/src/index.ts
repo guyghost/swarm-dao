@@ -299,7 +299,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
       const state = getState();
       if (!state.initialized) return toolResult("DAO not initialized. Run `dao_setup` first.");
 
-      const proposal = createProposal(params.title, params.type, params.description, "user", params.context);
+      const proposal = await createProposal(params.title, params.type, params.description, "user", params.context);
       proposal.problemStatement = params.problemStatement;
       if (params.acceptanceCriteria) proposal.acceptanceCriteria = params.acceptanceCriteria;
       if (params.successMetrics) proposal.successMetrics = params.successMetrics;
@@ -309,7 +309,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
       proposal.riskZone = zone;
       await saveState();
 
-      recordAudit(proposal.id, "governance", "proposal_created", "user", `Proposal "${params.title}" created`);
+      await recordAudit(proposal.id, "governance", "proposal_created", "user", `Proposal "${params.title}" created`);
       await saveState();
 
       return toolResult(
@@ -339,7 +339,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
       const transition = transitionProposal(proposal, "deliberate");
       if (!transition.success) return toolResult(`Cannot deliberate: ${transition.error}`);
 
-      recordAudit(proposal.id, "governance", "deliberation_started", "system", `Deliberation on #${proposal.id}`);
+      await recordAudit(proposal.id, "governance", "deliberation_started", "system", `Deliberation on #${proposal.id}`);
       await saveState();
 
       if (onUpdate) {
@@ -375,28 +375,28 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
           if (vote) {
             vote.weight = state.agents.find((a) => a.id === output.agentId)?.weight ?? 1;
             votes.push(vote);
-            addVote(proposal.id, vote);
+            await addVote(proposal.id, vote);
           }
         }
-        storeAgentOutput(proposal.id, output);
+        await storeAgentOutput(proposal.id, output);
       }
       proposal.votes = votes;
 
       // Composite score
       const compositeScore = calculateCompositeScore(outputs);
       proposal.compositeScore = compositeScore;
-      storeCompositeScore(proposal.id, compositeScore);
+      await storeCompositeScore(proposal.id, compositeScore);
 
       // Synthesis
       const tally = tallyVotes(proposal, state.config);
       const synthesisText = synthesize(proposal, state.agents, outputs, tally);
       proposal.synthesis = synthesisText;
-      storeSynthesis(proposal.id, synthesisText);
+      await storeSynthesis(proposal.id, synthesisText);
 
       // Final transition
       if (tally.approved) {
         transitionProposal(proposal, "approve");
-        recordAudit(
+        await recordAudit(
           proposal.id,
           "intelligence",
           "deliberation_approved",
@@ -405,7 +405,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
         );
       } else {
         transitionProposal(proposal, "reject");
-        recordAudit(
+        await recordAudit(
           proposal.id,
           "intelligence",
           "deliberation_rejected",
@@ -441,10 +441,10 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
 
       if (result.allGatesPassed) {
         transitionProposal(proposal, "control");
-        recordAudit(proposal.id, "control", "gates_passed", "system", "All gates passed");
+        await recordAudit(proposal.id, "control", "gates_passed", "system", "All gates passed");
       } else {
         transitionProposal(proposal, "fail");
-        recordAudit(proposal.id, "control", "gates_failed", "system", `${result.blockerCount} blockers`);
+        await recordAudit(proposal.id, "control", "gates_failed", "system", `${result.blockerCount} blockers`);
       }
 
       await saveState();
@@ -479,10 +479,10 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
         return toolResult(`Must be approved or controlled (current: ${proposal.status})`);
       }
 
-      const result = executeProposal(proposal);
+      const result = await executeProposal(proposal);
       await saveState();
 
-      recordAudit(proposal.id, "delivery", "proposal_executed", "user", `Executed #${proposal.id}`);
+      await recordAudit(proposal.id, "delivery", "proposal_executed", "user", `Executed #${proposal.id}`);
       await saveState();
 
       return toolResult(result.result);
@@ -535,7 +535,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
         return toolResult(`Proposal #${proposal.id} is ${proposal.status}, must be executed.`);
 
       const { addRating } = await import("@guyghost/swarm-dao-core");
-      addRating(proposal.id, {
+      await addRating(proposal.id, {
         proposalId: proposal.id,
         rater: "user",
         score: Number(params.score) as 1 | 2 | 3 | 4 | 5,
@@ -573,7 +573,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
     async execute(_id, params: DaoDryRunParams) {
       const proposal = getProposal(Number(params.proposalId));
       if (!proposal) return toolResult(`Proposal #${params.proposalId} not found.`);
-      const result = performDryRun(proposal);
+      const result = await performDryRun(proposal);
       proposal.dryRunAt = new Date().toISOString();
       proposal.dryRunCanProceed = result.canProceed;
       await saveState();
@@ -612,11 +612,11 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
       for (const s of suggestions) {
         if (!s.parsed) continue;
         try {
-          const proposal = createProposal(s.parsed.title, s.parsed.type, s.parsed.description, s.agentId);
+          const proposal = await createProposal(s.parsed.title, s.parsed.type, s.parsed.description, s.agentId);
           proposal.riskZone = classifyRiskZone(proposal);
           s.proposalId = proposal.id;
           proposalIds.set(s.agentId, proposal.id);
-          recordAudit(
+          await recordAudit(
             proposal.id,
             "intelligence",
             "roundtable_proposal_created",

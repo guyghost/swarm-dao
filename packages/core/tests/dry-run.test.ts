@@ -17,7 +17,7 @@ describe("delivery/dry-run", () => {
     setState(state);
   });
 
-  it("performs dry-run on proposal", () => {
+  it("performs dry-run on proposal", async () => {
     const proposal = {
       id: 1,
       title: "Add feature",
@@ -31,14 +31,14 @@ describe("delivery/dry-run", () => {
       createdAt: "",
     };
 
-    const result = performDryRun(proposal);
+    const result = await performDryRun(proposal);
     expect(result.proposalId).toBe(1);
     expect(result.filesAffected).toContain("src/feature.ts");
     expect(result.canProceed).toBe(true);
     expect(result.estimatedDuration).toBe("3-7 days");
   });
 
-  it("detects risks in red-zone proposals", () => {
+  it("detects risks in red-zone proposals", async () => {
     const proposal = {
       id: 1,
       title: "Auth change",
@@ -52,13 +52,13 @@ describe("delivery/dry-run", () => {
       createdAt: "",
     };
 
-    const result = performDryRun(proposal);
+    const result = await performDryRun(proposal);
     expect(result.risks.length).toBeGreaterThan(0);
     expect(result.risks.some((r) => r.includes("Red-zone"))).toBe(true);
   });
 
-  it("formats dry-run result", () => {
-    const result = performDryRun({
+  it("formats dry-run result", async () => {
+    const result = await performDryRun({
       id: 1,
       title: "Test",
       type: "product-feature",
@@ -74,9 +74,9 @@ describe("delivery/dry-run", () => {
     expect(formatted).toContain("Can Proceed");
   });
 
-  it("checks rollback availability", () => {
+  it("checks rollback availability", async () => {
     expect(canRollback(1)).toBe(false);
-    captureSnapshot(1, {
+    await captureSnapshot(1, {
       proposalId: 1,
       timestamp: "",
       branch: "main",
@@ -87,8 +87,8 @@ describe("delivery/dry-run", () => {
     expect(canRollback(1)).toBe(true);
   });
 
-  it("performs rollback", () => {
-    captureSnapshot(1, {
+  it("performs rollback", async () => {
+    await captureSnapshot(1, {
       proposalId: 1,
       timestamp: "",
       branch: "main",

@@ -178,7 +178,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
           const instructions = buildDispatchInstructions(proposal, state.agents);
           const plan = `## 🐝 Dispatch Plan — Proposal #${proposal.id}\n\n${instructions.map((inst) => `### @${inst.agentId}\n${inst.prompt.slice(0, 300)}...\n`).join("\n")}\n\nAfter collecting outputs, run \`dao_record_outputs proposalId=${proposal.id} outputs=[...]\``;
 
-          recordAudit(
+          await recordAudit(
             proposal.id,
             "intelligence",
             "deliberation_dispatched",
@@ -234,10 +234,10 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
             if (vote) {
               output.vote = vote;
               votes.push(vote);
-              addVote(proposal.id, vote);
+              await addVote(proposal.id, vote);
             }
 
-            storeAgentOutput(proposal.id, output);
+            await storeAgentOutput(proposal.id, output);
             enrichedOutputs.push(output);
           }
 
@@ -245,17 +245,17 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
 
           const compositeScore = calculateCompositeScore(enrichedOutputs);
           proposal.compositeScore = compositeScore;
-          storeCompositeScore(proposal.id, compositeScore);
+          await storeCompositeScore(proposal.id, compositeScore);
 
           const synthesisText = synthesize(proposal, state.agents, enrichedOutputs);
           proposal.synthesis = synthesisText;
-          storeSynthesis(proposal.id, synthesisText);
+          await storeSynthesis(proposal.id, synthesisText);
 
           const tally = tallyVotes(proposal, state.config);
 
           if (tally.approved) {
             transitionProposal(proposal, "approve");
-            recordAudit(
+            await recordAudit(
               proposal.id,
               "intelligence",
               "deliberation_approved",
@@ -264,7 +264,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
             );
           } else {
             transitionProposal(proposal, "reject");
-            recordAudit(
+            await recordAudit(
               proposal.id,
               "intelligence",
               "deliberation_rejected",
@@ -295,9 +295,9 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
 
           if (result.allGatesPassed) {
             transitionProposal(proposal, "control");
-            recordAudit(proposal.id, "control", "gates_passed", "system", "All gates passed");
+            await recordAudit(proposal.id, "control", "gates_passed", "system", "All gates passed");
           } else {
-            recordAudit(proposal.id, "control", "gates_failed", "system", `${result.blockerCount} blockers`);
+            await recordAudit(proposal.id, "control", "gates_failed", "system", `${result.blockerCount} blockers`);
           }
 
           await saveState();
@@ -317,10 +317,10 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
             return `Must be approved or controlled (current: ${proposal.status})`;
           }
 
-          const result = executeProposal(proposal);
+          const result = await executeProposal(proposal);
           await saveState();
 
-          recordAudit(proposal.id, "delivery", "proposal_executed", "user", `Executed #${proposal.id}`);
+          await recordAudit(proposal.id, "delivery", "proposal_executed", "user", `Executed #${proposal.id}`);
           await saveState();
 
           return result.result;
@@ -385,7 +385,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
         async execute(args: any, _context: any) {
           const proposal = getProposal(args.proposalId);
           if (!proposal) return `Proposal #${args.proposalId} not found.`;
-          const result = performDryRun(proposal);
+          const result = await performDryRun(proposal);
           proposal.dryRunAt = new Date().toISOString();
           proposal.dryRunCanProceed = result.canProceed;
           await saveState();
@@ -432,11 +432,11 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
           for (const s of suggestions) {
             if (!s.parsed) continue;
             try {
-              const proposal = createProposal(s.parsed.title, s.parsed.type, s.parsed.description, s.agentId);
+              const proposal = await createProposal(s.parsed.title, s.parsed.type, s.parsed.description, s.agentId);
               proposal.riskZone = classifyRiskZone(proposal);
               s.proposalId = proposal.id;
               proposalIds.set(s.agentId, proposal.id);
-              recordAudit(
+              await recordAudit(
                 proposal.id,
                 "intelligence",
                 "roundtable_proposal_created",
@@ -534,14 +534,14 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
           const validation = validateAmendmentPayload(payload);
           if (!validation.valid) return `❌ Validation failed:\n${validation.errors.join("\n")}`;
 
-          const proposal = createProposal(args.title, "governance-change", args.description, "user");
+          const proposal = await createProposal(args.title, "governance-change", args.description, "user");
           proposal.amendmentPayload = payload;
           proposal.amendmentOrigin = { source: "human" };
           proposal.amendmentState = "pending-vote";
           proposal.riskZone = classifyRiskZone(proposal);
           await saveState();
 
-          recordAudit(proposal.id, "governance", "amendment_proposed", "user", `Amendment: ${payload.type}`);
+          await recordAudit(proposal.id, "governance", "amendment_proposed", "user", `Amendment: ${payload.type}`);
           await saveState();
 
           return `# 📜 Amendment Proposed — #${proposal.id}\n\nType: ${payload.type}\n\nRun \`dao_deliberate proposalId=${proposal.id}\``;
