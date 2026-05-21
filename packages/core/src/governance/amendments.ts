@@ -3,7 +3,7 @@
 // ============================================================
 
 import { getState } from "../persistence.js";
-import type { AmendmentPayload, AmendmentSnapshot } from "../types/index.js";
+import type { AmendmentPayload, AmendmentSnapshot, TypeQuorumConfig } from "../types/index.js";
 
 export interface AmendmentValidation {
   valid: boolean;
@@ -118,8 +118,7 @@ export function previewAmendment(payload: AmendmentPayload): AmendmentPreviewDif
       for (const [key, value] of Object.entries(payload.changes)) {
         diffs.push({
           field: `${agent.id}.${key}`,
-          // biome-ignore lint/suspicious/noExplicitAny: dynamic property access for diff comparison
-          before: String((agent as any)[key] ?? "(not set)"),
+          before: String(agent[key as keyof typeof agent] ?? "(not set)"),
           after: String(value),
         });
       }
@@ -146,8 +145,7 @@ export function previewAmendment(payload: AmendmentPayload): AmendmentPreviewDif
       for (const [key, value] of Object.entries(payload.changes)) {
         diffs.push({
           field: `config.${key}`,
-          // biome-ignore lint/suspicious/noExplicitAny: dynamic property access for diff comparison
-          before: String((state.config as any)[key] ?? "(not set)"),
+          before: String(state.config[key as keyof typeof state.config] ?? "(not set)"),
           after: String(value),
         });
       }
@@ -225,11 +223,11 @@ export function executeAmendment(payload: AmendmentPayload): AmendmentExecutionR
       }
       case "quorum-update": {
         for (const [type, quorum] of Object.entries(payload.typeQuorum)) {
+          const current = state.config.typeQuorum[type as keyof typeof state.config.typeQuorum];
           state.config.typeQuorum[type as keyof typeof state.config.typeQuorum] = {
-            ...state.config.typeQuorum[type as keyof typeof state.config.typeQuorum],
+            ...current,
             ...quorum,
-            // biome-ignore lint/suspicious/noExplicitAny: partial spread of quorum settings
-          } as any;
+          } as TypeQuorumConfig;
         }
         break;
       }
