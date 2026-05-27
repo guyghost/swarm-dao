@@ -304,11 +304,11 @@ export async function saveDecisions(): Promise<void> {
 
 // ── Storage Settings ─────────────────────────────────────────
 
-export function getStorageSettings(daoRoot: string): StorageSettings {
+export async function getStorageSettings(daoRoot: string): Promise<StorageSettings> {
   const configPath = path.join(daoRoot, CONFIG_FILE);
   try {
-    const data = fs.readFile(configPath, "utf-8").then(JSON.parse);
-    return data as unknown as StorageSettings;
+    const raw = await fs.readFile(configPath, "utf-8");
+    return JSON.parse(raw) as StorageSettings;
   } catch {
     return { mode: "local", githubSyncEnabled: false, daoRoot };
   }
@@ -318,7 +318,7 @@ export async function updateStorageSettings(
   daoRoot: string,
   updates: Partial<StorageSettings>,
 ): Promise<StorageSettings> {
-  const current = getStorageSettings(daoRoot);
+  const current = await getStorageSettings(daoRoot);
   const next = { ...current, ...updates };
   const configPath = path.join(daoRoot, CONFIG_FILE);
   await fs.mkdir(daoRoot, { recursive: true });

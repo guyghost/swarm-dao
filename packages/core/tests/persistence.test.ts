@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import { promises as fs } from "node:fs";
+import path from "node:path";
 import {
   addVote,
   createInitialState,
@@ -8,6 +9,7 @@ import {
   getDaoRoot,
   getProposal,
   getState,
+  getStorageSettings,
   initStorage,
   listProposals,
   loadState,
@@ -15,6 +17,7 @@ import {
   recordAudit,
   setState,
   updateProposalStatus,
+  updateStorageSettings,
 } from "@guyghost/swarm-dao-core";
 
 describe("persistence", () => {
@@ -101,6 +104,86 @@ describe("persistence", () => {
     } finally {
       // Clean up temp directory and reset state
       setState(null);
+      await fs.rm(cwd, { recursive: true, force: true }).catch(() => {});
+    }
+  });
+
+  // ── Storage Settings regression tests ──────────────────────────
+
+  /**
+   * OpenSpec Scenario: getStorageSettings reads config.json and returns StorageSettings
+   *
+   * GIVEN a DAO root with a .dao/config.json containing valid StorageSettings
+   * WHEN calling getStorageSettings(daoRoot) synchronously
+   * THEN the returned value should be a plain StorageSettings object, not a Promise
+   *   AND mode should equal "github" (before fix, it is undefined because the return
+   *   is a Promise cast as StorageSettings)
+   *
+   * NOTE: After the fix, getStorageSettings becomes async. This test should be
+   * updated to await the result. For now, it asserts the bug: sync access yields
+   * undefined because the function silently returns a Promise.
+   */
+  it("getStorageSettings returns real StorageSettings, not a Promise cast", async () => {
+    const cwd = `/tmp/dao-storage-settings-test-${Date.now()}`;
+    const daoRoot = getDaoRoot(cwd);
+
+    try {
+      // ARRANGE: create .dao/ dir and write valid config.json
+      await fs.mkdir(daoRoot, { recursive: true });
+      const persisted = {
+        mode: "github",
+        githubSyncEnabled: true,
+        daoRoot,
+        githubRepo: "test/repo",
+      };
+      await fs.writeFile(path.join(daoRoot, "config.json"), JSON.stringify(persisted, null, 2), "utf-8");
+
+      // ACT: call async (fixed — was returning Promise cast as StorageSettings)
+      const result = await getStorageSettings(daoRoot);
+
+      // ASSERT: resolved value is a plain StorageSettings object
+      expect(result).toMatchObject({
+        mode: "github",
+        githubSyncEnabled: true,
+        githubRepo: "test/repo",
+      });
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true }).catch(() => {});
+    }
+  });
+
+  /**
+   * OpenSpec Scenario: updateStorageSettings persists and reads back correctly
+   *
+   * GIVEN an empty DAO root (no config.json yet)
+   * WHEN calling updateStorageSettings with partial overrides
+   * THEN getStorageSettings returns the merged values after the round-trip
+   */
+  it("updateStorageSettings round-trips with getStorageSettings", async () => {
+    const cwd = `/tmp/dao-storage-roundtrip-test-${Date.now()}`;
+    const daoRoot = getDaoRoot(cwd);
+
+    try {
+      // ACT: write settings via updateStorageSettings
+      const written = await updateStorageSettings(daoRoot, {
+        mode: "github",
+        githubSyncEnabled: true,
+        githubRepo: "roundtrip/repo",
+      });
+
+      // ASSERT: the returned object has the right values
+      expect(written.mode).toBe("github");
+      expect(written.githubSyncEnabled).toBe(true);
+      expect(written.githubRepo).toBe("roundtrip/repo");
+
+      // ACT: read them back
+      const read = await getStorageSettings(daoRoot);
+
+      // ASSERT: persisted values survive the round-trip
+      expect(read.mode).toBe("github");
+      expect(read.githubSyncEnabled).toBe(true);
+      expect(read.githubRepo).toBe("roundtrip/repo");
+    } finally {
       await fs.rm(cwd, { recursive: true, force: true }).catch(() => {});
     }
   });
