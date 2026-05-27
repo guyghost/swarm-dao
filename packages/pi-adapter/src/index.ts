@@ -190,7 +190,7 @@ interface DaoRateParams {
   comment: string;
 }
 
-interface DaoDashboardParams {}
+type DaoDashboardParams = Record<string, never>;
 
 interface DaoDryRunParams {
   proposalId: number;
@@ -200,7 +200,7 @@ interface DaoRollbackParams {
   proposalId: number;
 }
 
-interface DaoRoundtableParams {}
+type DaoRoundtableParams = Record<string, never>;
 
 interface DaoUpdateProposalParams {
   proposalId: number;
@@ -665,7 +665,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
   pi.registerCommand("/dao", {
     description: "Show DAO dashboard",
     handler: async (_args, _ctx) => {
-      let state;
+      let state: ReturnType<typeof getState>;
       try {
         state = getState();
       } catch {

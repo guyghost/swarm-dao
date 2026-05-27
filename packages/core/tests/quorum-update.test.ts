@@ -1,12 +1,6 @@
 import { beforeEach, describe, expect, it } from "bun:test";
-import {
-  createInitialState,
-  executeAmendment,
-  getState,
-  setState,
-  previewAmendment,
-} from "@guyghost/swarm-dao-core";
-import { ProposalType, DAOAgent } from "../src/types/index.js";
+import { createInitialState, executeAmendment, getState, previewAmendment, setState } from "@guyghost/swarm-dao-core";
+import type { DAOAgent, ProposalType } from "../src/types/index.js";
 
 describe("governance/amendments code health", () => {
   beforeEach(() => {
@@ -34,8 +28,8 @@ describe("governance/amendments code health", () => {
       const payload = {
         type: "quorum-update" as const,
         typeQuorum: {
-          [type]: changes
-        }
+          [type]: changes,
+        },
       };
 
       const before = getState().config.typeQuorum[type];
@@ -62,8 +56,8 @@ describe("governance/amendments code health", () => {
       const payload = {
         type: "quorum-update" as const,
         typeQuorum: {
-          [type]: changes
-        }
+          [type]: changes,
+        },
       };
 
       const result = executeAmendment(payload);
@@ -80,7 +74,7 @@ describe("governance/amendments code health", () => {
       const payload = {
         type: "agent-update" as const,
         agentId: "strategist",
-        changes: { weight: 5, role: "new role" }
+        changes: { weight: 5, role: "new role" },
       };
 
       const diffs = previewAmendment(payload);
@@ -91,7 +85,7 @@ describe("governance/amendments code health", () => {
     it("previews config-update correctly", () => {
       const payload = {
         type: "config-update" as const,
-        changes: { quorumPercent: 75 }
+        changes: { quorumPercent: 75 },
       };
 
       const diffs = previewAmendment(payload);

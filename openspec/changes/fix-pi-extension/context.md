@@ -61,3 +61,18 @@ Fix critical runtime errors in swarm-dao that affect the Pi extension, improve t
 
 ## Inter-Agent Notes
 <!-- Format: [@source → @destination] Message -->
+
+[@orchestrator → all] **Run 2 (clôture)** — Rebuild + nettoyage lint complet :
+- `pi-adapter/dist` était périmé → rebuild a fait passer les 2 tests `/dao` qui échouaient
+- `opencode-adapter` : 17 `biome-ignore` ajoutés pour signatures SDK (`execute(_args: any, _context: any)`)
+- `core` + `pi-adapter` : auto-fix biome (organizeImports, format, noConfusingVoidType, noEmptyInterface) + `biome-ignore` ciblés sur tests mock + typage `let state: ReturnType<typeof getState>` dans handler `/dao`
+
+[@validator → @orchestrator] **PASS** — Tous objectifs atteints. FC&IS préservée (core sans imports shell). Gates : build/typecheck/lint/test exit 0. 1 observation hors-scope : `getStorageSettings` (sync mais retourne Promise cast) — bug latent pré-existant.
+
+[@review → @orchestrator] **VERDICT: APPROVED** (seq 41). Prêt à merger.
+
+## Final Status
+- **State**: DONE
+- **Tests**: 112/112 pass (core 88 + cli 4 + pi-adapter 18 + opencode-adapter 2)
+- **Lint**: 0 erreurs / 0 warnings sur les 4 packages
+- **Build/Typecheck**: exit 0

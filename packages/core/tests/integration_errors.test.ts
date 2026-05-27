@@ -1,7 +1,7 @@
-import { describe, expect, it, mock, beforeEach } from "bun:test";
-import { ghCreateBranch, ghCreatePullRequest, configureGitHub } from "../src/integrations/github.js";
-import { glCreateBranch, glCreateMergeRequest, configureGitLab } from "../src/integrations/gitlab.js";
+import { beforeEach, describe, expect, it, mock } from "bun:test";
 import { bbCreateBranch, bbCreatePullRequest, configureBitbucket } from "../src/integrations/bitbucket.js";
+import { configureGitHub, ghCreateBranch, ghCreatePullRequest } from "../src/integrations/github.js";
+import { configureGitLab, glCreateBranch, glCreateMergeRequest } from "../src/integrations/gitlab.js";
 import type { Proposal } from "../src/types/index.js";
 
 describe("Integration Error Handling", () => {
@@ -28,22 +28,26 @@ describe("Integration Error Handling", () => {
     });
 
     it("ghCreateBranch throws error when API fails", async () => {
-      global.fetch = mock(() =>
-        Promise.resolve({
-          ok: false,
-          status: 404,
-        })
+      global.fetch = mock(
+        () =>
+          Promise.resolve({
+            ok: false,
+            status: 404,
+          }),
+        // biome-ignore lint/suspicious/noExplicitAny: test mock for fetch
       ) as any;
 
       expect(ghCreateBranch("test-branch")).rejects.toThrow("Failed to get ref for main: 404");
     });
 
     it("ghCreatePullRequest throws error when API fails", async () => {
-      global.fetch = mock(() =>
-        Promise.resolve({
-          ok: false,
-          status: 400,
-        })
+      global.fetch = mock(
+        () =>
+          Promise.resolve({
+            ok: false,
+            status: 400,
+          }),
+        // biome-ignore lint/suspicious/noExplicitAny: test mock for fetch
       ) as any;
 
       expect(ghCreatePullRequest(proposal, { headBranch: "test-branch" })).rejects.toThrow("Failed to create PR: 400");
@@ -60,25 +64,31 @@ describe("Integration Error Handling", () => {
     });
 
     it("glCreateBranch throws error when API fails", async () => {
-      global.fetch = mock(() =>
-        Promise.resolve({
-          ok: false,
-          status: 500,
-        })
+      global.fetch = mock(
+        () =>
+          Promise.resolve({
+            ok: false,
+            status: 500,
+          }),
+        // biome-ignore lint/suspicious/noExplicitAny: test mock for fetch
       ) as any;
 
       expect(glCreateBranch("test-branch")).rejects.toThrow("Failed to create branch: 500");
     });
 
     it("glCreateMergeRequest throws error when API fails", async () => {
-      global.fetch = mock(() =>
-        Promise.resolve({
-          ok: false,
-          status: 403,
-        })
+      global.fetch = mock(
+        () =>
+          Promise.resolve({
+            ok: false,
+            status: 403,
+          }),
+        // biome-ignore lint/suspicious/noExplicitAny: test mock for fetch
       ) as any;
 
-      expect(glCreateMergeRequest(proposal, { sourceBranch: "test-branch" })).rejects.toThrow("Failed to create MR: 403");
+      expect(glCreateMergeRequest(proposal, { sourceBranch: "test-branch" })).rejects.toThrow(
+        "Failed to create MR: 403",
+      );
     });
   });
 
@@ -94,25 +104,31 @@ describe("Integration Error Handling", () => {
     });
 
     it("bbCreateBranch throws error when API fails", async () => {
-      global.fetch = mock(() =>
-        Promise.resolve({
-          ok: false,
-          status: 401,
-        })
+      global.fetch = mock(
+        () =>
+          Promise.resolve({
+            ok: false,
+            status: 401,
+          }),
+        // biome-ignore lint/suspicious/noExplicitAny: test mock for fetch
       ) as any;
 
       expect(bbCreateBranch("test-branch")).rejects.toThrow("Failed to get ref: 401");
     });
 
     it("bbCreatePullRequest throws error when API fails", async () => {
-      global.fetch = mock(() =>
-        Promise.resolve({
-          ok: false,
-          status: 404,
-        })
+      global.fetch = mock(
+        () =>
+          Promise.resolve({
+            ok: false,
+            status: 404,
+          }),
+        // biome-ignore lint/suspicious/noExplicitAny: test mock for fetch
       ) as any;
 
-      expect(bbCreatePullRequest(proposal, { sourceBranch: "test-branch" })).rejects.toThrow("Failed to create PR: 404");
+      expect(bbCreatePullRequest(proposal, { sourceBranch: "test-branch" })).rejects.toThrow(
+        "Failed to create PR: 404",
+      );
     });
   });
 });

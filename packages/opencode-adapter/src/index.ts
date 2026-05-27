@@ -2,7 +2,7 @@
 // Swarm DAO — OpenCode Adapter
 // ============================================================
 
-import type { AgentOutput, DAOAgent, HostAdapter, ProposalType } from "@guyghost/swarm-dao-core";
+import type { AgentOutput, DAOAgent, HostAdapter } from "@guyghost/swarm-dao-core";
 import {
   addVote,
   buildDispatchInstructions,
@@ -31,7 +31,6 @@ import {
   initializeAgents,
   initStorage,
   loadState,
-  PROPOSAL_TYPE_LABELS,
   PROPOSAL_TYPES,
   parseVoteFromOutput,
   performDryRun,
@@ -131,7 +130,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
         args: {
           useDefaults: schema.boolean({ description: "Use default agents (default: true)" }),
         },
-        // biome-ignore lint/suspicious/noExplicitAny: plugin tool execute signature uses dynamic args/context
+        // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
         async execute(_args: any, context: any) {
           const workDir = context.directory;
           await initStorage(workDir);
@@ -163,8 +162,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
           successMetrics: schema.array(schema.string(), { description: "Success metrics" }),
           affectedPaths: schema.array(schema.string(), { description: "File paths authorized for editing" }),
         },
-        // biome-ignore lint/suspicious/noExplicitAny: plugin tool execute signature uses dynamic args/context
-        // biome-ignore lint/suspicious/noExplicitAny: plugin tool execute signature uses dynamic args/context
+        // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
         async execute(args: any, _context: any) {
           const state = getState();
           if (!state.initialized) return "DAO not initialized.";
@@ -206,6 +204,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
             { description: "Outputs from each sub-agent" },
           ),
         },
+        // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
         async execute(args: any, _context: any) {
           const state = getState();
           if (!state.initialized) return "DAO not initialized.";
@@ -214,6 +213,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
           if (!proposal) return `Proposal #${args.proposalId} not found.`;
           if (proposal.status !== "deliberating") return `Expected deliberating (current: ${proposal.status})`;
 
+          // biome-ignore lint/suspicious/noExplicitAny: vote shape determined at runtime by parseVoteFromOutput
           const votes: any[] = [];
           const enrichedOutputs: AgentOutput[] = [];
 
@@ -283,6 +283,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
       dao_control: tool({
         description: "Run quality control gates",
         args: { proposalId: schema.number() },
+        // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
         async execute(args: any, _context: any) {
           const state = getState();
           if (!state.initialized) return "DAO not initialized.";
@@ -309,6 +310,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
       dao_execute: tool({
         description: "Execute an approved or controlled proposal",
         args: { proposalId: schema.number() },
+        // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
         async execute(args: any, _context: any) {
           const _state = getState();
           const proposal = getProposal(args.proposalId);
@@ -331,6 +333,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
       dao_list: tool({
         description: "List all DAO proposals",
         args: {},
+        // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
         async execute(_args: any, _context: any) {
           const state = getState();
           if (!state.initialized) return "DAO not initialized.";
@@ -348,6 +351,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
       dao_agents: tool({
         description: "List all DAO agents",
         args: {},
+        // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
         async execute(_args: any, _context: any) {
           const state = getState();
           if (!state.initialized) return "DAO not initialized.";
@@ -359,6 +363,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
       dao_plan: tool({
         description: "Get delivery plan",
         args: { proposalId: schema.number() },
+        // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
         async execute(args: any, _context: any) {
           const plan = getPlan(args.proposalId);
           if (!plan) return "No plan yet. Run deliberation first.";
@@ -370,6 +375,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
       dao_artefacts: tool({
         description: "View auto-generated artefacts for a proposal",
         args: { proposalId: schema.number() },
+        // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
         async execute(args: any, _context: any) {
           const proposal = getProposal(args.proposalId);
           if (!proposal) return `Proposal #${args.proposalId} not found.`;
@@ -382,6 +388,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
       dao_dry_run: tool({
         description: "Preview execution without applying changes",
         args: { proposalId: schema.number() },
+        // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
         async execute(args: any, _context: any) {
           const proposal = getProposal(args.proposalId);
           if (!proposal) return `Proposal #${args.proposalId} not found.`;
@@ -397,6 +404,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
       dao_rollback: tool({
         description: "Revert proposal execution to pre-execution snapshot",
         args: { proposalId: schema.number() },
+        // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
         async execute(args: any, _context: any) {
           const result = performRollback(args.proposalId);
           await saveState();
@@ -408,6 +416,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
       dao_dashboard: tool({
         description: "View outcome tracking dashboard",
         args: {},
+        // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
         async execute(_args: any, _context: any) {
           const state = getState();
           if (!state.initialized) return "DAO not initialized.";
@@ -421,6 +430,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
       dao_roundtable: tool({
         description: "Ask every agent to suggest a proposal idea",
         args: {},
+        // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
         async execute(_args: any, _context: any) {
           const state = getState();
           if (!state.initialized) return "DAO not initialized.";
@@ -443,6 +453,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
                 s.agentId,
                 `Auto-created from round table`,
               );
+              // biome-ignore lint/suspicious/noExplicitAny: third-party error type unknown
             } catch (err: any) {
               s.error = `Failed to create proposal: ${err?.message ?? err}`;
             }
@@ -457,6 +468,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
       dao_audit: tool({
         description: "View audit trail",
         args: { proposalId: schema.number({ description: "Optional proposal ID" }) },
+        // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
         async execute(args: any, _context: any) {
           const entries = args.proposalId
             ? getAllAuditLog().filter((e) => e.proposalId === args.proposalId)
@@ -490,10 +502,12 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
           addGates: schema.array(schema.string()),
           removeGates: schema.array(schema.string()),
         },
+        // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
         async execute(args: any, _context: any) {
           const state = getState();
           if (!state.initialized) return "DAO not initialized.";
 
+          // biome-ignore lint/suspicious/noExplicitAny: dynamic amendment payload
           let payload: any;
           try {
             switch (args.amendmentType) {

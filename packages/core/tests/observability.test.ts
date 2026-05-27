@@ -130,6 +130,7 @@ describe("observability/tracing", () => {
   it("formats trace", () => {
     const span = startSpan("root");
     finishSpan(span.id);
+    // biome-ignore lint/style/noNonNullAssertion: test asserts trace exists by prior setup
     const trace = getTrace(span.traceId)!;
     const formatted = formatTrace(trace);
     expect(formatted).toContain("root");
@@ -190,6 +191,7 @@ describe("observability/alerts", () => {
     expect(active.length).toBe(1);
 
     // Now set the metric above threshold
+    // biome-ignore lint/style/noNonNullAssertion: test asserts gauge exists by prior setup
     const gauge = getGauge("test_agent_count")!;
     gauge.set(5);
     evaluateRules();

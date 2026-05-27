@@ -23,7 +23,7 @@ interface MockCommand {
   name: string;
   description: string;
   // biome-ignore lint/suspicious/noExplicitAny: mock interface for test command handler
-  handler: (...args: any[]) => Promise<string | void>;
+  handler: (...args: any[]) => Promise<string | undefined>;
 }
 
 interface MockEvent {

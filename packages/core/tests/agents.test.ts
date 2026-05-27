@@ -77,6 +77,7 @@ describe("agents/prompts", () => {
     recordPromptInvocation("strategist", "v1", 1500, { position: "for", confidence: 8 });
     recordPromptInvocation("strategist", "v1", 2000, { position: "against", confidence: 6 });
 
+    // biome-ignore lint/style/noNonNullAssertion: test asserts variant exists by prior setup
     const variant = getPromptVariant("strategist", "v1")!;
     expect(variant.metrics.invocations).toBe(2);
     expect(variant.metrics.votesFor).toBe(1);
