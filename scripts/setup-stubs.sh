@@ -50,10 +50,6 @@ cat > "$ROOT/node_modules/@opencode-ai/plugin/package.json" << 'EOF'
 EOF
 cat > "$ROOT/node_modules/@opencode-ai/plugin/index.js" << 'EOF'
 // This is a stub. The real package is a peer dependency.
-export function tool(input) {
-  return input;
-}
-
 function createSchemaProxy() {
   const proxy = new Proxy(() => proxy, {
     get(_target, prop) {
@@ -69,7 +65,11 @@ function createSchemaProxy() {
   return proxy;
 }
 
-export const schema = {
+export function tool(input) {
+  return input;
+}
+
+tool.schema = {
   string: createSchemaProxy,
   number: createSchemaProxy,
   boolean: createSchemaProxy,
