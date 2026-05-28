@@ -5,7 +5,6 @@
 import type { AgentOutput, DAOAgent, HostAdapter } from "@guyghost/swarm-dao-core";
 import {
   addVote,
-  buildDispatchInstructions,
   calculateCompositeScore,
   classifyRiskZone,
   computeHealthScore,
@@ -156,36 +155,33 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
           title: schema.string(),
           type: schema.enum(PROPOSAL_TYPES, { description: "Proposal type" }),
           description: schema.string(),
-          context: schema.string({ description: "Additional context" }),
-          problemStatement: schema.string({ description: "What problem does this solve?" }),
-          acceptanceCriteria: schema.array(schema.string(), { description: "Acceptance criteria" }),
-          successMetrics: schema.array(schema.string(), { description: "Success metrics" }),
-          affectedPaths: schema.array(schema.string(), { description: "File paths authorized for editing" }),
+          context: schema.string().describe("Additional context").optional(),
+          problemStatement: schema.string().describe("What problem does this solve?").optional(),
+          acceptanceCriteria: schema.array(schema.string()).describe("Acceptance criteria").optional(),
+          successMetrics: schema.array(schema.string()).describe("Success metrics").optional(),
+          rollbackConditions: schema.array(schema.string()).describe("Rollback conditions").optional(),
+          affectedPaths: schema.array(schema.string()).describe("File paths authorized for editing").optional(),
         },
         // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
         async execute(args: any, _context: any) {
           const state = getState();
           if (!state.initialized) return "DAO not initialized.";
 
-          const proposal = getProposal(args.proposalId);
-          if (!proposal) return `Proposal #${args.proposalId} not found.`;
-          if (proposal.status !== "open") return `Proposal #${proposal.id} is ${proposal.status}, must be open.`;
+          const proposal = await createProposal(args.title, args.type, args.description, "user", args.context);
+          if (args.problemStatement !== undefined) proposal.problemStatement = args.problemStatement;
+          if (args.acceptanceCriteria !== undefined) proposal.acceptanceCriteria = args.acceptanceCriteria;
+          if (args.successMetrics !== undefined) proposal.successMetrics = args.successMetrics;
+          if (args.rollbackConditions !== undefined) proposal.rollbackConditions = args.rollbackConditions;
+          if (args.affectedPaths !== undefined) proposal.affectedPaths = args.affectedPaths;
 
-          transitionProposal(proposal, "deliberate");
-
-          const instructions = buildDispatchInstructions(proposal, state.agents);
-          const plan = `## 🐝 Dispatch Plan — Proposal #${proposal.id}\n\n${instructions.map((inst) => `### @${inst.agentId}\n${inst.prompt.slice(0, 300)}...\n`).join("\n")}\n\nAfter collecting outputs, run \`dao_record_outputs proposalId=${proposal.id} outputs=[...]\``;
-
-          await recordAudit(
-            proposal.id,
-            "intelligence",
-            "deliberation_dispatched",
-            "system",
-            `${instructions.length} agents`,
-          );
+          const zone = classifyRiskZone(proposal);
+          proposal.riskZone = zone;
           await saveState();
 
-          return plan;
+          await recordAudit(proposal.id, "governance", "proposal_created", "user", `Proposal "${args.title}" created`);
+          await saveState();
+
+          return `# 📋 Proposal Created — #${proposal.id}\n\n**Title:** ${args.title}\n**Type:** ${args.type}\n**Zone:** ${zone}\n\nRun \`dao_deliberate proposalId=${proposal.id}\``;
         },
       }),
 
@@ -420,7 +416,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
         async execute(_args: any, _context: any) {
           const state = getState();
           if (!state.initialized) return "DAO not initialized.";
-          const dashboard = generateDashboard(state.proposals, state.outcomes, state.agents);
+          const dashboard = generateDashboard(state.proposals, state.outcomes, state.agents, state.healthSnapshots);
           const health = computeHealthScore(state.proposals, state.outcomes, state.config.healthWeights);
           return `${dashboard}\n\n${formatHealthScore(health)}`;
         },

@@ -2,6 +2,7 @@
 // Swarm DAO Core — Health Score & Dashboard
 // ============================================================
 
+import { getState, saveState } from "./persistence.js";
 import type {
   HealthMetric,
   HealthScore,
@@ -148,10 +149,54 @@ export function formatHealthTrend(trend: { improving: boolean; change: number })
   return `${arrow} ${sign}${trend.change.toFixed(1)} points`;
 }
 
+export async function recordHealthSnapshot(): Promise<HealthSnapshot> {
+  const state = getState();
+  const score = computeHealthScore(state.proposals, state.outcomes, state.config.healthWeights);
+  const now = new Date();
+  const start = new Date(now.getFullYear(), 0, 1);
+  const week = Math.ceil(((now.getTime() - start.getTime()) / 86400000 + start.getDay() + 1) / 7);
+  const weekKey = `${now.getFullYear()}-W${week.toString().padStart(2, "0")}`;
+
+  const snapshot: HealthSnapshot = {
+    weekKey,
+    year: now.getFullYear(),
+    week,
+    score: score.score,
+    metrics: score.metrics,
+    proposalCount: score.proposalCount,
+    createdAt: now.toISOString(),
+  };
+
+  if (!state.healthSnapshots) state.healthSnapshots = [];
+  const existingIndex = state.healthSnapshots.findIndex((s) => s.weekKey === snapshot.weekKey);
+  if (existingIndex !== -1) {
+    state.healthSnapshots[existingIndex] = snapshot;
+  } else {
+    state.healthSnapshots.push(snapshot);
+  }
+  // Prune to last 52 snapshots to avoid unbounded growth
+  if (state.healthSnapshots.length > 52) {
+    state.healthSnapshots = state.healthSnapshots.slice(-52);
+  }
+
+  await saveState();
+  return snapshot;
+}
+
+export function getHealthSnapshots(): HealthSnapshot[] {
+  return getState().healthSnapshots ?? [];
+}
+
+export function getLatestHealthSnapshot(): HealthSnapshot | undefined {
+  const snaps = getState().healthSnapshots;
+  return snaps && snaps.length > 0 ? snaps[snaps.length - 1] : undefined;
+}
+
 export function generateDashboard(
   proposals: Proposal[],
   outcomes: Record<number, ProposalOutcome>,
   agents: { id: string; name: string; weight: number }[],
+  snapshots?: HealthSnapshot[],
 ): string {
   const byStatus: Record<string, number> = {};
   for (const p of proposals) {
@@ -189,6 +234,12 @@ export function generateDashboard(
     for (const p of openProposals) {
       output += `- #${p.id}: ${p.title} (${p.type})\n`;
     }
+  }
+
+  // Show health trend if snapshots exist
+  if (snapshots && snapshots.length >= 2) {
+    output += `\n## Health Trend\n`;
+    output += `${formatHealthTrend(getHealthTrend(snapshots))}\n`;
   }
 
   return output;

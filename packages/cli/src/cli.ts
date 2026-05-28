@@ -4,17 +4,25 @@
 // Swarm DAO — Standalone CLI
 // ============================================================
 
+import { promises as fs } from "node:fs";
+import path from "node:path";
 import type { ProposalType, VotePosition } from "@guyghost/swarm-dao-core";
 import {
   addVote,
+  configureGitHub,
   createProposal,
   getAllAuditLog,
   getAuditLog,
+  getDaoRoot,
   getOrCreateState,
   getProposal,
   getState,
+  ghBranchNameFor,
+  ghCreateBranch,
+  ghCreatePullRequest,
   initializeAgents,
   initStorage,
+  isGitHubEnabled,
   listProposals,
   loadState,
   PROPOSAL_TYPES,
@@ -83,6 +91,11 @@ Commands:
   vote <id> --position <for|against|abstain> --reasoning <text>
         [--weight <n>] [--agent <name>]
                                 Cast a deterministic vote
+  github-config --token <t> --owner <o> --repo <r>
+                                Configure GitHub integration
+  github-branch <proposal-id>   Create a branch for a proposal
+  github-pr <proposal-id> --head-branch <b>
+                                Open a pull request for a proposal
   config                        Print DAO configuration
   audit [--proposal <id>]       Print audit log
   status                        Print DAO status summary
@@ -268,6 +281,101 @@ async function cmdVote(cwd: string, positional: string[], flags: Record<string, 
   info(`✓ Vote recorded for #${id}: ${positionRaw} by ${agent}`);
 }
 
+async function cmdGithubConfig(cwd: string, flags: Record<string, string | true>): Promise<void> {
+  const token = typeof flags.token === "string" ? flags.token : "";
+  const owner = typeof flags.owner === "string" ? flags.owner : "";
+  const repo = typeof flags.repo === "string" ? flags.repo : "";
+
+  if (!token) err("--token is required");
+  if (!owner) err("--owner is required");
+  if (!repo) err("--repo is required");
+
+  const githubConfig = { token, owner, repo, enabled: true };
+
+  // Persist to .dao/config.json
+  const daoRoot = getDaoRoot(cwd);
+  await fs.mkdir(daoRoot, { recursive: true });
+  const configPath = path.join(daoRoot, "config.json");
+  let configData: Record<string, unknown> = {};
+  try {
+    configData = JSON.parse(await fs.readFile(configPath, "utf-8"));
+  } catch {
+    /* no existing config */
+  }
+  configData.github = githubConfig;
+  await fs.writeFile(configPath, JSON.stringify(configData, null, 2), "utf-8");
+
+  // Also configure in-memory for current process
+  configureGitHub(githubConfig);
+  info(`✓ GitHub config set: ${owner}/${repo}`);
+}
+
+/**
+ * Read GitHub config from .dao/config.json and configure the in-memory module.
+ * Returns true if GitHub is configured, false otherwise.
+ */
+async function loadGitHubConfigFromStorage(cwd: string): Promise<boolean> {
+  const daoRoot = getDaoRoot(cwd);
+  const configPath = path.join(daoRoot, "config.json");
+  try {
+    const configData = JSON.parse(await fs.readFile(configPath, "utf-8"));
+    const github = configData.github;
+    if (github?.token && github?.owner && github?.repo) {
+      configureGitHub({ ...github, enabled: true });
+      return true;
+    }
+  } catch {
+    /* no config file */
+  }
+  return false;
+}
+
+async function cmdGithubBranch(cwd: string, positional: string[]): Promise<void> {
+  const idStr = positional[0];
+  if (!idStr) err("usage: swarm-dao github-branch <proposal-id>");
+  const id = Number(idStr);
+  if (!Number.isInteger(id)) err(`invalid proposal id '${idStr}'`);
+
+  await ensureLoaded(cwd);
+  const p = getProposal(id);
+  if (!p) err(`proposal #${id} not found`);
+
+  const configured = await loadGitHubConfigFromStorage(cwd);
+  if (!configured || !isGitHubEnabled()) {
+    err("GitHub not configured. Run: swarm-dao github-config --token <t> --owner <o> --repo <r>");
+  }
+
+  const branchName = ghBranchNameFor(p);
+  const result = await ghCreateBranch(branchName);
+  if (!result) err("failed to create branch (GitHub API returned null)");
+
+  info(`✓ Branch created: ${branchName} (sha: ${result.sha.slice(0, 7)})`);
+}
+
+async function cmdGithubPr(cwd: string, positional: string[], flags: Record<string, string | true>): Promise<void> {
+  const idStr = positional[0];
+  if (!idStr) err("usage: swarm-dao github-pr <proposal-id> --head-branch <b>");
+  const id = Number(idStr);
+  if (!Number.isInteger(id)) err(`invalid proposal id '${idStr}'`);
+
+  const headBranch = typeof flags["head-branch"] === "string" ? flags["head-branch"] : "";
+  if (!headBranch) err("--head-branch is required");
+
+  await ensureLoaded(cwd);
+  const p = getProposal(id);
+  if (!p) err(`proposal #${id} not found`);
+
+  const configured = await loadGitHubConfigFromStorage(cwd);
+  if (!configured || !isGitHubEnabled()) {
+    err("GitHub not configured. Run: swarm-dao github-config --token <t> --owner <o> --repo <r>");
+  }
+
+  const result = await ghCreatePullRequest(p, { headBranch });
+  if (!result) err("failed to create PR (GitHub API returned null)");
+
+  info(`✓ PR created: #${result.number} — ${result.url}`);
+}
+
 // ── Entry Point ─────────────────────────────────────────────
 
 export async function main(argv: string[], cwd: string = process.cwd()): Promise<number> {
@@ -308,6 +416,15 @@ export async function main(argv: string[], cwd: string = process.cwd()): Promise
         return 0;
       case "vote":
         await cmdVote(cwd, positional, flags);
+        return 0;
+      case "github-config":
+        await cmdGithubConfig(cwd, flags);
+        return 0;
+      case "github-branch":
+        await cmdGithubBranch(cwd, positional);
+        return 0;
+      case "github-pr":
+        await cmdGithubPr(cwd, positional, flags);
         return 0;
       default:
         process.stderr.write(`unknown command: ${cmd}\n\n${HELP}`);

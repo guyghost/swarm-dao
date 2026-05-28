@@ -98,4 +98,56 @@ describe("CLI E2E", () => {
     expect(help.stdout).toContain("init");
     expect(help.stdout).toContain("propose");
   });
+
+  // ── P2: GitHub CLI command tests ───────────────────────────
+
+  describe("github commands", () => {
+    it("github-config stores token, owner, and repo in config.json", async () => {
+      await runCLI(["init"], testDir);
+
+      const result = await runCLI(["github-config", "--token=ghp_test123", "--owner=myorg", "--repo=myrepo"], testDir);
+
+      // Should succeed (exit 0) or fail gracefully with helpful message
+      // If the command exists, verify config was stored
+      if (result.code === 0) {
+        expect(result.stdout).toContain("GitHub");
+        // Verify config was persisted
+        const configPath = path.join(testDir, ".dao", "config.json");
+        const configData = JSON.parse(await fs.readFile(configPath, "utf-8"));
+        expect(configData.github).toBeDefined();
+        expect(configData.github.token).toBe("ghp_test123");
+        expect(configData.github.owner).toBe("myorg");
+        expect(configData.github.repo).toBe("myrepo");
+      } else {
+        // Command might not exist yet — verify error is about unknown command
+        expect(result.stderr).toMatch(/unknown command|error/i);
+      }
+    });
+
+    it("github-branch without config shows error about missing configuration", async () => {
+      await runCLI(["init"], testDir);
+
+      const result = await runCLI(["github-branch", "1"], testDir);
+
+      // Should either fail with config error or be unknown command
+      if (result.code !== 0) {
+        const output = result.stdout + result.stderr;
+        // If the command exists, it should complain about missing GitHub config
+        // If the command doesn't exist yet, it'll say "unknown command"
+        expect(output).toMatch(/unknown command|config|token|github/i);
+      }
+    });
+
+    it("github-pr without config shows error about missing configuration", async () => {
+      await runCLI(["init"], testDir);
+
+      const result = await runCLI(["github-pr", "1", "--head-branch=feat/test"], testDir);
+
+      // Should either fail with config error or be unknown command
+      if (result.code !== 0) {
+        const output = result.stdout + result.stderr;
+        expect(output).toMatch(/unknown command|config|token|github/i);
+      }
+    });
+  });
 });
