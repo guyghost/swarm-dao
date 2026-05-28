@@ -53,13 +53,29 @@ cat > "$ROOT/node_modules/@opencode-ai/plugin/index.js" << 'EOF'
 export function tool(input) {
   return input;
 }
+
+function createSchemaProxy() {
+  const proxy = new Proxy(() => proxy, {
+    get(_target, prop) {
+      if (prop === 'describe') return () => proxy;
+      if (prop === 'optional') return () => proxy;
+      if (prop === 'default') return () => proxy;
+      return proxy;
+    },
+    apply(_target, _thisArg, args) {
+      return proxy;
+    },
+  });
+  return proxy;
+}
+
 export const schema = {
-  string: () => ({ type: "string" }),
-  number: () => ({ type: "number" }),
-  boolean: () => ({ type: "boolean" }),
-  array: (item) => ({ type: "array", items: item }),
-  object: (props) => ({ type: "object", properties: props }),
-  enum: (values) => ({ type: "string", enum: values }),
+  string: createSchemaProxy,
+  number: createSchemaProxy,
+  boolean: createSchemaProxy,
+  array: () => createSchemaProxy(),
+  object: () => createSchemaProxy(),
+  enum: () => createSchemaProxy(),
 };
 EOF
 
