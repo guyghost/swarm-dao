@@ -27,6 +27,9 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Setup runtime stubs for optional peer dependencies
+        run: bun run setup-stubs
+
       - name: Lint
         run: bun run lint
 

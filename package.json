@@ -13,6 +13,7 @@
     "typecheck": "bun run --filter '*' typecheck",
     "pack:pi": "bun run --cwd packages/pi-adapter build && npm pack --workspace @guyghost/swarm-dao-pi-adapter --dry-run",
     "prepare": "bun run build",
+    "setup-stubs": "bash scripts/setup-stubs.sh",
     "changeset": "changeset",
     "release": "bun run typecheck && bun test && bun run build && changeset publish"
   },
