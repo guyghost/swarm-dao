@@ -158,6 +158,7 @@ interface DaoProposeParams {
   acceptanceCriteria?: string[];
   successMetrics?: string[];
   rollbackConditions?: string[];
+  affectedPaths?: string[];
 }
 
 interface DaoDeliberateParams {
@@ -294,16 +295,18 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
       acceptanceCriteria: Type.Optional(Type.Array(Type.String())),
       successMetrics: Type.Optional(Type.Array(Type.String())),
       rollbackConditions: Type.Optional(Type.Array(Type.String())),
+      affectedPaths: Type.Optional(Type.Array(Type.String())),
     }),
     async execute(_id, params: DaoProposeParams) {
       const state = getState();
       if (!state.initialized) return toolResult("DAO not initialized. Run `dao_setup` first.");
 
       const proposal = await createProposal(params.title, params.type, params.description, "user", params.context);
-      proposal.problemStatement = params.problemStatement;
-      if (params.acceptanceCriteria) proposal.acceptanceCriteria = params.acceptanceCriteria;
-      if (params.successMetrics) proposal.successMetrics = params.successMetrics;
-      if (params.rollbackConditions) proposal.rollbackConditions = params.rollbackConditions;
+      if (params.problemStatement !== undefined) proposal.problemStatement = params.problemStatement;
+      if (params.acceptanceCriteria !== undefined) proposal.acceptanceCriteria = params.acceptanceCriteria;
+      if (params.successMetrics !== undefined) proposal.successMetrics = params.successMetrics;
+      if (params.rollbackConditions !== undefined) proposal.rollbackConditions = params.rollbackConditions;
+      if (params.affectedPaths !== undefined) proposal.affectedPaths = params.affectedPaths;
 
       const zone = classifyRiskZone(proposal);
       proposal.riskZone = zone;
@@ -558,7 +561,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
     async execute(_id, _params: DaoDashboardParams) {
       const state = getState();
       if (!state.initialized) return toolResult("DAO not initialized.");
-      const dashboard = generateDashboard(state.proposals, state.outcomes, state.agents);
+      const dashboard = generateDashboard(state.proposals, state.outcomes, state.agents, state.healthSnapshots);
       const health = computeHealthScore(state.proposals, state.outcomes, state.config.healthWeights);
       return toolResult(`${dashboard}\n\n${formatHealthScore(health)}`);
     },
@@ -651,10 +654,10 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
       if (!proposal) return toolResult(`Proposal #${params.proposalId} not found.`);
       if (proposal.status !== "open") return toolResult(`Must be open (current: ${proposal.status})`);
 
-      if (params.problemStatement) proposal.problemStatement = params.problemStatement;
-      if (params.acceptanceCriteria) proposal.acceptanceCriteria = params.acceptanceCriteria;
-      if (params.successMetrics) proposal.successMetrics = params.successMetrics;
-      if (params.rollbackConditions) proposal.rollbackConditions = params.rollbackConditions;
+      if (params.problemStatement !== undefined) proposal.problemStatement = params.problemStatement;
+      if (params.acceptanceCriteria !== undefined) proposal.acceptanceCriteria = params.acceptanceCriteria;
+      if (params.successMetrics !== undefined) proposal.successMetrics = params.successMetrics;
+      if (params.rollbackConditions !== undefined) proposal.rollbackConditions = params.rollbackConditions;
 
       await saveState();
       return toolResult(`# 📝 Proposal Updated — #${proposal.id}\n\nUpdated fields applied.`);

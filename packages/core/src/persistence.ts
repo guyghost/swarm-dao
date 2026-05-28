@@ -238,7 +238,7 @@ export async function saveState(): Promise<void> {
   const statePath = path.join(daoRoot, STATE_FILE);
 
   await fs.mkdir(daoRoot, { recursive: true });
-  await fs.writeFile(statePath, JSON.stringify(state, null, 2), "utf-8");
+  await fs.writeFile(statePath, `${JSON.stringify(state, null, 2)}\n`, "utf-8");
 
   // Sidecars
   const dir = getProposalsDir(daoRoot);

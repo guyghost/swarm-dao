@@ -15,6 +15,7 @@ import {
   loadState,
   padId,
   recordAudit,
+  saveState,
   setState,
   updateProposalStatus,
   updateStorageSettings,
@@ -109,6 +110,37 @@ describe("persistence", () => {
   });
 
   // ── Storage Settings regression tests ──────────────────────────
+
+  /**
+   * OpenSpec Scenario: saveState writes state.json ending with a trailing newline
+   *
+   * GIVEN a DAO state with some data
+   * WHEN saveState is called
+   * THEN the written state.json file ends with a newline character
+   */
+  it("saveState writes state.json ending with a trailing newline", async () => {
+    const cwd = `/tmp/dao-trailing-newline-test-${Date.now()}`;
+    const daoRoot = getDaoRoot(cwd);
+
+    try {
+      await initStorage(cwd);
+      const state = createInitialState(cwd);
+      state.initialized = true;
+      state.daoRoot = daoRoot;
+      setState(state);
+
+      // ACT: save state
+      await saveState();
+
+      // ASSERT: read the file and check trailing newline
+      const statePath = path.join(daoRoot, "state.json");
+      const content = await fs.readFile(statePath, "utf-8");
+      expect(content.endsWith("\n")).toBe(true);
+    } finally {
+      setState(null);
+      await fs.rm(cwd, { recursive: true, force: true }).catch(() => {});
+    }
+  });
 
   /**
    * OpenSpec Scenario: getStorageSettings reads config.json and returns StorageSettings

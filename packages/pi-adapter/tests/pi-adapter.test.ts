@@ -452,6 +452,200 @@ describe("swarmDaoExtension", () => {
       expect(text).toContain("#1");
       expect(text).toContain("Test Proposal");
     });
+
+    it("stores affectedPaths on the proposal when provided", async () => {
+      const { initStorage, setState, getOrCreateState, initializeAgents, getProposal } = await import(
+        "@guyghost/swarm-dao-core"
+      );
+      await initStorage(process.cwd());
+      const state = getOrCreateState(process.cwd());
+      state.initialized = true;
+      state.agents = initializeAgents();
+      setState(state);
+
+      const mod = await import("@guyghost/swarm-dao-pi-adapter");
+      const pi = createMockPi();
+      mod.default(pi);
+
+      // biome-ignore lint/style/noNonNullAssertion: test expects tool to be registered
+      const proposeTool = pi.tools.find((t) => t.name === "dao_propose")!;
+      await proposeTool.execute("test-id", {
+        title: "Affected Paths Proposal",
+        type: "product-feature",
+        description: "Testing affected paths",
+        affectedPaths: ["packages/core/src/index.ts", "packages/core/src/types.ts"],
+      });
+
+      const proposal = getProposal(1);
+      expect(proposal).toBeDefined();
+      // biome-ignore lint/suspicious/noExplicitAny: accessing dynamic field on proposal
+      expect((proposal as any).affectedPaths).toEqual(["packages/core/src/index.ts", "packages/core/src/types.ts"]);
+    });
+
+    it("assigns explicit empty array for acceptanceCriteria (not skipped by truthy check)", async () => {
+      const { initStorage, setState, getOrCreateState, initializeAgents, getProposal } = await import(
+        "@guyghost/swarm-dao-core"
+      );
+      await initStorage(process.cwd());
+      const state = getOrCreateState(process.cwd());
+      state.initialized = true;
+      state.agents = initializeAgents();
+      setState(state);
+
+      const mod = await import("@guyghost/swarm-dao-pi-adapter");
+      const pi = createMockPi();
+      mod.default(pi);
+
+      // biome-ignore lint/style/noNonNullAssertion: test expects tool to be registered
+      const proposeTool = pi.tools.find((t) => t.name === "dao_propose")!;
+      await proposeTool.execute("test-id", {
+        title: "Empty Criteria Proposal",
+        type: "product-feature",
+        description: "Testing empty acceptanceCriteria",
+        acceptanceCriteria: [],
+      });
+
+      const proposal = getProposal(1);
+      expect(proposal).toBeDefined();
+      // biome-ignore lint/suspicious/noExplicitAny: accessing dynamic field on proposal
+      expect((proposal as any).acceptanceCriteria).toEqual([]);
+    });
+
+    it("does NOT assign problemStatement when parameter is omitted", async () => {
+      const { initStorage, setState, getOrCreateState, initializeAgents, getProposal } = await import(
+        "@guyghost/swarm-dao-core"
+      );
+      await initStorage(process.cwd());
+      const state = getOrCreateState(process.cwd());
+      state.initialized = true;
+      state.agents = initializeAgents();
+      setState(state);
+
+      const mod = await import("@guyghost/swarm-dao-pi-adapter");
+      const pi = createMockPi();
+      mod.default(pi);
+
+      // biome-ignore lint/style/noNonNullAssertion: test expects tool to be registered
+      const proposeTool = pi.tools.find((t) => t.name === "dao_propose")!;
+      await proposeTool.execute("test-id", {
+        title: "No Problem Statement Proposal",
+        type: "product-feature",
+        description: "Testing omitted problemStatement",
+      });
+
+      const proposal = getProposal(1);
+      expect(proposal).toBeDefined();
+      // biome-ignore lint/suspicious/noExplicitAny: accessing dynamic field on proposal
+      expect((proposal as any).problemStatement).toBeUndefined();
+    });
+  });
+
+  // ── dao_update_proposal tool ────────────────────────────
+
+  describe("dao_update_proposal tool", () => {
+    async function setupDao() {
+      const { initStorage, setState, getOrCreateState, initializeAgents } = await import(
+        "@guyghost/swarm-dao-core"
+      );
+      await initStorage(process.cwd());
+      const state = getOrCreateState(process.cwd());
+      state.initialized = true;
+      state.agents = initializeAgents();
+      setState(state);
+    }
+
+    async function createOpenProposal(): Promise<MockTool> {
+      await setupDao();
+      const mod = await import("@guyghost/swarm-dao-pi-adapter");
+      const pi = createMockPi();
+      mod.default(pi);
+
+      // Create an open proposal first
+      // biome-ignore lint/style/noNonNullAssertion: test expects tool to be registered
+      const proposeTool = pi.tools.find((t) => t.name === "dao_propose")!;
+      await proposeTool.execute("test-id", {
+        title: "Update Test Proposal",
+        type: "product-feature",
+        description: "A proposal to update",
+        problemStatement: "initial problem",
+        acceptanceCriteria: ["initial criterion"],
+      });
+
+      return pi;
+    }
+
+    it("correctly assigns an empty string to problemStatement (not skipped by truthy check)", async () => {
+      const { getProposal } = await import("@guyghost/swarm-dao-core");
+      const pi = await createOpenProposal();
+
+      // biome-ignore lint/style/noNonNullAssertion: test expects tool to be registered
+      const updateTool = pi.tools.find((t) => t.name === "dao_update_proposal")!;
+      await updateTool.execute("test-id", {
+        proposalId: 1,
+        problemStatement: "",
+      });
+
+      const proposal = getProposal(1);
+      expect(proposal).toBeDefined();
+      // biome-ignore lint/suspicious/noExplicitAny: accessing dynamic field on proposal
+      expect((proposal as any).problemStatement).toBe("");
+    });
+
+    it("correctly assigns an empty array to acceptanceCriteria (not skipped by truthy check)", async () => {
+      const { getProposal } = await import("@guyghost/swarm-dao-core");
+      const pi = await createOpenProposal();
+
+      // biome-ignore lint/style/noNonNullAssertion: test expects tool to be registered
+      const updateTool = pi.tools.find((t) => t.name === "dao_update_proposal")!;
+      await updateTool.execute("test-id", {
+        proposalId: 1,
+        acceptanceCriteria: [],
+      });
+
+      const proposal = getProposal(1);
+      expect(proposal).toBeDefined();
+      // biome-ignore lint/suspicious/noExplicitAny: accessing dynamic field on proposal
+      expect((proposal as any).acceptanceCriteria).toEqual([]);
+    });
+
+    it("rejects when proposal does not exist", async () => {
+      await setupDao();
+      const mod = await import("@guyghost/swarm-dao-pi-adapter");
+      const pi = createMockPi();
+      mod.default(pi);
+
+      // biome-ignore lint/style/noNonNullAssertion: test expects tool to be registered
+      const updateTool = pi.tools.find((t) => t.name === "dao_update_proposal")!;
+      const result = await updateTool.execute("test-id", {
+        proposalId: 999,
+        problemStatement: "updated",
+      });
+
+      expect(result).toBeDefined();
+      const text = result.content[0]?.text;
+      expect(text).toContain("not found");
+    });
+
+    it("rejects when proposal is not open", async () => {
+      const { getProposal, transitionProposal } = await import("@guyghost/swarm-dao-core");
+      const pi = await createOpenProposal();
+
+      // Move proposal out of open status
+      const proposal = getProposal(1);
+      // biome-ignore lint/style/noNonNullAssertion: proposal was just created
+      transitionProposal(proposal!, "deliberate");
+
+      // biome-ignore lint/style/noNonNullAssertion: test expects tool to be registered
+      const updateTool = pi.tools.find((t) => t.name === "dao_update_proposal")!;
+      const result = await updateTool.execute("test-id", {
+        proposalId: 1,
+        problemStatement: "updated",
+      });
+
+      expect(result).toBeDefined();
+      const text = result.content[0]?.text;
+      expect(text).toContain("Must be open");
+    });
   });
 
   // ── dao_dashboard tool ───────────────────────────────────
