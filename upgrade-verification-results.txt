@@ -1,0 +1,25 @@
+Homebrew Upgrade Verification Results
+Date: 2026-05-28
+
+Upgraded packages validated:
+- deno 2.8.1
+- flyctl 0.4.57
+- gh 2.93.0
+- vercel-cli 54.5.0
+- erlang 29.0.1
+- pnpm 11.4.0
+- block-goose-cli 1.36.0
+
+Verification checks run:
+- brew doctor -> "Your system is ready to brew."
+- deno --version -> PASS
+- flyctl version -> PASS
+- gh --version -> PASS
+- vercel --version -> PASS
+- erl -noshell -eval 'io:format("~s~n", [erlang:system_info(otp_release)]), halt().' -> PASS (29)
+- pnpm --version -> PASS (command works; non-blocking workspace warning shown)
+- goose --version -> PASS
+
+Notes:
+- The temporary script at /tmp/homebrew_post_upgrade_smoke_test.sh was removed after verification.
+- block-goose-cli installs the executable as "goose" (not "block-goose-cli").
