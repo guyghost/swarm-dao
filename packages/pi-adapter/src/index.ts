@@ -8,6 +8,7 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import type { AgentOutput, HostAdapter, ProposalType } from "@guyghost/swarm-dao-core";
 import {
+  addRating,
   addVote,
   // Intelligence
   buildDispatchInstructions,
@@ -125,7 +126,7 @@ function createPiHostAdapter(_pi: ExtensionAPI, _ctx?: ExtensionCommandContext):
     },
 
     hasCapability(capability: string): boolean {
-      const caps = ["spawn_agent", "read_file", "write_file", "exec", "log"];
+      const caps = ["read_file", "write_file", "exec", "log"];
       return caps.includes(capability);
     },
   };
@@ -537,7 +538,6 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
       if (proposal.status !== "executed")
         return toolResult(`Proposal #${proposal.id} is ${proposal.status}, must be executed.`);
 
-      const { addRating } = await import("@guyghost/swarm-dao-core");
       await addRating(proposal.id, {
         proposalId: proposal.id,
         rater: "user",

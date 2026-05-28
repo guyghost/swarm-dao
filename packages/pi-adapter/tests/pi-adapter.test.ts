@@ -544,9 +544,7 @@ describe("swarmDaoExtension", () => {
 
   describe("dao_update_proposal tool", () => {
     async function setupDao() {
-      const { initStorage, setState, getOrCreateState, initializeAgents } = await import(
-        "@guyghost/swarm-dao-core"
-      );
+      const { initStorage, setState, getOrCreateState, initializeAgents } = await import("@guyghost/swarm-dao-core");
       await initStorage(process.cwd());
       const state = getOrCreateState(process.cwd());
       state.initialized = true;

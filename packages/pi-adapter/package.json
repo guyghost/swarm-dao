@@ -1,12 +1,14 @@
 {
   "name": "@guyghost/swarm-dao-pi-adapter",
   "version": "0.1.0",
-  "description": "Swarm DAO adapter for the Pi coding agent",
+  "description": "Swarm DAO adapter for the Pi coding agent — multi-agent governance tools, commands, and event hooks",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "sideEffects": false,
   "files": [
-    "dist"
+    "dist",
+    "README.md"
   ],
   "exports": {
     ".": {
@@ -25,9 +27,17 @@
     "@guyghost/swarm-dao-core": "^0.1.0"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "*",
-    "@earendil-works/pi-ai": "*",
-    "typebox": "*"
+    "@earendil-works/pi-coding-agent": ">=0.1.0",
+    "@earendil-works/pi-ai": ">=0.1.0",
+    "typebox": ">=1.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    },
+    "@earendil-works/pi-ai": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@types/bun": "latest"
@@ -37,6 +47,19 @@
       "./dist/index.js"
     ]
   },
+  "keywords": [
+    "pi",
+    "pi-coding-agent",
+    "dao",
+    "governance",
+    "swarm",
+    "agents",
+    "multi-agent",
+    "ai",
+    "extension"
+  ],
+  "author": "guyghost",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/guyghost/swarm-dao.git",

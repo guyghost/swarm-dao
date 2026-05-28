@@ -2,7 +2,7 @@
 // Swarm DAO — OpenCode Adapter
 // ============================================================
 
-import type { AgentOutput, DAOAgent, HostAdapter } from "@guyghost/swarm-dao-core";
+import type { AgentOutput, DAOAgent, HostAdapter, Vote } from "@guyghost/swarm-dao-core";
 import {
   addVote,
   calculateCompositeScore,
@@ -209,8 +209,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
           if (!proposal) return `Proposal #${args.proposalId} not found.`;
           if (proposal.status !== "deliberating") return `Expected deliberating (current: ${proposal.status})`;
 
-          // biome-ignore lint/suspicious/noExplicitAny: vote shape determined at runtime by parseVoteFromOutput
-          const votes: any[] = [];
+          const votes: Vote[] = [];
           const enrichedOutputs: AgentOutput[] = [];
 
           for (const raw of args.outputs) {
@@ -503,8 +502,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
           const state = getState();
           if (!state.initialized) return "DAO not initialized.";
 
-          // biome-ignore lint/suspicious/noExplicitAny: dynamic amendment payload
-          let payload: any;
+          let payload: import("@guyghost/swarm-dao-core").AmendmentPayload;
           try {
             switch (args.amendmentType) {
               case "agent-update":
@@ -535,6 +533,8 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
               case "gate-update":
                 payload = { type: "gate-update", addGates: args.addGates, removeGates: args.removeGates };
                 break;
+              default:
+                return `Error: Unknown amendment type "${args.amendmentType}"`;
             }
           } catch (err: unknown) {
             const message = err instanceof Error ? err.message : String(err);
