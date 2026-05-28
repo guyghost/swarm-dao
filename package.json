@@ -11,9 +11,10 @@
     "test": "bun run --filter '*' test",
     "lint": "bun run --filter '*' lint",
     "typecheck": "bun run --filter '*' typecheck",
+    "pack:pi": "bun run --cwd packages/pi-adapter build && npm pack --workspace @guyghost/swarm-dao-pi-adapter --dry-run",
     "prepare": "bun run build",
     "changeset": "changeset",
-    "release": "bun test && changeset publish"
+    "release": "bun run typecheck && bun test && bun run build && changeset publish"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.0.0",
