@@ -4,11 +4,11 @@
 
 import type { AgentOutput, DAOAgent, HostAdapter, Vote } from "@guyghost/swarm-dao-core";
 import {
-  addVote,
   calculateCompositeScore,
   classifyRiskZone,
   computeHealthScore,
   createProposal,
+  createProposalsBatch,
   execCommand,
   executeProposal,
   formatAllArtefacts,
@@ -41,8 +41,8 @@ import {
   runRoundTable,
   saveState,
   setState,
-  storeAgentOutput,
   storeCompositeScore,
+  storeDeliberationBatch,
   storeSynthesis,
   synthesize,
   tallyVotes,
@@ -79,6 +79,35 @@ const OPENCODE_HELP_MESSAGE = [
   "- `dao_dashboard` — governance health summary",
   "- `dao_audit` — audit trail",
 ].join("\n");
+
+const FORBIDDEN_JSON_KEYS = new Set(["__proto__", "prototype", "constructor"]);
+
+function assertSafeJsonValue(value: unknown, context: string): void {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      assertSafeJsonValue(item, context);
+    }
+    return;
+  }
+  if (typeof value !== "object" || value === null) return;
+  for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+    if (FORBIDDEN_JSON_KEYS.has(key)) {
+      throw new Error(`Unsafe key "${key}" in ${context}`);
+    }
+    assertSafeJsonValue(nested, context);
+  }
+}
+
+function parseSafeJson<T>(input: string, context: string): T {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(input);
+  } catch (error) {
+    throw new Error(`Invalid JSON in ${context}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  assertSafeJsonValue(parsed, context);
+  return parsed as T;
+}
 
 function formatAgentsTable(agents: DAOAgent[]): string {
   let table = "| Agent | Weight | Role |\n|-------|--------|------|\n";
@@ -262,12 +291,11 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
             if (vote) {
               output.vote = vote;
               votes.push(vote);
-              await addVote(proposal.id, vote);
             }
 
-            await storeAgentOutput(proposal.id, output);
             enrichedOutputs.push(output);
           }
+          await storeDeliberationBatch(proposal.id, votes, enrichedOutputs);
 
           proposal.votes = votes;
 
@@ -466,23 +494,43 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
           const suggestions = await runRoundTable(adapter, state.agents, state.config.maxConcurrent);
 
           const proposalIds = new Map<string, number>();
-          for (const s of suggestions) {
-            if (!s.parsed) continue;
-            try {
-              const proposal = await createProposal(s.parsed.title, s.parsed.type, s.parsed.description, s.agentId);
+          const parsedSuggestions = suggestions
+            .map((suggestion) => ({ suggestion, parsed: suggestion.parsed }))
+            .filter(
+              (
+                entry,
+              ): entry is {
+                suggestion: (typeof suggestions)[number];
+                parsed: NonNullable<(typeof suggestions)[number]["parsed"]>;
+              } => Boolean(entry.parsed),
+            );
+          try {
+            const proposals = await createProposalsBatch(
+              parsedSuggestions.map(({ suggestion, parsed }) => ({
+                title: parsed.title,
+                type: parsed.type,
+                description: parsed.description,
+                proposedBy: suggestion.agentId,
+              })),
+            );
+            for (const [index, { suggestion }] of parsedSuggestions.entries()) {
+              const proposal = proposals[index];
+              if (!proposal) continue;
               proposal.riskZone = classifyRiskZone(proposal);
-              s.proposalId = proposal.id;
-              proposalIds.set(s.agentId, proposal.id);
+              suggestion.proposalId = proposal.id;
+              proposalIds.set(suggestion.agentId, proposal.id);
               await recordAudit(
                 proposal.id,
                 "intelligence",
                 "roundtable_proposal_created",
-                s.agentId,
+                suggestion.agentId,
                 `Auto-created from round table`,
               );
-              // biome-ignore lint/suspicious/noExplicitAny: third-party error type unknown
-            } catch (err: any) {
-              s.error = `Failed to create proposal: ${err?.message ?? err}`;
+            }
+          } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : String(error);
+            for (const { suggestion } of parsedSuggestions) {
+              suggestion.error = `Failed to create proposal: ${message}`;
             }
           }
 
@@ -538,7 +586,11 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
           try {
             switch (args.amendmentType) {
               case "agent-update":
-                payload = { type: "agent-update", agentId: args.agentId, changes: JSON.parse(args.agentChanges) };
+                payload = {
+                  type: "agent-update",
+                  agentId: args.agentId,
+                  changes: parseSafeJson(args.agentChanges, "agentChanges"),
+                };
                 break;
               case "agent-add":
                 payload = {
@@ -557,10 +609,10 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
                 payload = { type: "agent-remove", agentId: args.agentId };
                 break;
               case "config-update":
-                payload = { type: "config-update", changes: JSON.parse(args.configChanges) };
+                payload = { type: "config-update", changes: parseSafeJson(args.configChanges, "configChanges") };
                 break;
               case "quorum-update":
-                payload = { type: "quorum-update", typeQuorum: JSON.parse(args.quorumChanges) };
+                payload = { type: "quorum-update", typeQuorum: parseSafeJson(args.quorumChanges, "quorumChanges") };
                 break;
               case "gate-update":
                 payload = { type: "gate-update", addGates: args.addGates, removeGates: args.removeGates };

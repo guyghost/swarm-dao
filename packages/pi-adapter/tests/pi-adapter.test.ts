@@ -4,9 +4,16 @@
 // Uses a mock ExtensionAPI to verify tool registration,
 // command registration, event handlers, and core interactions.
 
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, mock } from "bun:test";
 import { promises as fs } from "node:fs";
 import path from "node:path";
+
+mock.module("@earendil-works/pi-ai", () => ({
+  StringEnum: (values: string[]) => ({
+    type: "string",
+    enum: values,
+  }),
+}));
 
 // ── Mock ExtensionAPI ───────────────────────────────────────
 

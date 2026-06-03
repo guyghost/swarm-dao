@@ -24,16 +24,61 @@ export const DEFAULT_PROJECT_CONFIG: ProjectConfig = {
 
 const CONFIG_FILE = "config.json";
 
-function globToRegex(pattern: string): RegExp {
-  const doubleStar = "__SWARM_DAO_DOUBLE_STAR__";
-  const singleStar = "__SWARM_DAO_SINGLE_STAR__";
-  const escaped = pattern
-    .replace(/\*\*/g, doubleStar)
-    .replace(/\*/g, singleStar)
-    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
-    .replaceAll(doubleStar, ".*")
-    .replaceAll(singleStar, "[^/]*");
-  return new RegExp(`^${escaped}$`);
+function splitPathSegments(value: string): string[] {
+  return value.split("/").filter((segment) => segment.length > 0);
+}
+
+function matchSegment(pattern: string, value: string): boolean {
+  let patternIndex = 0;
+  let valueIndex = 0;
+  let starIndex = -1;
+  let starMatchIndex = 0;
+  while (valueIndex < value.length) {
+    if (pattern[patternIndex] === "*") {
+      starIndex = patternIndex++;
+      starMatchIndex = valueIndex;
+      continue;
+    }
+    if (pattern[patternIndex] === value[valueIndex]) {
+      patternIndex++;
+      valueIndex++;
+      continue;
+    }
+    if (starIndex !== -1) {
+      patternIndex = starIndex + 1;
+      valueIndex = ++starMatchIndex;
+      continue;
+    }
+    return false;
+  }
+  while (pattern[patternIndex] === "*") patternIndex++;
+  return patternIndex === pattern.length;
+}
+
+function globMatchesPath(pattern: string, filePath: string): boolean {
+  const patternSegments = splitPathSegments(pattern);
+  const pathSegments = splitPathSegments(filePath);
+  const matchesFrom = (patternIndex: number, pathIndex: number): boolean => {
+    while (patternIndex < patternSegments.length) {
+      const segment = patternSegments[patternIndex];
+      if (segment === undefined) return false;
+      if (segment === "**") {
+        if (patternIndex === patternSegments.length - 1) return true;
+        for (let skip = pathIndex; skip <= pathSegments.length; skip++) {
+          if (matchesFrom(patternIndex + 1, skip)) return true;
+        }
+        return false;
+      }
+      if (pathIndex >= pathSegments.length) return false;
+      const pathSegment = pathSegments[pathIndex];
+      if (pathSegment === undefined) return false;
+      if (!matchSegment(segment, pathSegment)) return false;
+      patternIndex++;
+      pathIndex++;
+    }
+    return pathIndex === pathSegments.length;
+  };
+  return matchesFrom(0, 0);
 }
 
 export function getConfigPath(daoRoot: string): string {
@@ -105,8 +150,7 @@ export function shouldSuggestProposal(text: string): boolean {
 
 export function isCriticalPath(filePath: string, criticalPaths: string[]): boolean {
   for (const pattern of criticalPaths) {
-    const regex = globToRegex(pattern);
-    if (regex.test(filePath)) return true;
+    if (globMatchesPath(pattern, filePath)) return true;
   }
   return false;
 }
@@ -120,10 +164,7 @@ export function canEditWithoutProposal(
   if (mode === "opt-in") return true;
   if (mode === "enforce") {
     if (!isCriticalPath(filePath, criticalPaths)) return true;
-    return approvedPaths.some((ap) => {
-      const regex = globToRegex(ap);
-      return regex.test(filePath);
-    });
+    return approvedPaths.some((approvedPath) => globMatchesPath(approvedPath, filePath));
   }
   // suggest mode: always allow but may prompt
   return true;

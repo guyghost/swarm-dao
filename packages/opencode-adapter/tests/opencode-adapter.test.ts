@@ -1,9 +1,38 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { getState, setState } from "@guyghost/swarm-dao-core";
-import { OpenCodeDAO } from "@guyghost/swarm-dao-opencode-adapter";
+
+function createSchemaNode() {
+  return {
+    describe() {
+      return this;
+    },
+    optional() {
+      return this;
+    },
+  };
+}
+
+const mockSchema = {
+  string: () => createSchemaNode(),
+  number: () => createSchemaNode(),
+  boolean: () => createSchemaNode(),
+  enum: () => createSchemaNode(),
+  array: () => createSchemaNode(),
+  object: () => createSchemaNode(),
+};
+
+const mockTool = Object.assign(
+  // biome-ignore lint/suspicious/noExplicitAny: SDK tool factory mock
+  (definition: any) => definition,
+  { schema: mockSchema },
+);
+
+mock.module("@opencode-ai/plugin", () => ({
+  tool: mockTool,
+}));
 
 // ── Helpers ──────────────────────────────────────────────────
 
@@ -34,6 +63,7 @@ async function setupPlugin(tmpDir: string) {
   // Reset module-level state so tests are isolated
   setState(null);
   const ctx = createMockCtx(tmpDir);
+  const { OpenCodeDAO } = await import("@guyghost/swarm-dao-opencode-adapter");
   const plugin = await OpenCodeDAO(ctx);
   return { plugin, ctx };
 }

@@ -40,6 +40,41 @@ function isPositiveInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value > 0;
 }
 
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function hasErrorCode(error: unknown, code: string): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    typeof (error as { code?: unknown }).code === "string" &&
+    (error as { code: string }).code === code
+  );
+}
+
+function parseJsonText<T>(text: string, context: string): T {
+  try {
+    return JSON.parse(text) as T;
+  } catch (error) {
+    throw new Error(`Invalid JSON in ${context}: ${getErrorMessage(error)}`);
+  }
+}
+
+function formatJson(value: unknown): string {
+  return `${JSON.stringify(value, null, 2)}\n`;
+}
+
+async function readJsonFile<T>(filePath: string): Promise<T> {
+  const raw = await fs.readFile(filePath, "utf-8");
+  return parseJsonText<T>(raw, filePath);
+}
+
+async function writeJsonFile(filePath: string, value: unknown): Promise<void> {
+  await fs.writeFile(filePath, formatJson(value), "utf-8");
+}
+
 function normalizeStorageSettings(value: unknown, daoRoot: string): StorageSettings {
   const settings = isRecord(value) ? value : {};
   const mode = settings.mode;
@@ -109,19 +144,21 @@ export async function migrateFromLegacy(cwd: string): Promise<boolean> {
   await fs.mkdir(newRoot, { recursive: true });
 
   const entries = await fs.readdir(legacyRoot, { withFileTypes: true });
-  for (const entry of entries) {
-    const srcPath = path.join(legacyRoot, entry.name);
-    const destPath = path.join(newRoot, entry.name);
-    if (entry.isDirectory()) {
-      await fs.mkdir(destPath, { recursive: true });
-      const subEntries = await fs.readdir(srcPath);
-      for (const subEntry of subEntries) {
-        await fs.copyFile(path.join(srcPath, subEntry), path.join(destPath, subEntry));
+  await Promise.all(
+    entries.map(async (entry) => {
+      const srcPath = path.join(legacyRoot, entry.name);
+      const destPath = path.join(newRoot, entry.name);
+      if (entry.isDirectory()) {
+        await fs.mkdir(destPath, { recursive: true });
+        const subEntries = await fs.readdir(srcPath);
+        await Promise.all(
+          subEntries.map((subEntry) => fs.copyFile(path.join(srcPath, subEntry), path.join(destPath, subEntry))),
+        );
+        return;
       }
-    } else {
       await fs.copyFile(srcPath, destPath);
-    }
-  }
+    }),
+  );
 
   const oldStatePath = path.join(newRoot, "dao-state.json");
   const newStatePath = path.join(newRoot, STATE_FILE);
@@ -137,17 +174,19 @@ export async function migrateFromLegacy(cwd: string): Promise<boolean> {
   try {
     const proposalsDir = getProposalsDir(newRoot);
     const files = await fs.readdir(proposalsDir);
-    for (const file of files) {
-      if (!file.endsWith(".json")) continue;
-      const match = file.match(/^(\d+)\.json$/) ?? null;
-      if (!match) continue;
-      const id = parseInt(match[1] ?? "0", 10);
-      const paddedName = `${padId(id)}.json`;
-      if (file !== paddedName) {
-        await fs.rename(path.join(proposalsDir, file), path.join(proposalsDir, paddedName));
-        console.log(`  ✓ Renamed ${file} → ${paddedName}`);
-      }
-    }
+    await Promise.all(
+      files.map(async (file) => {
+        if (!file.endsWith(".json")) return;
+        const match = file.match(/^(\d+)\.json$/) ?? null;
+        if (!match) return;
+        const id = parseInt(match[1] ?? "0", 10);
+        const paddedName = `${padId(id)}.json`;
+        if (file !== paddedName) {
+          await fs.rename(path.join(proposalsDir, file), path.join(proposalsDir, paddedName));
+          console.log(`  ✓ Renamed ${file} → ${paddedName}`);
+        }
+      }),
+    );
   } catch {
     /* no proposals yet */
   }
@@ -192,8 +231,7 @@ export async function loadState(cwd: string): Promise<DAOState | null> {
 
   let loaded: DAOState | null = null;
   try {
-    const data = await fs.readFile(statePath, "utf-8");
-    loaded = JSON.parse(data);
+    loaded = await readJsonFile<DAOState>(statePath);
   } catch {
     return null;
   }
@@ -227,8 +265,8 @@ export async function loadState(cwd: string): Promise<DAOState | null> {
       for (const sc of sidecars) byId.set(sc.id, sc);
       loaded.proposals = Array.from(byId.values()).sort((a, b) => a.id - b.id);
     }
-  } catch {
-    /* ignore */
+  } catch (error) {
+    console.warn(`⚠ Failed to reconcile proposal sidecars: ${getErrorMessage(error)}`);
   }
 
   const highestProposalId = loaded.proposals.reduce((max, proposal) => Math.max(max, proposal.id), 0);
@@ -251,18 +289,21 @@ export async function loadProposalsFromDisk(daoRoot: string): Promise<Proposal[]
   } catch {
     return [];
   }
-  const out: Proposal[] = [];
-  for (const file of entries) {
-    if (!file.endsWith(".json")) continue;
-    try {
-      const raw = await fs.readFile(path.join(dir, file), "utf-8");
-      const p = JSON.parse(raw) as Proposal;
-      if (isPositiveInteger(p?.id)) out.push(p);
-    } catch {
-      /* skip malformed */
-    }
-  }
-  return out;
+  const proposals = await Promise.all(
+    entries
+      .filter((file) => file.endsWith(".json"))
+      .map(async (file) => {
+        const filePath = path.join(dir, file);
+        try {
+          const proposal = await readJsonFile<Proposal>(filePath);
+          return isPositiveInteger(proposal?.id) ? proposal : null;
+        } catch (error) {
+          console.warn(`⚠ Skipping malformed proposal sidecar ${filePath}: ${getErrorMessage(error)}`);
+          return null;
+        }
+      }),
+  );
+  return proposals.filter((proposal): proposal is Proposal => proposal !== null);
 }
 
 export async function saveProposal(proposalId: number): Promise<string | null> {
@@ -272,7 +313,7 @@ export async function saveProposal(proposalId: number): Promise<string | null> {
   const dir = getProposalsDir(state.daoRoot);
   await fs.mkdir(dir, { recursive: true });
   const filePath = getProposalPath(state.daoRoot, proposalId);
-  await fs.writeFile(filePath, `${JSON.stringify(proposal, null, 2)}\n`, "utf-8");
+  await writeJsonFile(filePath, proposal);
   return filePath;
 }
 
@@ -284,20 +325,12 @@ export async function saveState(): Promise<void> {
   const statePath = path.join(daoRoot, STATE_FILE);
 
   await fs.mkdir(daoRoot, { recursive: true });
-  await fs.writeFile(statePath, `${JSON.stringify(state, null, 2)}\n`, "utf-8");
+  await writeJsonFile(statePath, state);
 
   // Sidecars
   const dir = getProposalsDir(daoRoot);
-  try {
-    await fs.mkdir(dir, { recursive: true });
-    await Promise.all(
-      state.proposals.map((p) =>
-        fs.writeFile(getProposalPath(daoRoot, p.id), `${JSON.stringify(p, null, 2)}\n`, "utf-8").catch(() => {}),
-      ),
-    );
-  } catch {
-    /* ignore */
-  }
+  await fs.mkdir(dir, { recursive: true });
+  await Promise.all(state.proposals.map((proposal) => writeJsonFile(getProposalPath(daoRoot, proposal.id), proposal)));
 
   await saveDecisions();
 
@@ -306,15 +339,20 @@ export async function saveState(): Promise<void> {
     const entries = await fs.readdir(dir);
     const currentIds = new Set(state.proposals.map((p) => `${padId(p.id)}.json`));
     const orphans = entries.filter((e) => e.endsWith(".json") && !currentIds.has(e));
-    for (const orphan of orphans) {
-      try {
-        await fs.unlink(path.join(dir, orphan));
-      } catch {
-        /* ignore */
-      }
-    }
-  } catch {
-    /* ENOENT */
+    await Promise.all(
+      orphans.map(async (orphan) => {
+        const orphanPath = path.join(dir, orphan);
+        try {
+          await fs.unlink(orphanPath);
+        } catch (error) {
+          if (hasErrorCode(error, "ENOENT")) return;
+          console.warn(`⚠ Failed to remove orphan proposal sidecar ${orphanPath}: ${getErrorMessage(error)}`);
+        }
+      }),
+    );
+  } catch (error) {
+    if (hasErrorCode(error, "ENOENT")) return;
+    throw error;
   }
 }
 
@@ -338,13 +376,9 @@ export async function saveDecisions(): Promise<void> {
     )
     .sort((a, b) => a.id - b.id);
 
-  await fs.writeFile(path.join(decisionsDir, "index.json"), `${JSON.stringify(decisions, null, 2)}\n`, "utf-8");
+  await writeJsonFile(path.join(decisionsDir, "index.json"), decisions);
   await Promise.all(
-    decisions.map((d) =>
-      fs
-        .writeFile(path.join(decisionsDir, `${padId(d.id)}.json`), `${JSON.stringify(d, null, 2)}\n`, "utf-8")
-        .catch(() => {}),
-    ),
+    decisions.map((decision) => writeJsonFile(path.join(decisionsDir, `${padId(decision.id)}.json`), decision)),
   );
 }
 
@@ -353,8 +387,7 @@ export async function saveDecisions(): Promise<void> {
 export async function getStorageSettings(daoRoot: string): Promise<StorageSettings> {
   const configPath = path.join(daoRoot, CONFIG_FILE);
   try {
-    const raw = await fs.readFile(configPath, "utf-8");
-    const parsed = JSON.parse(raw) as unknown;
+    const parsed = await readJsonFile<unknown>(configPath);
     if (isRecord(parsed) && isRecord(parsed.storageSettings)) {
       return normalizeStorageSettings(parsed.storageSettings, daoRoot);
     }
@@ -374,16 +407,17 @@ export async function updateStorageSettings(
   await fs.mkdir(daoRoot, { recursive: true });
   let rootConfig: Record<string, unknown> = {};
   try {
-    const raw = await fs.readFile(configPath, "utf-8");
-    const parsed = JSON.parse(raw) as unknown;
+    const parsed = await readJsonFile<unknown>(configPath);
     if (isRecord(parsed)) {
       rootConfig = parsed;
     }
-  } catch {
-    /* ignore missing/invalid config */
+  } catch (error) {
+    if (!hasErrorCode(error, "ENOENT")) {
+      console.warn(`⚠ Ignoring invalid storage config at ${configPath}: ${getErrorMessage(error)}`);
+    }
   }
   rootConfig.storageSettings = next;
-  await fs.writeFile(configPath, JSON.stringify(rootConfig, null, 2), "utf-8");
+  await writeJsonFile(configPath, rootConfig);
   return next;
 }
 
@@ -439,6 +473,37 @@ export async function createProposal(
   return proposal;
 }
 
+export async function createProposalsBatch(
+  entries: Array<{
+    title: string;
+    type: string;
+    description: string;
+    proposedBy: string;
+    context?: string;
+  }>,
+): Promise<Proposal[]> {
+  if (entries.length === 0) return [];
+  const s = getState();
+  const proposals = entries.map((entry) => {
+    const proposal: Proposal = {
+      id: s.nextProposalId++,
+      title: entry.title,
+      type: entry.type as Proposal["type"],
+      description: entry.description,
+      context: entry.context,
+      proposedBy: entry.proposedBy,
+      status: "open",
+      votes: [],
+      agentOutputs: [],
+      createdAt: new Date().toISOString(),
+    };
+    return proposal;
+  });
+  s.proposals.push(...proposals);
+  await saveState();
+  return proposals;
+}
+
 export function getProposal(proposalId: number): Proposal | undefined {
   return getState().proposals.find((p) => p.id === proposalId);
 }
@@ -477,6 +542,23 @@ export async function storeAgentOutput(proposalId: number, output: AgentOutput):
   const proposal = s.proposals.find((p) => p.id === proposalId);
   if (!proposal) return false;
   proposal.agentOutputs.push(output);
+  await saveState();
+  return true;
+}
+
+export async function storeDeliberationBatch(
+  proposalId: number,
+  votes: Vote[],
+  outputs: AgentOutput[],
+): Promise<boolean> {
+  const s = getState();
+  const proposal = s.proposals.find((p) => p.id === proposalId);
+  if (!proposal) return false;
+  for (const vote of votes) {
+    proposal.votes.push(vote);
+    recordVoteCast(vote.agentId, vote.position, vote.weight);
+  }
+  proposal.agentOutputs.push(...outputs);
   await saveState();
   return true;
 }

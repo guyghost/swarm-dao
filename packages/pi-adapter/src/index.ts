@@ -6,10 +6,9 @@
 
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import type { AgentOutput, HostAdapter, ProposalType } from "@guyghost/swarm-dao-core";
+import type { AgentOutput, HostAdapter, ProposalType, Vote } from "@guyghost/swarm-dao-core";
 import {
   addRating,
-  addVote,
   // Intelligence
   buildDispatchInstructions,
   calculateCompositeScore,
@@ -18,6 +17,7 @@ import {
   // Health Score
   computeHealthScore,
   createProposal,
+  createProposalsBatch,
   dispatchSwarm,
   // Delivery
   execCommand,
@@ -59,8 +59,8 @@ import {
   runRoundTable,
   saveState,
   setState,
-  storeAgentOutput,
   storeCompositeScore,
+  storeDeliberationBatch,
   storeSynthesis,
   synthesize,
   tallyVotes,
@@ -90,12 +90,11 @@ function createPiHostAdapter(_pi: ExtensionAPI, _ctx?: ExtensionCommandContext):
     },
 
     async spawnAgents(params): Promise<AgentOutput[]> {
-      const outputs: AgentOutput[] = [];
-      for (const agent of params.agents) {
-        const output = await this.spawnAgent({ agent, proposal: params.proposal, systemPrompt: agent.systemPrompt });
-        outputs.push(output);
-      }
-      return outputs;
+      return Promise.all(
+        params.agents.map((agent) =>
+          this.spawnAgent({ agent, proposal: params.proposal, systemPrompt: agent.systemPrompt }),
+        ),
+      );
     },
 
     async log(params): Promise<void> {
@@ -387,7 +386,8 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
       });
 
       // Parse votes
-      const votes = [];
+      const votes: Vote[] = [];
+      const persistedOutputs: AgentOutput[] = [];
       for (const output of outputs) {
         if (output.content) {
           const vote = parseVoteFromOutput(
@@ -399,10 +399,12 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
           if (vote) {
             vote.weight = state.agents.find((a) => a.id === output.agentId)?.weight ?? 1;
             votes.push(vote);
-            await addVote(proposal.id, vote);
           }
         }
-        await storeAgentOutput(proposal.id, output);
+        persistedOutputs.push(output);
+      }
+      if (votes.length > 0 || persistedOutputs.length > 0) {
+        await storeDeliberationBatch(proposal.id, votes, persistedOutputs);
       }
       proposal.votes = votes;
 
@@ -631,23 +633,43 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
 
       // Create proposals from valid suggestions
       const proposalIds = new Map<string, number>();
-      for (const s of suggestions) {
-        if (!s.parsed) continue;
-        try {
-          const proposal = await createProposal(s.parsed.title, s.parsed.type, s.parsed.description, s.agentId);
+      const parsedSuggestions = suggestions
+        .map((suggestion) => ({ suggestion, parsed: suggestion.parsed }))
+        .filter(
+          (
+            entry,
+          ): entry is {
+            suggestion: (typeof suggestions)[number];
+            parsed: NonNullable<(typeof suggestions)[number]["parsed"]>;
+          } => Boolean(entry.parsed),
+        );
+      try {
+        const proposals = await createProposalsBatch(
+          parsedSuggestions.map(({ suggestion, parsed }) => ({
+            title: parsed.title,
+            type: parsed.type,
+            description: parsed.description,
+            proposedBy: suggestion.agentId,
+          })),
+        );
+        for (const [index, { suggestion }] of parsedSuggestions.entries()) {
+          const proposal = proposals[index];
+          if (!proposal) continue;
           proposal.riskZone = classifyRiskZone(proposal);
-          s.proposalId = proposal.id;
-          proposalIds.set(s.agentId, proposal.id);
+          suggestion.proposalId = proposal.id;
+          proposalIds.set(suggestion.agentId, proposal.id);
           await recordAudit(
             proposal.id,
             "intelligence",
             "roundtable_proposal_created",
-            s.agentId,
+            suggestion.agentId,
             `Auto-created from round table`,
           );
-        } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : String(err);
-          s.error = `Failed to create proposal: ${msg}`;
+        }
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        for (const { suggestion } of parsedSuggestions) {
+          suggestion.error = `Failed to create proposal: ${message}`;
         }
       }
 
