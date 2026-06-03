@@ -2,6 +2,7 @@
 // Swarm DAO Core — Quality Control Gates
 // ============================================================
 
+import { getState } from "../persistence.js";
 import type { ChecklistItem, ControlCheckResult, DAOConfig, GateResult, Proposal } from "../types/index.js";
 import { TYPE_QUORUM } from "../types/index.js";
 
@@ -110,8 +111,24 @@ const GATES: GateDefinition[] = [
     id: "dependency-readiness",
     name: "Dependency Readiness",
     severity: "info",
-    check: (_proposal, _config) => {
-      return { passed: true, message: "Dependencies not tracked in core — verify manually" };
+    check: (proposal, _config) => {
+      const dependsOn = proposal.dependsOn;
+      if (!dependsOn || dependsOn.length === 0) {
+        return { passed: true, message: "No inter-proposal dependencies" };
+      }
+      const proposals = getState().proposals;
+      const unexecuted = dependsOn.filter((id) => {
+        const dep = proposals.find((p) => p.id === id);
+        return !dep || dep.status !== "executed";
+      });
+      if (unexecuted.length > 0) {
+        return {
+          passed: false,
+          message: `Unexecuted dependencies: #${unexecuted.join(", #")}`,
+          details: { unexecuted },
+        };
+      }
+      return { passed: true, message: `All ${dependsOn.length} dependencies executed` };
     },
   },
   {

@@ -11,12 +11,14 @@ import {
   addVote,
   configureGitHub,
   createProposal,
+  executeProposal,
   getAllAuditLog,
   getAuditLog,
   getDaoRoot,
   getOrCreateState,
   getProposal,
   getState,
+  getUnexecutedDependencies,
   ghBranchNameFor,
   ghCreateBranch,
   ghCreatePullRequest,
@@ -27,6 +29,7 @@ import {
   loadState,
   PROPOSAL_TYPES,
   recordAudit,
+  resolveDependencyOrder,
   saveState,
   setState,
 } from "@guyghost/swarm-dao-core";
@@ -84,6 +87,7 @@ Commands:
   init                          Initialize .dao/ in current directory
   setup                         Initialize DAO with default agents
   propose --title <t> --type <T> --description <d> [--by <name>]
+          [--depends-on <id1,id2,...>]
                                 Create a new proposal
   list [--status <s>] [--type <T>]
                                 List proposals
@@ -91,6 +95,11 @@ Commands:
   vote <id> --position <for|against|abstain> --reasoning <text>
         [--weight <n>] [--agent <name>]
                                 Cast a deterministic vote
+  ship <id> [--cascade] [--force]
+                                Ship (execute) a proposal.
+                                --cascade  Automatically ship unexecuted
+                                           dependencies first (in order).
+                                --force    Skip dependency checks.
   github-config --token <t> --owner <o> --repo <r>
                                 Configure GitHub integration
   github-branch <proposal-id>   Create a branch for a proposal
@@ -141,12 +150,35 @@ async function cmdPropose(cwd: string, flags: Record<string, string | true>): Pr
     err(`invalid --type '${type}'. Allowed: ${PROPOSAL_TYPES.join(", ")}`);
   }
 
+  // Parse optional --depends-on flag (comma-separated proposal IDs)
+  let dependsOn: number[] | undefined;
+  if (typeof flags["depends-on"] === "string") {
+    const raw = flags["depends-on"].split(",").map((s) => s.trim()).filter(Boolean);
+    dependsOn = raw.map((s) => {
+      const n = Number(s);
+      if (!Number.isInteger(n) || n <= 0) err(`invalid proposal id '${s}' in --depends-on`);
+      return n;
+    });
+  }
+
   await ensureLoaded(cwd);
   const p = await createProposal(title, type, description, by);
+  if (dependsOn && dependsOn.length > 0) {
+    const state = getState();
+    for (const depId of dependsOn) {
+      if (!state.proposals.find((q) => q.id === depId)) {
+        err(`--depends-on references unknown proposal #${depId}`);
+      }
+    }
+    p.dependsOn = dependsOn;
+  }
   await recordAudit(p.id, "governance", "proposal-created", by, `via cli: ${title}`);
   await saveState();
   info(`✓ Proposal #${p.id} created (${p.status})`);
   info(`  ${p.title} | ${p.type}`);
+  if (p.dependsOn && p.dependsOn.length > 0) {
+    info(`  depends-on: #${p.dependsOn.join(", #")}`);
+  }
 }
 
 async function cmdList(cwd: string, flags: Record<string, string | true>): Promise<void> {
@@ -279,6 +311,80 @@ async function cmdVote(cwd: string, positional: string[], flags: Record<string, 
   await recordAudit(id, "governance", "vote-cast", agent, `${position} (w=${weight}): ${reasoning}`);
   await saveState();
   info(`✓ Vote recorded for #${id}: ${positionRaw} by ${agent}`);
+}
+
+async function shipOne(proposalId: number): Promise<void> {
+  const p = getProposal(proposalId);
+  if (!p) err(`proposal #${proposalId} not found`);
+  if (p.status !== "controlled") {
+    err(`Proposal #${p.id} must be in 'controlled' state to ship (current: ${p.status})`);
+  }
+  const result = await executeProposal(p);
+  if (!result.success) err(result.result);
+  await recordAudit(p.id, "delivery", "proposal-shipped", "cli", "shipped via ship command");
+  await saveState();
+  info(`✓ Shipped #${p.id}: ${p.title}`);
+}
+
+async function cmdShip(cwd: string, positional: string[], flags: Record<string, string | true>): Promise<void> {
+  const idStr = positional[0];
+  if (!idStr) err("usage: swarm-dao ship <id> [--cascade] [--force]");
+  const id = Number(idStr);
+  if (!Number.isInteger(id)) err(`invalid proposal id '${idStr}'`);
+
+  const cascade = flags.cascade === true;
+  const force = flags.force === true;
+
+  await ensureLoaded(cwd);
+  const proposal = getProposal(id);
+  if (!proposal) err(`proposal #${id} not found`);
+
+  if (force) {
+    await shipOne(id);
+    return;
+  }
+
+  // Resolve dependency chain
+  const resolution = resolveDependencyOrder(id, getState().proposals);
+  if (resolution.error) err(resolution.error);
+
+  const unexecutedResolution = getUnexecutedDependencies(id, getState().proposals);
+  if (unexecutedResolution.error) err(unexecutedResolution.error);
+
+  const unexecutedDeps = unexecutedResolution.order ?? [];
+
+  if (unexecutedDeps.length > 0) {
+    if (!cascade) {
+      info(`⚠️  Proposal #${id} has unexecuted dependencies:`);
+      for (const depId of unexecutedDeps) {
+        const dep = getProposal(depId);
+        if (dep) info(`   #${String(dep.id).padStart(3)} [${dep.status.padEnd(12)}] ${dep.title}`);
+      }
+      info("");
+      info(`Run with --cascade to ship all dependencies first:`);
+      info(`  swarm-dao ship ${id} --cascade`);
+      err("Dependencies not yet executed — use --cascade to ship in order");
+    }
+
+    // Validate all unexecuted deps are in 'controlled' state before executing anything
+    const notReady = unexecutedDeps.filter((depId) => getProposal(depId)?.status !== "controlled");
+    if (notReady.length > 0) {
+      const msgs = notReady
+        .map((depId) => {
+          const dep = getProposal(depId);
+          return dep ? `#${dep.id} (${dep.status})` : `#${depId} (not found)`;
+        })
+        .join(", ");
+      err(`Cannot cascade: dependencies not in 'controlled' state: ${msgs}`);
+    }
+
+    info(`▶ Shipping ${unexecutedDeps.length} dependency(ies) before #${id}...`);
+    for (const depId of unexecutedDeps) {
+      await shipOne(depId);
+    }
+  }
+
+  await shipOne(id);
 }
 
 async function cmdGithubConfig(cwd: string, flags: Record<string, string | true>): Promise<void> {
@@ -416,6 +522,9 @@ export async function main(argv: string[], cwd: string = process.cwd()): Promise
         return 0;
       case "vote":
         await cmdVote(cwd, positional, flags);
+        return 0;
+      case "ship":
+        await cmdShip(cwd, positional, flags);
         return 0;
       case "github-config":
         await cmdGithubConfig(cwd, flags);

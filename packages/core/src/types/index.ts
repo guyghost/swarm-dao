@@ -365,6 +365,9 @@ export interface Proposal {
   amendmentState?: AmendmentState;
   preAmendmentSnapshot?: AmendmentSnapshot;
 
+  // Inter-proposal dependencies (explicit proposal IDs)
+  dependsOn?: number[];
+
   // Dry-Run
   dryRunAt?: string;
   dryRunCanProceed?: boolean;
