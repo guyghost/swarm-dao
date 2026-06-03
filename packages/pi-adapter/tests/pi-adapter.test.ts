@@ -78,6 +78,7 @@ const EXPECTED_TOOLS = [
   "dao_check",
   "dao_plan",
   "dao_execute",
+  "dao_ship",
   "dao_audit",
   "dao_artefacts",
   "dao_rate",
@@ -590,6 +591,44 @@ describe("swarmDaoExtension", () => {
     });
   });
 
+  // ── dao_deliberate tool ──────────────────────────────────
+
+  describe("dao_deliberate tool", () => {
+    it("produces agent votes instead of failing with unimplemented spawning", async () => {
+      const { initStorage, setState, getOrCreateState, initializeAgents, getProposal } = await import(
+        "@guyghost/swarm-dao-core"
+      );
+      await initStorage(process.cwd());
+      const state = getOrCreateState(process.cwd());
+      state.initialized = true;
+      state.agents = initializeAgents();
+      setState(state);
+
+      const mod = await import("@guyghost/swarm-dao-pi-adapter");
+      const pi = createMockPi();
+      mod.default(pi);
+
+      // biome-ignore lint/style/noNonNullAssertion: test expects tool to be registered
+      const proposeTool = pi.tools.find((t) => t.name === "dao_propose")!;
+      await proposeTool.execute("test-id", {
+        title: "Deliberation Spawn Fix",
+        type: "product-feature",
+        description: "Verify deliberation receives real agent outputs",
+      });
+
+      // biome-ignore lint/style/noNonNullAssertion: test expects tool to be registered
+      const deliberateTool = pi.tools.find((t) => t.name === "dao_deliberate")!;
+      const result = await deliberateTool.execute("test-id", { proposalId: 1 });
+      const text = result.content[0]?.text ?? "";
+
+      expect(text).toContain("Deliberation Complete");
+      expect(text).not.toContain("Votes Cast:** 0 /");
+
+      const proposal = getProposal(1);
+      expect(proposal?.votes.length).toBeGreaterThan(0);
+    });
+  });
+
   // ── dao_update_proposal tool ────────────────────────────
 
   describe("dao_update_proposal tool", () => {
@@ -717,6 +756,52 @@ describe("swarmDaoExtension", () => {
       expect(result).toBeDefined();
       const text = result.content[0]?.text;
       expect(text).toContain("not initialized");
+    });
+
+    // ── dao_ship tool ────────────────────────────────────────
+
+    describe("dao_ship tool", () => {
+      it("ships a controlled proposal", async () => {
+        const { initStorage, setState, getOrCreateState, initializeAgents, getProposal, transitionProposal } = await import(
+          "@guyghost/swarm-dao-core"
+        );
+        await initStorage(process.cwd());
+        const state = getOrCreateState(process.cwd());
+        state.initialized = true;
+        state.agents = initializeAgents();
+        setState(state);
+
+        const mod = await import("@guyghost/swarm-dao-pi-adapter");
+        const pi = createMockPi();
+        mod.default(pi);
+
+        // biome-ignore lint/style/noNonNullAssertion: test expects tool to be registered
+        const proposeTool = pi.tools.find((t) => t.name === "dao_propose")!;
+        await proposeTool.execute("test-id", {
+          title: "Ship Tool Proposal",
+          type: "product-feature",
+          description: "Validate dao_ship",
+        });
+
+        const proposal = getProposal(1);
+        expect(proposal).toBeDefined();
+        // biome-ignore lint/style/noNonNullAssertion: created in previous step
+        transitionProposal(proposal!, "deliberate");
+        // biome-ignore lint/style/noNonNullAssertion: proposal status transition
+        transitionProposal(proposal!, "approve");
+        // biome-ignore lint/style/noNonNullAssertion: proposal status transition
+        transitionProposal(proposal!, "control");
+
+        // biome-ignore lint/style/noNonNullAssertion: test expects tool to be registered
+        const shipTool = pi.tools.find((t) => t.name === "dao_ship")!;
+        const result = await shipTool.execute("test-id", { proposalId: 1 });
+
+        expect(result).toBeDefined();
+        const text = result.content[0]?.text ?? "";
+        expect(text).toContain("Ship Complete");
+        expect(text).toContain("#1");
+        expect(getProposal(1)?.status).toBe("executed");
+      });
     });
   });
 });

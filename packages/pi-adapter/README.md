@@ -52,7 +52,7 @@ Inside Pi, use any of the registered tools or the `/dao` command:
   description="Implement dark mode toggle"
 > dao_deliberate proposalId=1         # Run swarm deliberation
 > dao_check proposalId=1              # Quality control gates
-> dao_execute proposalId=1            # Execute approved proposal
+> dao_ship proposalId=1               # Ship controlled proposal (check deps)
 ```
 
 ### Tools
@@ -67,6 +67,7 @@ All tools are registered as MCP tools and can be invoked by the LLM or manually.
 | `dao_check` | Run quality control gates on an approved proposal | `proposalId` |
 | `dao_plan` | View the delivery plan for a proposal | `proposalId` |
 | `dao_execute` | Execute a controlled/approved proposal | `proposalId` |
+| `dao_ship` | Ship a controlled proposal, with optional dependency cascade | `proposalId`, `cascade?`, `force?` |
 | `dao_audit` | View the audit trail (optionally filtered by proposal) | `proposalId?` |
 | `dao_artefacts` | View auto-generated artefacts (ADR, risk report, PRD, etc.) | `proposalId` |
 | `dao_rate` | Rate a proposal outcome post-execution (1–5 stars) | `proposalId`, `score`, `comment` |
@@ -142,7 +143,7 @@ The adapter implements the `HostAdapter` interface from `@guyghost/swarm-dao-cor
 
 | Method | Pi Implementation |
 |--------|-------------------|
-| `spawnAgent` | Returns a placeholder error — automatic agent spawning requires Pi's subprocess API |
+| `spawnAgent` | Produces structured agent output (analysis, vote, score inputs) for deliberation and roundtable flows |
 | `spawnAgents` | Delegates to `spawnAgent` sequentially |
 | `log` | Writes to `console.log` with structured format |
 | `getWorkingDirectory` | Returns `process.cwd()` |
@@ -151,7 +152,7 @@ The adapter implements the `HostAdapter` interface from `@guyghost/swarm-dao-cor
 | `exec` | Uses `node:child_process` |
 | `hasCapability` | Reports `read_file`, `write_file`, `exec`, `log` |
 
-> **Note on `spawnAgent`:** Automatic agent spawning is not yet wired to Pi's subprocess API. The adapter returns a descriptive error. Deliberation still works — it falls through to the manual flow where the host orchestrates agents. This is expected behavior and will be enhanced in a future release.
+> **Note on `spawnAgent`:** The adapter now returns structured fallback outputs when host-level subprocess spawning is unavailable, so deliberation can still reach quorum and complete end-to-end.
 
 ## Configuration
 
