@@ -88,7 +88,10 @@ Inside the Pi session:
 > /dao help
 
 # /dao Help
-# Use `/dao`, `/dao status`, `/dao help`, `/dao setup`
+# Use `/dao` with one of these subcommands:
+# - `/dao` or `/dao status` — show dashboard summary.
+# - `/dao help` — show this help.
+# - `/dao setup` — initialize DAO directly from the slash command.
 
 > /dao
 
@@ -142,7 +145,7 @@ opencode
 
 # DAO Initialized
 # 7 agents configured
-# Run `dao_propose` to create proposals.
+# Run `dao_help` to discover the workflow, then `dao_propose` to create proposals.
 
 > dao_help
 
@@ -153,11 +156,11 @@ opencode
 ### 5. Verify Installation
 
 ```
-> dao_status
+> dao_dashboard
 
-# DAO Status
-# Agents: 7 active | Total weight: 15
-# Proposals: 0
+# DAO Dashboard
+# Health: ...
+# Proposal overview: ...
 # Config: quorum=60%, approval=55%, risk=7/10
 ```
 
@@ -445,7 +448,7 @@ dao_setup
 | Rollback | `dao_rollback` | `dao_rollback` | Revert execution |
 | Roundtable | `dao_roundtable` | `dao_roundtable` | Agent suggestions |
 | Audit | `dao_audit` | `dao_audit` | History |
-| Status | `/dao` / `/dao status` | `dao_status` | Quick dashboard |
+| Status | `/dao` / `/dao status` | `dao_dashboard` | Quick dashboard |
 | Help | `/dao help` | *(n/a)* | Onboarding + command discovery |
 
 ---
