@@ -29,7 +29,6 @@ import {
   loadState,
   PROPOSAL_TYPES,
   recordAudit,
-  resolveDependencyOrder,
   saveState,
   setState,
 } from "@guyghost/swarm-dao-core";
@@ -346,10 +345,6 @@ async function cmdShip(cwd: string, positional: string[], flags: Record<string, 
     await shipOne(id);
     return;
   }
-
-  // Resolve dependency chain
-  const resolution = resolveDependencyOrder(id, getState().proposals);
-  if (resolution.error) err(resolution.error);
 
   const unexecutedResolution = getUnexecutedDependencies(id, getState().proposals);
   if (unexecutedResolution.error) err(unexecutedResolution.error);

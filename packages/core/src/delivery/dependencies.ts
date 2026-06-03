@@ -17,7 +17,7 @@ export function resolveDependencyOrder(targetId: number, proposals: Proposal[]):
   const visited = new Set<number>();
   const visiting = new Set<number>(); // in-progress nodes for cycle detection
 
-  function dfs(id: number): string | null {
+  function dfs(id: number, isTransitiveDep = false): string | null {
     if (visiting.has(id)) {
       return `Circular dependency detected involving proposal #${id}`;
     }
@@ -25,12 +25,14 @@ export function resolveDependencyOrder(targetId: number, proposals: Proposal[]):
 
     const proposal = proposalMap.get(id);
     if (!proposal) {
-      return `Proposal #${id} referenced as dependency but not found`;
+      return isTransitiveDep
+        ? `Proposal #${id} referenced as dependency, not found`
+        : `Proposal #${id} not found`;
     }
 
     visiting.add(id);
     for (const depId of proposal.dependsOn ?? []) {
-      const cycleError = dfs(depId);
+      const cycleError = dfs(depId, true);
       if (cycleError) return cycleError;
     }
     visiting.delete(id);

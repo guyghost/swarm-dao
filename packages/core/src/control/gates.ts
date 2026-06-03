@@ -116,18 +116,42 @@ const GATES: GateDefinition[] = [
       if (!dependsOn || dependsOn.length === 0) {
         return { passed: true, message: "No inter-proposal dependencies" };
       }
-      const proposals = getState().proposals;
-      const unexecuted = dependsOn.filter((id) => {
-        const dep = proposals.find((p) => p.id === id);
-        return dep?.status !== "executed";
-      });
-      if (unexecuted.length > 0) {
+
+      let allProposals: Proposal[];
+      try {
+        allProposals = getState().proposals;
+      } catch {
         return {
-          passed: false,
-          message: `Unexecuted dependencies: #${unexecuted.join(", #")}`,
-          details: { unexecuted },
+          passed: true,
+          message: "Dependency readiness could not be verified — please verify manually",
+          details: { verifyManually: true },
         };
       }
+
+      const proposalMap = new Map<number, Proposal>(allProposals.map((p) => [p.id, p]));
+      const missing: number[] = [];
+      const unexecuted: number[] = [];
+
+      for (const id of dependsOn) {
+        const dep = proposalMap.get(id);
+        if (!dep) {
+          missing.push(id);
+        } else if (dep.status !== "executed") {
+          unexecuted.push(id);
+        }
+      }
+
+      if (missing.length > 0 || unexecuted.length > 0) {
+        const parts: string[] = [];
+        if (missing.length > 0) parts.push(`Missing dependencies: #${missing.join(", #")}`);
+        if (unexecuted.length > 0) parts.push(`Unexecuted dependencies: #${unexecuted.join(", #")}`);
+        return {
+          passed: false,
+          message: parts.join("; "),
+          details: { missing, unexecuted },
+        };
+      }
+
       return { passed: true, message: `All ${dependsOn.length} dependencies executed` };
     },
   },
