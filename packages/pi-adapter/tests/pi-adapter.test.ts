@@ -233,6 +233,49 @@ describe("swarmDaoExtension", () => {
       expect(result).toContain("# Swarm DAO Dashboard");
       expect(result).toContain(`Agents: ${state.agents.length}`);
     });
+
+    it("/dao help returns command usage", async () => {
+      const mod = await import("@guyghost/swarm-dao-pi-adapter");
+      const pi = createMockPi();
+      mod.default(pi);
+
+      const daoCommand = pi.commands.find((c) => c.name === "/dao");
+      const result = await daoCommand?.handler("help", {});
+      expect(result).toContain("# /dao Help");
+      expect(result).toContain("/dao setup");
+      expect(result).toContain("dao_propose");
+    });
+
+    it("/dao setup initializes DAO when uninitialized", async () => {
+      const mod = await import("@guyghost/swarm-dao-pi-adapter");
+      const pi = createMockPi();
+      mod.default(pi);
+
+      const daoCommand = pi.commands.find((c) => c.name === "/dao");
+      const setupResult = await daoCommand?.handler("setup", {});
+      expect(setupResult).toContain("# DAO Initialized");
+
+      const statusResult = await daoCommand?.handler("status", {});
+      expect(statusResult).toContain("# Swarm DAO Dashboard");
+    });
+
+    it("/dao rejects unknown subcommands", async () => {
+      const { initStorage, setState, getOrCreateState, initializeAgents } = await import("@guyghost/swarm-dao-core");
+      await initStorage(process.cwd());
+      const state = getOrCreateState(process.cwd());
+      state.initialized = true;
+      state.agents = initializeAgents();
+      setState(state);
+
+      const mod = await import("@guyghost/swarm-dao-pi-adapter");
+      const pi = createMockPi();
+      mod.default(pi);
+
+      const daoCommand = pi.commands.find((c) => c.name === "/dao");
+      const result = await daoCommand?.handler("unknown", {});
+      expect(result).toContain("Unknown /dao subcommand");
+      expect(result).toContain("/dao help");
+    });
   });
 
   // ── Event handler registration ───────────────────────────

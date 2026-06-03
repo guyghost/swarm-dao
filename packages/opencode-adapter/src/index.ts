@@ -55,6 +55,31 @@ import { tool } from "@opencode-ai/plugin";
 
 const schema = tool.schema;
 
+const OPENCODE_ONBOARDING_MESSAGE = [
+  "# DAO not initialized",
+  "",
+  "1. Run `dao_setup` to create the default governance agents.",
+  "2. Run `dao_help` to see the full workflow and available tools.",
+  '3. Start your first proposal with `dao_propose title="..." type="product-feature" description="..."`.',
+].join("\n");
+
+const OPENCODE_HELP_MESSAGE = [
+  "# DAO Help",
+  "",
+  "Recommended flow:",
+  "1. `dao_setup`",
+  '2. `dao_propose title="..." type="product-feature" description="..."`',
+  "3. `dao_record_outputs proposalId=1 outputs='[...]'`",
+  "4. `dao_control proposalId=1`",
+  "5. `dao_execute proposalId=1`",
+  "",
+  "Discovery tools:",
+  "- `dao_list` — proposals overview",
+  "- `dao_agents` — configured agents",
+  "- `dao_dashboard` — governance health summary",
+  "- `dao_audit` — audit trail",
+].join("\n");
+
 function formatAgentsTable(agents: DAOAgent[]): string {
   let table = "| Agent | Weight | Role |\n|-------|--------|------|\n";
   for (const agent of agents) {
@@ -119,6 +144,18 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
 
   return {
     tool: {
+      // ── dao_help ─────────────────────────────────────────
+      dao_help: tool({
+        description: "Show onboarding and available DAO tools",
+        args: {},
+        // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
+        async execute(_args: any, _context: any) {
+          const state = getState();
+          if (!state.initialized) return OPENCODE_ONBOARDING_MESSAGE;
+          return OPENCODE_HELP_MESSAGE;
+        },
+      }),
+
       // ── dao_setup ────────────────────────────────────────
       dao_setup: tool({
         description: "Initialize the DAO with default 7 product agents",
@@ -140,7 +177,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
           state.initialized = true;
           await saveState();
 
-          return `# DAO Initialized\n\n${formatAgentsTable(agents)}\n\nRun \`dao_propose\` to create proposals.`;
+          return `# DAO Initialized\n\n${formatAgentsTable(agents)}\n\nRun \`dao_help\` to discover the workflow, then \`dao_propose\` to create proposals.`;
         },
       }),
 
@@ -161,7 +198,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
         // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
         async execute(args: any, _context: any) {
           const state = getState();
-          if (!state.initialized) return "DAO not initialized.";
+          if (!state.initialized) return OPENCODE_ONBOARDING_MESSAGE;
 
           const proposal = await createProposal(args.title, args.type, args.description, "user", args.context);
           if (args.problemStatement !== undefined) proposal.problemStatement = args.problemStatement;
@@ -199,7 +236,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
         // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
         async execute(args: any, _context: any) {
           const state = getState();
-          if (!state.initialized) return "DAO not initialized.";
+          if (!state.initialized) return OPENCODE_ONBOARDING_MESSAGE;
 
           const proposal = getProposal(args.proposalId);
           if (!proposal) return `Proposal #${args.proposalId} not found.`;
@@ -277,7 +314,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
         // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
         async execute(args: any, _context: any) {
           const state = getState();
-          if (!state.initialized) return "DAO not initialized.";
+          if (!state.initialized) return OPENCODE_ONBOARDING_MESSAGE;
 
           const proposal = getProposal(args.proposalId);
           if (!proposal) return `Proposal #${args.proposalId} not found.`;
@@ -327,7 +364,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
         // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
         async execute(_args: any, _context: any) {
           const state = getState();
-          if (!state.initialized) return "DAO not initialized.";
+          if (!state.initialized) return OPENCODE_ONBOARDING_MESSAGE;
           if (state.proposals.length === 0) return "No proposals yet.";
 
           let output = "# DAO Proposals\n\n";
@@ -345,7 +382,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
         // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
         async execute(_args: any, _context: any) {
           const state = getState();
-          if (!state.initialized) return "DAO not initialized.";
+          if (!state.initialized) return OPENCODE_ONBOARDING_MESSAGE;
           return `# DAO Agents\n\n${formatAgentsTable(state.agents)}`;
         },
       }),
@@ -409,7 +446,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
         // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
         async execute(_args: any, _context: any) {
           const state = getState();
-          if (!state.initialized) return "DAO not initialized.";
+          if (!state.initialized) return OPENCODE_ONBOARDING_MESSAGE;
           const dashboard = generateDashboard(state.proposals, state.outcomes, state.agents, state.healthSnapshots);
           const health = computeHealthScore(state.proposals, state.outcomes, state.config.healthWeights);
           return `${dashboard}\n\n${formatHealthScore(health)}`;
@@ -423,7 +460,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
         // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
         async execute(_args: any, _context: any) {
           const state = getState();
-          if (!state.initialized) return "DAO not initialized.";
+          if (!state.initialized) return OPENCODE_ONBOARDING_MESSAGE;
 
           const adapter = createOpenCodeHostAdapter(ctx);
           const suggestions = await runRoundTable(adapter, state.agents, state.config.maxConcurrent);
@@ -495,7 +532,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
         // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
         async execute(args: any, _context: any) {
           const state = getState();
-          if (!state.initialized) return "DAO not initialized.";
+          if (!state.initialized) return OPENCODE_ONBOARDING_MESSAGE;
 
           let payload: import("@guyghost/swarm-dao-core").AmendmentPayload;
           try {

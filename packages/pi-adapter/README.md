@@ -80,7 +80,9 @@ All tools are registered as MCP tools and can be invoked by the LLM or manually.
 
 | Command | Description |
 |---------|-------------|
-| `/dao` | Show the DAO dashboard — agent count, proposal counts by status |
+| `/dao` | Show the DAO dashboard (`/dao` or `/dao status`) |
+| `/dao help` | Show command help and the recommended next tools |
+| `/dao setup` | Initialize DAO directly from the slash command |
 
 ### Event Hooks
 
