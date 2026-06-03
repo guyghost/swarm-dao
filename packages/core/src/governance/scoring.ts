@@ -72,7 +72,7 @@ export function calculateCompositeScore(outputs: AgentOutput[]): CompositeScore 
     normalizedSecurityRisk * SCORING_WEIGHTS.securityRisk +
     axes.confidence * SCORING_WEIGHTS.confidence;
 
-  const riskZone: RiskZone = weighted >= 70 ? "green" : weighted >= 40 ? "orange" : "red";
+  const riskZone: RiskZone = weighted >= 7.0 ? "green" : weighted >= 4.0 ? "orange" : "red";
 
   return {
     axes,
@@ -85,7 +85,7 @@ export function calculateCompositeScore(outputs: AgentOutput[]): CompositeScore 
 export function formatCompositeScore(score: CompositeScore): string {
   return `## Composite Score
 
-**Weighted:** ${score.weighted}/100
+**Weighted:** ${score.weighted}/10
 **Zone:** ${RISK_ZONE_LABELS[score.riskZone]}
 
 ### Axes

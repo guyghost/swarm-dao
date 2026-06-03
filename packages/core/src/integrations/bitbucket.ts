@@ -3,6 +3,7 @@
 // ============================================================
 
 import type { Proposal } from "../types/index.js";
+import { slugify } from "./utils.js";
 
 interface BitbucketConfig {
   token: string;
@@ -33,14 +34,6 @@ function getAuthHeaders(): Record<string, string> {
     Authorization: `Basic ${auth}`,
     "Content-Type": "application/json",
   };
-}
-
-function slugify(title: string): string {
-  return title
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "")
-    .slice(0, 40);
 }
 
 export function bbBranchNameFor(proposal: Proposal): string {

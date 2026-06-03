@@ -93,6 +93,57 @@ describe("governance/scoring", () => {
     expect(score.riskZone).toBeDefined();
   });
 
+  it("assigns green zone for high-scoring outputs (0-10 scale)", () => {
+    // userImpact:9, businessImpact:9, effort:1(→9inv), securityRisk:1(→9inv), confidence:9
+    // weighted = 9*0.3 + 9*0.2 + 9*0.15 + 9*0.2 + 9*0.15 = 9.0 → green (≥7.0)
+    const outputs = [
+      {
+        agentId: "strategist",
+        agentName: "Strategist",
+        role: "vision",
+        content: `## Composite Score Inputs (0-10)\n- userImpact: 9\n- businessImpact: 9\n- effort: 1\n- securityRisk: 1\n- confidence: 9`,
+        durationMs: 100,
+      },
+    ];
+    const score = calculateCompositeScore(outputs);
+    expect(score.weighted).toBeGreaterThanOrEqual(7.0);
+    expect(score.riskZone).toBe("green");
+  });
+
+  it("assigns orange zone for mid-range scores (0-10 scale)", () => {
+    // userImpact:5, businessImpact:5, effort:5(→5inv), securityRisk:5(→5inv), confidence:5
+    // weighted = 5*1.0 = 5.0 → orange (≥4.0, <7.0)
+    const outputs = [
+      {
+        agentId: "strategist",
+        agentName: "Strategist",
+        role: "vision",
+        content: `## Composite Score Inputs (0-10)\n- userImpact: 5\n- businessImpact: 5\n- effort: 5\n- securityRisk: 5\n- confidence: 5`,
+        durationMs: 100,
+      },
+    ];
+    const score = calculateCompositeScore(outputs);
+    expect(score.weighted).toBeGreaterThanOrEqual(4.0);
+    expect(score.weighted).toBeLessThan(7.0);
+    expect(score.riskZone).toBe("orange");
+  });
+
+  it("assigns red zone for low scores (0-10 scale)", () => {
+    // All zeroes → weighted = 0 → red (<4.0)
+    const outputs = [
+      {
+        agentId: "strategist",
+        agentName: "Strategist",
+        role: "vision",
+        content: `## Composite Score Inputs (0-10)\n- userImpact: 0\n- businessImpact: 0\n- effort: 10\n- securityRisk: 10\n- confidence: 0`,
+        durationMs: 100,
+      },
+    ];
+    const score = calculateCompositeScore(outputs);
+    expect(score.weighted).toBeLessThan(4.0);
+    expect(score.riskZone).toBe("red");
+  });
+
   it("calculates RICE score", () => {
     const score = calculateRICEScore(1000, 5, 80, 2);
     expect(score.riceScore).toBe((1000 * 5 * 0.8) / 2);
@@ -165,8 +216,7 @@ describe("governance/amendments", () => {
     const result = executeAmendment(payload);
     expect(result.success).toBe(true);
 
-    // biome-ignore lint/suspicious/noExplicitAny: test-only state reset hack
-    const _state = setState(setState as any) || { agents: [] };
+    setState(null);
     // Weight should be updated in state
   });
 });

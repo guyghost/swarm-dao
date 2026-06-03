@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import {
   createInitialState,
+  executeProposal,
   formatPlan,
   generateDeliveryPlan,
+  getSnapshot,
   initializeAgents,
   setState,
   validateProposalQuality,
@@ -106,5 +108,24 @@ describe("delivery/execution", () => {
 
     expect(verification.status).toBe("partial"); // missing expected file
     expect(verification.missingFiles).toContain("tests/feature.test.ts");
+  });
+
+  it("does not capture snapshot when proposal cannot transition to executed", async () => {
+    const proposal = {
+      id: 2,
+      title: "Cannot Execute Yet",
+      type: "product-feature" as const,
+      description: "Should fail transition",
+      proposedBy: "test",
+      status: "approved" as const,
+      votes: [],
+      agentOutputs: [],
+      createdAt: new Date().toISOString(),
+    };
+
+    const result = await executeProposal(proposal);
+    expect(result.success).toBe(false);
+    expect(result.result).toContain('Cannot execute proposal from status "approved"');
+    expect(getSnapshot(proposal.id)).toBeUndefined();
   });
 });

@@ -3,6 +3,7 @@
 // ============================================================
 
 import type { Proposal } from "../types/index.js";
+import { slugify } from "./utils.js";
 
 interface GitLabConfig {
   token: string;
@@ -36,14 +37,6 @@ function getAuthHeaders(): Record<string, string> {
     "PRIVATE-TOKEN": config?.token ?? "",
     "Content-Type": "application/json",
   };
-}
-
-function slugify(title: string): string {
-  return title
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "")
-    .slice(0, 40);
 }
 
 export function glBranchNameFor(proposal: Proposal): string {

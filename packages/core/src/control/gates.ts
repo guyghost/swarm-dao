@@ -22,16 +22,22 @@ const GATES: GateDefinition[] = [
     id: "quorum-quality",
     name: "Quorum Quality",
     severity: "blocker",
-    check: (proposal, _config) => {
+    check: (proposal, config) => {
       const votes = proposal.votes || [];
-      const totalWeight = votes.reduce((sum, v) => sum + v.weight, 0);
-      const totalPossible = totalWeight; // Simplified
-      const quorumMet = totalPossible > 0; // Actual quorum check done during tally
+      const eligibleAgents = (proposal.agentOutputs || []).filter((o) => !o.error);
+      const totalAgents = Math.max(eligibleAgents.length, votes.length, 1);
+      const quorumRequired =
+        config.typeQuorum[proposal.type]?.quorumPercent ??
+        TYPE_QUORUM[proposal.type]?.quorumPercent ??
+        config.quorumPercent;
+      const votingPercent = (votes.length / totalAgents) * 100;
+      const quorumMet = votes.length > 0 && votingPercent >= quorumRequired;
       return {
         passed: quorumMet,
         message: quorumMet
-          ? `Quorum met (${votes.length} agents voted)`
-          : `Quorum not met (${votes.length} agents voted)`,
+          ? `Quorum met (${votes.length}/${totalAgents} agents voted — ${votingPercent.toFixed(0)}% ≥ ${quorumRequired}%)`
+          : `Quorum not met (${votes.length}/${totalAgents} agents voted — ${votingPercent.toFixed(0)}% < ${quorumRequired}%)`,
+        details: { votes: votes.length, totalAgents, votingPercent, quorumRequired },
       };
     },
   },

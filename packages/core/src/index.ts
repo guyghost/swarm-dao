@@ -25,3 +25,5 @@ export * from "./observability/index.js";
 export * from "./persistence.js";
 // Types
 export * from "./types/index.js";
+// Utils
+export * from "./utils/host.js";

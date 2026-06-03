@@ -9,6 +9,7 @@ import {
   classifyRiskZone,
   computeHealthScore,
   createProposal,
+  execCommand,
   executeProposal,
   formatAllArtefacts,
   formatAuditTrail,
@@ -34,6 +35,7 @@ import {
   parseVoteFromOutput,
   performDryRun,
   performRollback,
+  readFileContained,
   recordAudit,
   runGates,
   runRoundTable,
@@ -46,6 +48,7 @@ import {
   tallyVotes,
   transitionProposal,
   validateAmendmentPayload,
+  writeFileContained,
 } from "@guyghost/swarm-dao-core";
 import type { Plugin, PluginInput } from "@opencode-ai/plugin";
 import { tool } from "@opencode-ai/plugin";
@@ -91,20 +94,13 @@ function createOpenCodeHostAdapter(ctx: PluginInput): HostAdapter {
       return ctx.directory;
     },
     async readFile(path: string) {
-      const fs = await import("node:fs/promises");
-      return fs.readFile(path, "utf-8");
+      return readFileContained(path, this.getWorkingDirectory());
     },
     async writeFile(path: string, content: string) {
-      const fs = await import("node:fs/promises");
-      await fs.writeFile(path, content, "utf-8");
+      return writeFileContained(path, content, this.getWorkingDirectory());
     },
     async exec(command, options) {
-      const { exec } = await import("node:child_process");
-      return new Promise((resolve) => {
-        exec(command, { cwd: options?.cwd, timeout: options?.timeout }, (error, stdout, stderr) => {
-          resolve({ stdout, stderr, exitCode: error ? ((error.code as number) ?? 1) : 0 });
-        });
-      });
+      return execCommand(command, options);
     },
     hasCapability(capability) {
       return ["read_file", "write_file", "exec", "log"].includes(capability);
@@ -310,8 +306,8 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
           const _state = getState();
           const proposal = getProposal(args.proposalId);
           if (!proposal) return `Proposal #${args.proposalId} not found.`;
-          if (proposal.status !== "approved" && proposal.status !== "controlled") {
-            return `Must be approved or controlled (current: ${proposal.status})`;
+          if (proposal.status !== "controlled") {
+            return `Must be controlled (current: ${proposal.status}). Run dao_control first.`;
           }
 
           const result = await executeProposal(proposal);
@@ -401,8 +397,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
         args: { proposalId: schema.number() },
         // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
         async execute(args: any, _context: any) {
-          const result = performRollback(args.proposalId);
-          await saveState();
+          const result = await performRollback(args.proposalId);
           return formatRollback(result);
         },
       }),

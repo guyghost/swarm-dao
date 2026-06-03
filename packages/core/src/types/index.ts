@@ -164,7 +164,7 @@ export const SCORING_WEIGHTS: Record<keyof AxisScore, number> = {
 
 export interface CompositeScore {
   axes: AxisScore;
-  weighted: number; // 0-100
+  weighted: number; // 0-10
   riskZone: RiskZone;
   breakdown: string;
 }

@@ -97,13 +97,13 @@ describe("delivery/dry-run", () => {
       stateSnapshot: "",
     });
 
-    const result = performRollback(1);
+    const result = await performRollback(1);
     expect(result.success).toBe(true);
     expect(result.message).toContain("abc123de");
   });
 
-  it("fails rollback without snapshot", () => {
-    const result = performRollback(999);
+  it("fails rollback without snapshot", async () => {
+    const result = await performRollback(999);
     expect(result.success).toBe(false);
   });
 
