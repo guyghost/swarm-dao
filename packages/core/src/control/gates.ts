@@ -2,6 +2,7 @@
 // Swarm DAO Core — Quality Control Gates
 // ============================================================
 
+import { getState } from "../persistence.js";
 import type { ChecklistItem, ControlCheckResult, DAOConfig, GateResult, Proposal } from "../types/index.js";
 import { TYPE_QUORUM } from "../types/index.js";
 
@@ -110,8 +111,48 @@ const GATES: GateDefinition[] = [
     id: "dependency-readiness",
     name: "Dependency Readiness",
     severity: "info",
-    check: (_proposal, _config) => {
-      return { passed: true, message: "Dependencies not tracked in core — verify manually" };
+    check: (proposal, _config) => {
+      const dependsOn = proposal.dependsOn;
+      if (!dependsOn || dependsOn.length === 0) {
+        return { passed: true, message: "No inter-proposal dependencies" };
+      }
+
+      let allProposals: Proposal[];
+      try {
+        allProposals = getState().proposals;
+      } catch {
+        return {
+          passed: true,
+          message: "Dependency readiness could not be verified — please verify manually",
+          details: { verifyManually: true },
+        };
+      }
+
+      const proposalMap = new Map<number, Proposal>(allProposals.map((p) => [p.id, p]));
+      const missing: number[] = [];
+      const unexecuted: number[] = [];
+
+      for (const id of dependsOn) {
+        const dep = proposalMap.get(id);
+        if (!dep) {
+          missing.push(id);
+        } else if (dep.status !== "executed") {
+          unexecuted.push(id);
+        }
+      }
+
+      if (missing.length > 0 || unexecuted.length > 0) {
+        const parts: string[] = [];
+        if (missing.length > 0) parts.push(`Missing dependencies: #${missing.join(", #")}`);
+        if (unexecuted.length > 0) parts.push(`Unexecuted dependencies: #${unexecuted.join(", #")}`);
+        return {
+          passed: false,
+          message: parts.join("; "),
+          details: { missing, unexecuted },
+        };
+      }
+
+      return { passed: true, message: `All ${dependsOn.length} dependencies executed` };
     },
   },
   {

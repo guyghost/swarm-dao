@@ -150,4 +150,128 @@ describe("CLI E2E", () => {
       }
     });
   });
+
+  // ── Ship command tests ─────────────────────────────────────
+
+  describe("ship command", () => {
+    /** Helper: fast-track a proposal to 'controlled' status by mutating state directly */
+    async function setupControlledProposal(title: string, dependsOn?: number[]): Promise<number> {
+      const { loadState, saveState, getOrCreateState, setState } = await import("@guyghost/swarm-dao-core");
+
+      const loaded = await loadState(testDir);
+      if (!loaded) {
+        const { initializeAgents } = await import("@guyghost/swarm-dao-core");
+        const s = getOrCreateState(testDir);
+        s.initialized = true;
+        s.agents = initializeAgents();
+        setState(s);
+      }
+
+      const { createProposal, transitionProposal } = await import("@guyghost/swarm-dao-core");
+      const p = await createProposal(title, "product-feature", "desc", "test");
+      if (dependsOn) p.dependsOn = dependsOn;
+      transitionProposal(p, "deliberate");
+      transitionProposal(p, "approve");
+      transitionProposal(p, "control");
+      await saveState();
+      return p.id;
+    }
+
+    it("ships a proposal without dependencies", async () => {
+      await runCLI(["init"], testDir);
+      await runCLI(["setup"], testDir);
+      const id = await setupControlledProposal("Feature A");
+
+      const result = await runCLI(["ship", String(id)], testDir);
+      expect(result.code).toBe(0);
+      expect(result.stdout).toContain(`Shipped #${id}`);
+    });
+
+    it("blocks ship when dependency is unexecuted (no --cascade)", async () => {
+      await runCLI(["init"], testDir);
+      await runCLI(["setup"], testDir);
+      await setupControlledProposal("Dep A"); // id=1
+      const id = await setupControlledProposal("Feature B", [1]);
+
+      const result = await runCLI(["ship", String(id)], testDir);
+      expect(result.code).toBe(1);
+      expect(result.stderr).toContain("Dependencies not yet executed");
+      expect(result.stdout).toContain("--cascade");
+    });
+
+    it("ships dependency first then target with --cascade", async () => {
+      await runCLI(["init"], testDir);
+      await runCLI(["setup"], testDir);
+      const depId = await setupControlledProposal("Dep A"); // id=1
+      const targetId = await setupControlledProposal("Feature B", [depId]);
+
+      const result = await runCLI(["ship", String(targetId), "--cascade"], testDir);
+      expect(result.code).toBe(0);
+      expect(result.stdout).toContain(`Shipped #${depId}`);
+      expect(result.stdout).toContain(`Shipped #${targetId}`);
+    });
+
+    it("skips already-executed dependency with --cascade", async () => {
+      await runCLI(["init"], testDir);
+      await runCLI(["setup"], testDir);
+      const depId = await setupControlledProposal("Dep A");
+      // Ship the dep first
+      await runCLI(["ship", String(depId)], testDir);
+      const targetId = await setupControlledProposal("Feature B", [depId]);
+
+      const result = await runCLI(["ship", String(targetId), "--cascade"], testDir);
+      expect(result.code).toBe(0);
+      expect(result.stdout).toContain(`Shipped #${targetId}`);
+      // Dep was already executed — no redundant ship
+      expect(result.stdout).not.toContain(`Shipped #${depId}: Dep A`);
+    });
+
+    it("--cascade fails when dependency is not in controlled state", async () => {
+      await runCLI(["init"], testDir);
+      await runCLI(["setup"], testDir);
+
+      // Create dep in 'open' state (not controlled)
+      const { loadState, getOrCreateState, setState, saveState, initializeAgents, createProposal } = await import(
+        "@guyghost/swarm-dao-core"
+      );
+      const loaded = await loadState(testDir);
+      if (!loaded) {
+        const s = getOrCreateState(testDir);
+        s.initialized = true;
+        s.agents = initializeAgents();
+        setState(s);
+      }
+      const dep = await createProposal("Open Dep", "product-feature", "desc", "test");
+      const targetId = await setupControlledProposal("Feature B", [dep.id]);
+      await saveState();
+
+      const result = await runCLI(["ship", String(targetId), "--cascade"], testDir);
+      expect(result.code).toBe(1);
+      expect(result.stderr).toContain("not in 'controlled' state");
+    });
+
+    it("--force ships even with unexecuted dependencies", async () => {
+      await runCLI(["init"], testDir);
+      await runCLI(["setup"], testDir);
+      await setupControlledProposal("Dep A"); // id=1, not shipped
+      const id = await setupControlledProposal("Feature B", [1]);
+
+      const result = await runCLI(["ship", String(id), "--force"], testDir);
+      expect(result.code).toBe(0);
+      expect(result.stdout).toContain(`Shipped #${id}`);
+    });
+
+    it("propose with --depends-on records dependency", async () => {
+      await runCLI(["init"], testDir);
+      await runCLI(["setup"], testDir);
+      await runCLI(["propose", "--title=Base", "--type=product-feature", "--description=base"], testDir);
+
+      const result = await runCLI(
+        ["propose", "--title=Feature", "--type=product-feature", "--description=feat", "--depends-on=1"],
+        testDir,
+      );
+      expect(result.code).toBe(0);
+      expect(result.stdout).toContain("depends-on: #1");
+    });
+  });
 });
