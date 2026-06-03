@@ -140,6 +140,30 @@ function toolResult(content: string): {
   };
 }
 
+const PI_ONBOARDING_MESSAGE = [
+  "# DAO not initialized",
+  "",
+  "1. Run `dao_setup` to create the default governance agents.",
+  "2. Run `/dao` to confirm the dashboard is available.",
+  '3. Start your first proposal with `dao_propose title="..." type="product-feature" description="..."`.',
+].join("\n");
+
+const DAO_COMMAND_HELP = [
+  "# /dao Help",
+  "",
+  "Use `/dao` with one of these subcommands:",
+  "- `/dao` or `/dao status` — show dashboard summary.",
+  "- `/dao help` — show this help.",
+  "- `/dao setup` — initialize DAO with default agents.",
+  "",
+  "Main tools you can run next:",
+  "- `dao_setup`",
+  '- `dao_propose title="..." type="product-feature" description="..."`',
+  "- `dao_deliberate proposalId=1`",
+  "- `dao_check proposalId=1`",
+  "- `dao_execute proposalId=1`",
+].join("\n");
+
 // ── Parameter Interfaces ─────────────────────────────────────
 
 interface DaoSetupParams {
@@ -229,7 +253,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
       return {
         systemPrompt:
           event.systemPrompt +
-          "\n\n## Swarm DAO\nThe swarm-dao extension is loaded (4-layer architecture: Governance → Intelligence → Control → Delivery). Use `dao_setup` to initialize the DAO with default agents, or run `/dao` for the dashboard.",
+          "\n\n## Swarm DAO\nThe swarm-dao extension is loaded (4-layer architecture: Governance → Intelligence → Control → Delivery). If this is your first run, execute `dao_setup` first, then `/dao` to verify setup.",
       };
     }
 
@@ -296,7 +320,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
     }),
     async execute(_id, params: DaoProposeParams) {
       const state = getState();
-      if (!state.initialized) return toolResult("DAO not initialized. Run `dao_setup` first.");
+      if (!state.initialized) return toolResult(PI_ONBOARDING_MESSAGE);
 
       const proposal = await createProposal(params.title, params.type, params.description, "user", params.context);
       if (params.problemStatement !== undefined) proposal.problemStatement = params.problemStatement;
@@ -328,7 +352,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
     }),
     async execute(_id, params: DaoDeliberateParams, _signal, onUpdate, ctx) {
       const state = getState();
-      if (!state.initialized) return toolResult("DAO not initialized.");
+      if (!state.initialized) return toolResult(PI_ONBOARDING_MESSAGE);
 
       const proposal = getProposal(Number(params.proposalId));
       if (!proposal) return toolResult(`Proposal #${params.proposalId} not found.`);
@@ -431,7 +455,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
     parameters: Type.Object({ proposalId: Type.Number() }),
     async execute(_id, params: DaoCheckParams) {
       const state = getState();
-      if (!state.initialized) return toolResult("DAO not initialized.");
+      if (!state.initialized) return toolResult(PI_ONBOARDING_MESSAGE);
 
       const proposal = getProposal(params.proposalId);
       if (!proposal) return toolResult(`Proposal #${params.proposalId} not found.`);
@@ -556,7 +580,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
     parameters: Type.Object({}),
     async execute(_id, _params: DaoDashboardParams) {
       const state = getState();
-      if (!state.initialized) return toolResult("DAO not initialized.");
+      if (!state.initialized) return toolResult(PI_ONBOARDING_MESSAGE);
       const dashboard = generateDashboard(state.proposals, state.outcomes, state.agents, state.healthSnapshots);
       const health = computeHealthScore(state.proposals, state.outcomes, state.config.healthWeights);
       return toolResult(`${dashboard}\n\n${formatHealthScore(health)}`);
@@ -600,7 +624,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
     parameters: Type.Object({}),
     async execute(_id, _params: DaoRoundtableParams, _signal, _onUpdate, ctx) {
       const state = getState();
-      if (!state.initialized) return toolResult("DAO not initialized.");
+      if (!state.initialized) return toolResult(PI_ONBOARDING_MESSAGE);
 
       const adapter = createPiHostAdapter(pi, ctx);
       const suggestions = await runRoundTable(adapter, state.agents, state.config.maxConcurrent);
@@ -661,17 +685,43 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
 
   // ── Command: /dao ────────────────────────────────────────
   pi.registerCommand("/dao", {
-    description: "Show DAO dashboard",
-    handler: async (_args, _ctx) => {
+    description: "DAO command: dashboard, help, setup",
+    handler: async (args, _ctx) => {
+      const subcommand = args.trim().toLowerCase();
+
+      if (subcommand === "help" || subcommand === "-h" || subcommand === "--help") {
+        return DAO_COMMAND_HELP;
+      }
+
       let state: ReturnType<typeof getState>;
       try {
         state = getState();
       } catch {
-        return "DAO not initialized. Run `dao_setup`.";
+        if (subcommand === "setup" || subcommand === "init") {
+          const newState = getOrCreateState(process.cwd());
+          const agents = initializeAgents();
+          newState.agents = agents;
+          newState.initialized = true;
+          setState(newState);
+          await saveState();
+          return `# DAO Initialized\n\nAgents: ${agents.length}\nRun \`/dao status\` to view the dashboard.`;
+        }
+        return PI_ONBOARDING_MESSAGE;
       }
 
       if (!state.initialized) {
-        return "DAO not initialized. Run `dao_setup`.";
+        if (subcommand === "setup" || subcommand === "init") {
+          const agents = initializeAgents();
+          state.agents = agents;
+          state.initialized = true;
+          await saveState();
+          return `# DAO Initialized\n\nAgents: ${agents.length}\nRun \`/dao status\` to view the dashboard.`;
+        }
+        return PI_ONBOARDING_MESSAGE;
+      }
+
+      if (subcommand !== "" && subcommand !== "status" && subcommand !== "dashboard") {
+        return `Unknown /dao subcommand: "${subcommand}".\n\nTry \`/dao help\`.`;
       }
 
       const byStatus: Record<string, number> = {};

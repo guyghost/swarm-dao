@@ -72,6 +72,7 @@ describe("opencode-adapter", () => {
       expect(plugin.tool).toBeDefined();
 
       const expectedTools = [
+        "dao_help",
         "dao_setup",
         "dao_propose",
         "dao_record_outputs",
@@ -122,6 +123,19 @@ describe("opencode-adapter", () => {
       const state = getState();
       expect(state.initialized).toBe(true);
       expect(state.agents.length).toBe(7);
+    });
+
+    it("dao_help returns onboarding before setup and workflow after setup", async () => {
+      const { plugin } = await setupPlugin(testDir);
+
+      const beforeSetup = await plugin.tool.dao_help.execute({}, { directory: testDir });
+      expect(beforeSetup).toContain("DAO not initialized");
+      expect(beforeSetup).toContain("dao_setup");
+
+      await plugin.tool.dao_setup.execute({}, { directory: testDir });
+      const afterSetup = await plugin.tool.dao_help.execute({}, { directory: testDir });
+      expect(afterSetup).toContain("# DAO Help");
+      expect(afterSetup).toContain("dao_record_outputs");
     });
 
     it("returns already-initialized message on second call", async () => {

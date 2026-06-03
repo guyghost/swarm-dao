@@ -85,6 +85,11 @@ Inside the Pi session:
 ### 6. Verify Installation
 
 ```
+> /dao help
+
+# /dao Help
+# Use `/dao`, `/dao status`, `/dao help`, `/dao setup`
+
 > /dao
 
 # Swarm DAO Dashboard
@@ -138,6 +143,11 @@ opencode
 # DAO Initialized
 # 7 agents configured
 # Run `dao_propose` to create proposals.
+
+> dao_help
+
+# DAO Help
+# Recommended flow and tool discovery
 ```
 
 ### 5. Verify Installation
@@ -430,11 +440,13 @@ dao_setup
 | Execute | `dao_execute` | `dao_execute` | Execute proposal |
 | Artefacts | `dao_artefacts` | `dao_artefacts` | Generate documents |
 | Dashboard | `dao_dashboard` | `dao_dashboard` | Overview |
+| Help | *(n/a)* | `dao_help` | Onboarding + tool discovery |
 | Dry-run | `dao_dry_run` | `dao_dry_run` | Preview changes |
 | Rollback | `dao_rollback` | `dao_rollback` | Revert execution |
 | Roundtable | `dao_roundtable` | `dao_roundtable` | Agent suggestions |
 | Audit | `dao_audit` | `dao_audit` | History |
-| Status | `/dao` | `dao_status` | Quick dashboard |
+| Status | `/dao` / `/dao status` | `dao_status` | Quick dashboard |
+| Help | `/dao help` | *(n/a)* | Onboarding + command discovery |
 
 ---
 

@@ -4,7 +4,7 @@
 
 ## Overview
 
-This adapter bridges the [Swarm DAO](https://github.com/guyghost/swarm-dao) core governance engine to the OpenCode platform via the `@opencode-ai/plugin` API. It registers 15 DAO tools that OpenCode agents can invoke directly, enabling structured proposal creation, multi-agent deliberation, quality control gates, and execution tracking — all from within the OpenCode environment.
+This adapter bridges the [Swarm DAO](https://github.com/guyghost/swarm-dao) core governance engine to the OpenCode platform via the `@opencode-ai/plugin` API. It registers 16 DAO tools that OpenCode agents can invoke directly, enabling structured proposal creation, multi-agent deliberation, quality control gates, and execution tracking — all from within the OpenCode environment.
 
 Swarm DAO implements a **4-layer governance model**:
 
@@ -14,7 +14,7 @@ Swarm DAO implements a **4-layer governance model**:
 | **L2 Intelligence** | Produce analysis and recommendations | `dao_record_outputs`, `dao_roundtable` |
 | **L3 Delivery** | Convert decisions into execution | `dao_execute`, `dao_plan`, `dao_artefacts`, `dao_dry_run`, `dao_rollback` |
 | **L4 Control** | Reduce risk before publication | `dao_control`, `dao_audit`, `dao_dashboard` |
-| **Utility** | Inspect DAO state | `dao_list`, `dao_agents` |
+| **Utility** | Inspect DAO state | `dao_help`, `dao_list`, `dao_agents` |
 
 ## Installation
 
@@ -59,6 +59,7 @@ The plugin initializes automatically when OpenCode starts. DAO state is persiste
 
 ```
 > dao_setup
+> dao_help
 ```
 
 Creates the DAO with 7 default product agents:
@@ -238,6 +239,7 @@ Per-project configuration in `.dao/config.json`:
 | Tool | Description |
 |------|-------------|
 | `dao_setup` | Initialize the DAO with 7 default product agents |
+| `dao_help` | Show onboarding and recommended workflow |
 | `dao_propose` | Create a new governance proposal |
 | `dao_record_outputs` | Record sub-agent outputs and finalize deliberation |
 | `dao_control` | Run quality control gates on an approved proposal |
