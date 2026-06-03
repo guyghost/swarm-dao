@@ -284,6 +284,10 @@ GitHub Actions workflow included (`.github/workflows/ci.yml`):
 - Test execution
 - Build verification
 
+Release workflow included (`.github/workflows/publish.yml`):
+- Creates Changesets version PRs on pull requests
+- Publishes to npm from `main` via GitHub OIDC trusted publishing
+
 ## Documentation
 
 - [ADR-001: Unified Architecture](docs/ADR-001-unified-architecture.md)
