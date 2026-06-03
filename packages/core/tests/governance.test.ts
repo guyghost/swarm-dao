@@ -216,7 +216,6 @@ describe("governance/amendments", () => {
     const result = executeAmendment(payload);
     expect(result.success).toBe(true);
 
-    // biome-ignore lint/suspicious/noExplicitAny: test-only state reset
     setState(null);
     // Weight should be updated in state
   });

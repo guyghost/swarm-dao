@@ -2,9 +2,9 @@
 // Swarm DAO Core — Proposal Execution
 // ============================================================
 
+import { transitionProposal } from "../governance/lifecycle.js";
 import { captureSnapshot, getState, storeVerification } from "../persistence.js";
 import type { ExecutionSnapshot, ExecutionVerification, Proposal, VerificationStatus } from "../types/index.js";
-import { transitionProposal } from "../governance/lifecycle.js";
 import { generateDeliveryPlan } from "./plans.js";
 
 export interface ExecutionResult {
