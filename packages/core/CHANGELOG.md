@@ -1,5 +1,11 @@
 # @guyghost/swarm-dao-core
 
+## 0.1.2
+
+### Patch Changes
+
+- Prepare a new patch release for all published Swarm DAO packages.
+
 ## 0.1.1
 
 ### Patch Changes

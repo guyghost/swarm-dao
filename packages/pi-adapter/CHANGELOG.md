@@ -1,5 +1,13 @@
 # @guyghost/swarm-dao-pi-adapter
 
+## 0.1.2
+
+### Patch Changes
+
+- Prepare a new patch release for all published Swarm DAO packages.
+- Updated dependencies
+  - @guyghost/swarm-dao-core@0.1.2
+
 ## 0.1.1
 
 ### Patch Changes
