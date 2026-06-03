@@ -24,6 +24,18 @@ export const DEFAULT_PROJECT_CONFIG: ProjectConfig = {
 
 const CONFIG_FILE = "config.json";
 
+function globToRegex(pattern: string): RegExp {
+  const doubleStar = "__SWARM_DAO_DOUBLE_STAR__";
+  const singleStar = "__SWARM_DAO_SINGLE_STAR__";
+  const escaped = pattern
+    .replace(/\*\*/g, doubleStar)
+    .replace(/\*/g, singleStar)
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replaceAll(doubleStar, ".*")
+    .replaceAll(singleStar, "[^/]*");
+  return new RegExp(`^${escaped}$`);
+}
+
 export function getConfigPath(daoRoot: string): string {
   return path.join(daoRoot, CONFIG_FILE);
 }
@@ -93,14 +105,7 @@ export function shouldSuggestProposal(text: string): boolean {
 
 export function isCriticalPath(filePath: string, criticalPaths: string[]): boolean {
   for (const pattern of criticalPaths) {
-    const regex = new RegExp(
-      "^" +
-        pattern
-          .replace(/\*\*/g, "<<<DOUBLESTAR>>>")
-          .replace(/\*/g, "[^/]*")
-          .replace(/<<<DOUBLESTAR>>>/g, ".*") +
-        "$",
-    );
+    const regex = globToRegex(pattern);
     if (regex.test(filePath)) return true;
   }
   return false;
@@ -116,7 +121,7 @@ export function canEditWithoutProposal(
   if (mode === "enforce") {
     if (!isCriticalPath(filePath, criticalPaths)) return true;
     return approvedPaths.some((ap) => {
-      const regex = new RegExp(`^${ap.replace(/\*\*/g, ".*").replace(/\*/g, "[^/]*")}$`);
+      const regex = globToRegex(ap);
       return regex.test(filePath);
     });
   }

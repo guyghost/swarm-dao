@@ -25,6 +25,7 @@ describe("config", () => {
     expect(isCriticalPath("src/auth/login.ts", ["src/auth/**"])).toBe(true);
     expect(isCriticalPath("src/ui/button.ts", ["src/auth/**"])).toBe(false);
     expect(isCriticalPath(".env.local", [".env*"])).toBe(true);
+    expect(isCriticalPath("xenv.local", [".env*"])).toBe(false);
   });
 
   it("allows edits based on mode", () => {

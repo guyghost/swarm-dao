@@ -303,6 +303,9 @@ async function cmdVote(cwd: string, positional: string[], flags: Record<string, 
   if (!reasoning) err("--reasoning is required");
 
   const weight = typeof flags.weight === "string" ? Number(flags.weight) : 1;
+  if (!Number.isFinite(weight) || weight <= 0) {
+    err("--weight must be a positive number");
+  }
   const agent = typeof flags.agent === "string" ? flags.agent : "cli-user";
 
   await ensureLoaded(cwd);

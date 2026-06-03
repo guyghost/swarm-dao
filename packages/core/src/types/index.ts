@@ -839,6 +839,7 @@ export interface StorageSettings {
   mode: "local" | "github" | "hybrid";
   githubSyncEnabled: boolean;
   daoRoot: string;
+  githubRepo?: string;
 }
 
 // ── Host Adapter Interface ───────────────────────────────────

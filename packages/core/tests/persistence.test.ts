@@ -102,6 +102,12 @@ describe("persistence", () => {
       expect(getState().proposals).toEqual([]);
       expect(getState().agents).toEqual([]);
       expect(getState().auditLog).toEqual([]);
+      expect(getState().controlResults).toEqual({});
+      expect(getState().deliveryPlans).toEqual({});
+      expect(getState().artefacts).toEqual({});
+      expect(getState().outcomes).toEqual({});
+      expect(getState().snapshots).toEqual({});
+      expect(getState().verifications).toEqual({});
     } finally {
       // Clean up temp directory and reset state
       setState(null);
@@ -215,6 +221,46 @@ describe("persistence", () => {
       expect(read.mode).toBe("github");
       expect(read.githubSyncEnabled).toBe(true);
       expect(read.githubRepo).toBe("roundtrip/repo");
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true }).catch(() => {});
+    }
+  });
+
+  it("updateStorageSettings preserves existing integration config and isolates storage settings", async () => {
+    const cwd = `/tmp/dao-storage-coexist-test-${Date.now()}`;
+    const daoRoot = getDaoRoot(cwd);
+    const configPath = path.join(daoRoot, "config.json");
+
+    try {
+      await fs.mkdir(daoRoot, { recursive: true });
+      await fs.writeFile(
+        configPath,
+        JSON.stringify(
+          {
+            github: {
+              enabled: true,
+              token: "token",
+              owner: "owner",
+              repo: "repo",
+            },
+          },
+          null,
+          2,
+        ),
+        "utf-8",
+      );
+
+      const written = await updateStorageSettings(daoRoot, { mode: "hybrid", githubSyncEnabled: true });
+      expect(written.mode).toBe("hybrid");
+      expect(written.githubSyncEnabled).toBe(true);
+
+      const reloadedStorage = await getStorageSettings(daoRoot);
+      expect(reloadedStorage.mode).toBe("hybrid");
+      expect(reloadedStorage.githubSyncEnabled).toBe(true);
+
+      const mergedConfig = JSON.parse(await fs.readFile(configPath, "utf-8"));
+      expect(mergedConfig.github?.repo).toBe("repo");
+      expect(mergedConfig.storageSettings?.mode).toBe("hybrid");
     } finally {
       await fs.rm(cwd, { recursive: true, force: true }).catch(() => {});
     }

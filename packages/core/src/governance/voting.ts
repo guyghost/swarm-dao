@@ -9,6 +9,10 @@ import type { AgentOutput, DAOConfig, Proposal, TallyResult, Vote, VotePosition 
 const VOTE_PATTERN = /##\s*Vote\s*\n\s*(for|against|abstain)/i;
 const REASONING_PATTERN = /##\s*Reasoning\s*\n\s*([\s\S]*?)(?=\n##|$)/i;
 
+function normalizeVoteWeight(weight: number): number {
+  return Number.isFinite(weight) && weight > 0 ? weight : 0;
+}
+
 export function parseVoteFromOutput(
   agentId: string,
   agentName: string,
@@ -41,11 +45,17 @@ export function tallyVotes(proposal: Proposal, config: DAOConfig): TallyResult {
   const votes = proposal.votes || [];
   const totalAgents = proposal.agentOutputs?.length || votes.length;
 
-  const weightedFor = votes.filter((v) => v.position === "for").reduce((sum, v) => sum + v.weight, 0);
+  const weightedFor = votes
+    .filter((v) => v.position === "for")
+    .reduce((sum, v) => sum + normalizeVoteWeight(v.weight), 0);
 
-  const weightedAgainst = votes.filter((v) => v.position === "against").reduce((sum, v) => sum + v.weight, 0);
+  const weightedAgainst = votes
+    .filter((v) => v.position === "against")
+    .reduce((sum, v) => sum + normalizeVoteWeight(v.weight), 0);
 
-  const weightedAbstain = votes.filter((v) => v.position === "abstain").reduce((sum, v) => sum + v.weight, 0);
+  const weightedAbstain = votes
+    .filter((v) => v.position === "abstain")
+    .reduce((sum, v) => sum + normalizeVoteWeight(v.weight), 0);
 
   const totalVotingWeight = weightedFor + weightedAgainst + weightedAbstain;
   const votingAgents = votes.filter((v) => v.position !== "abstain").length;
@@ -53,7 +63,7 @@ export function tallyVotes(proposal: Proposal, config: DAOConfig): TallyResult {
   // Quorum check: % of total agent weight that participated
   const totalPossibleWeight =
     totalAgents > 0
-      ? votes.reduce((sum, v) => sum + v.weight, 0) + (totalAgents - votes.length) * 1
+      ? votes.reduce((sum, v) => sum + normalizeVoteWeight(v.weight), 0) + (totalAgents - votes.length) * 1
       : totalVotingWeight;
 
   const quorumPercent = totalPossibleWeight > 0 ? Math.round((totalVotingWeight / totalPossibleWeight) * 100) : 0;

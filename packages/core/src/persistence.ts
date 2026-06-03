@@ -32,6 +32,26 @@ const PROPOSALS_DIR = "proposals";
 const DECISIONS_DIR = "decisions";
 const CONFIG_FILE = "config.json";
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function normalizeStorageSettings(value: unknown, daoRoot: string): StorageSettings {
+  const settings = isRecord(value) ? value : {};
+  const mode = settings.mode;
+  const githubSyncEnabled = settings.githubSyncEnabled;
+  const githubRepo = settings.githubRepo;
+  const next: StorageSettings = {
+    mode: mode === "local" || mode === "github" || mode === "hybrid" ? mode : "local",
+    githubSyncEnabled: typeof githubSyncEnabled === "boolean" ? githubSyncEnabled : false,
+    daoRoot: typeof settings.daoRoot === "string" ? settings.daoRoot : daoRoot,
+  };
+  if (typeof githubRepo === "string") {
+    next.githubRepo = githubRepo;
+  }
+  return next;
+}
+
 // ── Paths ────────────────────────────────────────────────────
 
 export function getDaoRoot(cwd: string): string {
@@ -179,6 +199,16 @@ export async function loadState(cwd: string): Promise<DAOState | null> {
   if (!loaded.proposals) loaded.proposals = [];
   if (!loaded.agents) loaded.agents = [];
   if (!loaded.auditLog) loaded.auditLog = [];
+  if (!loaded.controlResults) loaded.controlResults = {};
+  if (!loaded.deliveryPlans) loaded.deliveryPlans = {};
+  if (!loaded.artefacts) loaded.artefacts = {};
+  if (!loaded.outcomes) loaded.outcomes = {};
+  if (!loaded.snapshots) loaded.snapshots = {};
+  if (!loaded.verifications) loaded.verifications = {};
+  if (!loaded.daoRoot) loaded.daoRoot = daoRoot;
+  if (typeof loaded.nextProposalId !== "number") loaded.nextProposalId = 1;
+  if (typeof loaded.nextAuditId !== "number") loaded.nextAuditId = 1;
+  if (!loaded.config) loaded.config = createInitialState(daoRoot).config;
 
   // Reconcile with sidecars
   try {
@@ -308,7 +338,11 @@ export async function getStorageSettings(daoRoot: string): Promise<StorageSettin
   const configPath = path.join(daoRoot, CONFIG_FILE);
   try {
     const raw = await fs.readFile(configPath, "utf-8");
-    return JSON.parse(raw) as StorageSettings;
+    const parsed = JSON.parse(raw) as unknown;
+    if (isRecord(parsed) && isRecord(parsed.storageSettings)) {
+      return normalizeStorageSettings(parsed.storageSettings, daoRoot);
+    }
+    return normalizeStorageSettings(parsed, daoRoot);
   } catch {
     return { mode: "local", githubSyncEnabled: false, daoRoot };
   }
@@ -319,10 +353,21 @@ export async function updateStorageSettings(
   updates: Partial<StorageSettings>,
 ): Promise<StorageSettings> {
   const current = await getStorageSettings(daoRoot);
-  const next = { ...current, ...updates };
+  const next = normalizeStorageSettings({ ...current, ...updates }, daoRoot);
   const configPath = path.join(daoRoot, CONFIG_FILE);
   await fs.mkdir(daoRoot, { recursive: true });
-  await fs.writeFile(configPath, JSON.stringify(next, null, 2), "utf-8");
+  let rootConfig: Record<string, unknown> = {};
+  try {
+    const raw = await fs.readFile(configPath, "utf-8");
+    const parsed = JSON.parse(raw) as unknown;
+    if (isRecord(parsed)) {
+      rootConfig = parsed;
+    }
+  } catch {
+    /* ignore missing/invalid config */
+  }
+  rootConfig.storageSettings = next;
+  await fs.writeFile(configPath, JSON.stringify(rootConfig, null, 2), "utf-8");
   return next;
 }
 
