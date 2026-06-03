@@ -2,19 +2,89 @@
 // Swarm DAO Core — Shared host-adapter utilities
 // ============================================================
 
-import { exec as nodeExec } from "node:child_process";
+import { spawn } from "node:child_process";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
-/** Promisified wrapper around child_process.exec. */
+function parseCommand(command: string): { file: string; args: string[] } {
+  const trimmed = command.trim();
+  if (!trimmed) {
+    throw new Error("Command cannot be empty");
+  }
+  if (/[|&;<>()`$\n\r]/.test(trimmed)) {
+    throw new Error("Unsafe command: shell metacharacters are not allowed");
+  }
+  const tokens = trimmed.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) ?? [];
+  if (tokens.length === 0) {
+    throw new Error("Command cannot be empty");
+  }
+  const decodeToken = (token: string): string => {
+    if ((token.startsWith('"') && token.endsWith('"')) || (token.startsWith("'") && token.endsWith("'"))) {
+      return token.slice(1, -1);
+    }
+    return token;
+  };
+  const file = decodeToken(tokens[0] ?? "");
+  const args = tokens.slice(1).map(decodeToken);
+  if (!file) {
+    throw new Error("Command executable is required");
+  }
+  return { file, args };
+}
+
+/** Spawn wrapper using shell-free execution to avoid command injection risks. */
 export function execCommand(
   command: string,
   options?: { cwd?: string; timeout?: number },
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   return new Promise((resolve) => {
-    nodeExec(command, { cwd: options?.cwd, timeout: options?.timeout }, (error, stdout, stderr) => {
-      const exitCode = error ? (typeof error.code === "number" ? error.code : 1) : 0;
-      resolve({ stdout, stderr, exitCode });
+    let parsed: { file: string; args: string[] };
+    try {
+      parsed = parseCommand(command);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      resolve({ stdout: "", stderr: message, exitCode: 1 });
+      return;
+    }
+
+    const child = spawn(parsed.file, parsed.args, {
+      cwd: options?.cwd,
+      shell: false,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    let timedOut = false;
+    const timeoutMs = options?.timeout;
+    const timeout =
+      typeof timeoutMs === "number" && timeoutMs > 0
+        ? setTimeout(() => {
+            timedOut = true;
+            child.kill("SIGTERM");
+          }, timeoutMs)
+        : undefined;
+
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on("error", (error) => {
+      if (timeout) clearTimeout(timeout);
+      resolve({ stdout, stderr: `${stderr}${error.message}`, exitCode: 1 });
+    });
+    child.on("close", (code) => {
+      if (timeout) clearTimeout(timeout);
+      if (timedOut) {
+        resolve({
+          stdout,
+          stderr: `${stderr}${stderr.endsWith("\n") ? "" : "\n"}Command timed out after ${timeoutMs}ms`,
+          exitCode: 124,
+        });
+        return;
+      }
+      resolve({ stdout, stderr, exitCode: code ?? 1 });
     });
   });
 }

@@ -3,6 +3,7 @@
 // ============================================================
 
 import type { Proposal } from "../types/index.js";
+import { HttpRequestError, requestJson } from "./http.js";
 import { slugify } from "./utils.js";
 
 interface GitHubConfig {
@@ -53,26 +54,30 @@ export async function ghCreateBranch(
   const base = baseBranch || config?.defaultBranch || "main";
 
   // Get base branch SHA
-  const refRes = await fetch(`${getApiBase()}/repos/${config?.owner}/${config?.repo}/git/ref/heads/${base}`, {
-    headers: getAuthHeaders(),
-  });
-  if (!refRes.ok) {
-    throw new Error(`Failed to get ref for ${base}: ${refRes.status}`);
+  let refData: { object?: { sha: string } } | null;
+  try {
+    ({ data: refData } = await requestJson<{ object?: { sha: string } }>(
+      `${getApiBase()}/repos/${config?.owner}/${config?.repo}/git/ref/heads/${base}`,
+      {
+        headers: getAuthHeaders(),
+      },
+    ));
+  } catch (error) {
+    if (error instanceof HttpRequestError) {
+      throw new Error(`Failed to get ref for ${base}: ${error.status}`);
+    }
+    throw error;
   }
-  const refData = (await refRes.json()) as { object?: { sha: string } };
-  const sha = refData.object?.sha;
+  const sha = refData?.object?.sha;
   if (!sha) return null;
 
   // Create branch
-  const createRes = await fetch(`${getApiBase()}/repos/${config?.owner}/${config?.repo}/git/refs`, {
+  await requestJson<unknown>(`${getApiBase()}/repos/${config?.owner}/${config?.repo}/git/refs`, {
     method: "POST",
     headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
     body: JSON.stringify({ ref: `refs/heads/${branchName}`, sha }),
+    allowStatuses: [422],
   });
-
-  if (!createRes.ok && createRes.status !== 422) {
-    throw new Error(`Failed to create branch: ${createRes.status}`);
-  }
 
   return { ref: `refs/heads/${branchName}`, sha };
 }
@@ -90,23 +95,29 @@ export async function ghCreatePullRequest(
 
   const body = buildPRBody(proposal, options.linkedIssue);
 
-  const res = await fetch(`${getApiBase()}/repos/${config?.owner}/${config?.repo}/pulls`, {
-    method: "POST",
-    headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
-    body: JSON.stringify({
-      title: proposal.title,
-      body,
-      head: options.headBranch,
-      base: options.baseBranch || config?.defaultBranch || "main",
-      draft: options.draft ?? false,
-    }),
-  });
-
-  if (!res.ok) {
-    throw new Error(`Failed to create PR: ${res.status}`);
+  let data: { number: number; html_url: string } | null;
+  try {
+    ({ data } = await requestJson<{ number: number; html_url: string }>(
+      `${getApiBase()}/repos/${config?.owner}/${config?.repo}/pulls`,
+      {
+        method: "POST",
+        headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: proposal.title,
+          body,
+          head: options.headBranch,
+          base: options.baseBranch || config?.defaultBranch || "main",
+          draft: options.draft ?? false,
+        }),
+      },
+    ));
+  } catch (error) {
+    if (error instanceof HttpRequestError) {
+      throw new Error(`Failed to create PR: ${error.status}`);
+    }
+    throw error;
   }
-
-  const data = (await res.json()) as { number: number; html_url: string };
+  if (!data) return null;
   return { number: data.number, url: data.html_url };
 }
 
@@ -117,15 +128,20 @@ export async function ghCreateIssue(
 ): Promise<{ number: number; url: string } | null> {
   if (!isGitHubEnabled()) return null;
 
-  const res = await fetch(`${getApiBase()}/repos/${config?.owner}/${config?.repo}/issues`, {
-    method: "POST",
-    headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
-    body: JSON.stringify({ title, body, labels: labels ?? ["dao-proposal"] }),
-  });
-
-  if (!res.ok) return null;
-  const data = (await res.json()) as { number: number; html_url: string };
-  return { number: data.number, url: data.html_url };
+  try {
+    const { data } = await requestJson<{ number: number; html_url: string }>(
+      `${getApiBase()}/repos/${config?.owner}/${config?.repo}/issues`,
+      {
+        method: "POST",
+        headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ title, body, labels: labels ?? ["dao-proposal"] }),
+      },
+    );
+    if (!data) return null;
+    return { number: data.number, url: data.html_url };
+  } catch {
+    return null;
+  }
 }
 
 export async function ghUpdateIssue(
@@ -134,13 +150,16 @@ export async function ghUpdateIssue(
 ): Promise<boolean> {
   if (!isGitHubEnabled()) return false;
 
-  const res = await fetch(`${getApiBase()}/repos/${config?.owner}/${config?.repo}/issues/${issueNumber}`, {
-    method: "PATCH",
-    headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
-    body: JSON.stringify(updates),
-  });
-
-  return res.ok;
+  try {
+    await requestJson<unknown>(`${getApiBase()}/repos/${config?.owner}/${config?.repo}/issues/${issueNumber}`, {
+      method: "PATCH",
+      headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify(updates),
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function buildPRBody(proposal: Proposal, linkedIssue?: number): string {
