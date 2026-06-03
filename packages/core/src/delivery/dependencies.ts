@@ -4,9 +4,7 @@
 
 import type { Proposal } from "../types/index.js";
 
-export type DependencyResolution =
-  | { order: number[]; error?: undefined }
-  | { order?: undefined; error: string };
+export type DependencyResolution = { order: number[]; error?: undefined } | { order?: undefined; error: string };
 
 /**
  * Resolve the execution order for a proposal and all its transitive dependencies.
@@ -55,7 +53,7 @@ export function getUnexecutedDependencies(targetId: number, proposals: Proposal[
   if (resolution.error) return resolution;
 
   const proposalMap = new Map<number, Proposal>(proposals.map((p) => [p.id, p]));
-  const allOrder = resolution.order!;
+  const allOrder = resolution.order ?? [];
   const unexecuted = allOrder
     .filter((id) => id !== targetId)
     .filter((id) => proposalMap.get(id)?.status !== "executed");

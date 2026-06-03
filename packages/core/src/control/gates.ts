@@ -119,7 +119,7 @@ const GATES: GateDefinition[] = [
       const proposals = getState().proposals;
       const unexecuted = dependsOn.filter((id) => {
         const dep = proposals.find((p) => p.id === id);
-        return !dep || dep.status !== "executed";
+        return dep?.status !== "executed";
       });
       if (unexecuted.length > 0) {
         return {

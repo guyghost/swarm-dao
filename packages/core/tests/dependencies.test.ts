@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import { getUnexecutedDependencies, resolveDependencyOrder } from "@guyghost/swarm-dao-core";
 import type { Proposal } from "@guyghost/swarm-dao-core";
+import { getUnexecutedDependencies, resolveDependencyOrder } from "@guyghost/swarm-dao-core";
 
 function makeProposal(id: number, status: Proposal["status"] = "controlled", dependsOn?: number[]): Proposal {
   return {
@@ -41,7 +41,7 @@ describe("resolveDependencyOrder", () => {
     const d = makeProposal(4, "controlled", [2, 3]);
     const result = resolveDependencyOrder(4, [a, b, c, d]);
     expect(result.error).toBeUndefined();
-    const order = result.order!;
+    const order = result.order ?? [];
     // A must come before B and C; B and C before D
     expect(order.indexOf(1)).toBeLessThan(order.indexOf(2));
     expect(order.indexOf(1)).toBeLessThan(order.indexOf(3));

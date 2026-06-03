@@ -156,7 +156,7 @@ describe("CLI E2E", () => {
   describe("ship command", () => {
     /** Helper: fast-track a proposal to 'controlled' status by mutating state directly */
     async function setupControlledProposal(title: string, dependsOn?: number[]): Promise<number> {
-      const { getState, loadState, saveState, getOrCreateState, setState } = await import("@guyghost/swarm-dao-core");
+      const { loadState, saveState, getOrCreateState, setState } = await import("@guyghost/swarm-dao-core");
 
       const loaded = await loadState(testDir);
       if (!loaded) {
@@ -231,8 +231,9 @@ describe("CLI E2E", () => {
       await runCLI(["setup"], testDir);
 
       // Create dep in 'open' state (not controlled)
-      const { getState, loadState, getOrCreateState, setState, saveState, initializeAgents, createProposal } =
-        await import("@guyghost/swarm-dao-core");
+      const { loadState, getOrCreateState, setState, saveState, initializeAgents, createProposal } = await import(
+        "@guyghost/swarm-dao-core"
+      );
       const loaded = await loadState(testDir);
       if (!loaded) {
         const s = getOrCreateState(testDir);

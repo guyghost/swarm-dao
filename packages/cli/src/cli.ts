@@ -153,7 +153,10 @@ async function cmdPropose(cwd: string, flags: Record<string, string | true>): Pr
   // Parse optional --depends-on flag (comma-separated proposal IDs)
   let dependsOn: number[] | undefined;
   if (typeof flags["depends-on"] === "string") {
-    const raw = flags["depends-on"].split(",").map((s) => s.trim()).filter(Boolean);
+    const raw = flags["depends-on"]
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
     dependsOn = raw.map((s) => {
       const n = Number(s);
       if (!Number.isInteger(n) || n <= 0) err(`invalid proposal id '${s}' in --depends-on`);
