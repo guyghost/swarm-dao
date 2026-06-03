@@ -73,6 +73,36 @@ describe("governance/voting", () => {
     expect(tally.weightedAgainst).toBe(3);
     expect(tally.approved).toBe(true); // 6/9 = 66% > 55%
   });
+
+  it("ignores invalid vote weights when tallying", () => {
+    const proposal = {
+      id: 2,
+      title: "Invalid weights",
+      type: "product-feature" as const,
+      description: "Test proposal",
+      proposedBy: "test",
+      status: "deliberating" as const,
+      votes: [
+        { agentId: "strategist", agentName: "Strategist", position: "for" as const, reasoning: "Good", weight: 3 },
+        {
+          agentId: "broken",
+          agentName: "Broken",
+          position: "against" as const,
+          reasoning: "Bad",
+          weight: Number.NaN,
+        },
+      ],
+      agentOutputs: [{ agentId: "strategist", agentName: "Strategist", role: "vision", content: "", durationMs: 1 }],
+      createdAt: new Date().toISOString(),
+    };
+
+    const tally = tallyVotes(proposal, DEFAULT_CONFIG);
+    expect(Number.isFinite(tally.weightedFor)).toBe(true);
+    expect(Number.isFinite(tally.weightedAgainst)).toBe(true);
+    expect(Number.isFinite(tally.approvalScore)).toBe(true);
+    expect(Number.isFinite(tally.quorumPercent)).toBe(true);
+    expect(tally.weightedAgainst).toBe(0);
+  });
 });
 
 // ── Scoring ─────────────────────────────────────────────────

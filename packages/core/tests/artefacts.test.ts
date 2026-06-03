@@ -71,6 +71,17 @@ describe("delivery/artefacts", () => {
     expect(brief.keyAgents.length).toBe(2);
   });
 
+  it("handles zero or invalid vote weights in decision brief", () => {
+    const brief = generateDecisionBrief({
+      ...mockProposal,
+      votes: [
+        { agentId: "a", agentName: "A", position: "for", reasoning: "ok", weight: 0 },
+        { agentId: "b", agentName: "B", position: "against", reasoning: "no", weight: Number.NaN },
+      ],
+    });
+    expect(brief.approvalScore).toBe(0);
+  });
+
   it("generates ADR", () => {
     const adr = generateADR(mockProposal);
     expect(adr.adrId).toBe("ADR-042");

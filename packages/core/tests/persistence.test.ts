@@ -102,8 +102,59 @@ describe("persistence", () => {
       expect(getState().proposals).toEqual([]);
       expect(getState().agents).toEqual([]);
       expect(getState().auditLog).toEqual([]);
+      expect(getState().controlResults).toEqual({});
+      expect(getState().deliveryPlans).toEqual({});
+      expect(getState().artefacts).toEqual({});
+      expect(getState().outcomes).toEqual({});
+      expect(getState().snapshots).toEqual({});
+      expect(getState().verifications).toEqual({});
     } finally {
       // Clean up temp directory and reset state
+      setState(null);
+      await fs.rm(cwd, { recursive: true, force: true }).catch(() => {});
+    }
+  });
+
+  it("loadState repairs invalid collection shapes and non-positive IDs", async () => {
+    const cwd = `/tmp/dao-corruption-shape-test-${Date.now()}`;
+
+    try {
+      await initStorage(cwd);
+
+      const corruptedState = {
+        proposals: {},
+        agents: {},
+        auditLog: {},
+        config: { quorumPercent: 60 },
+        nextProposalId: -5,
+        initialized: true,
+        nextAuditId: 0.5,
+        controlResults: [],
+        deliveryPlans: [],
+        artefacts: [],
+        outcomes: [],
+        snapshots: [],
+        verifications: [],
+        daoRoot: getDaoRoot(cwd),
+      };
+      const statePath = `${getDaoRoot(cwd)}/state.json`;
+      await fs.writeFile(statePath, JSON.stringify(corruptedState), "utf-8");
+
+      const loaded = await loadState(cwd);
+      expect(loaded).not.toBeNull();
+
+      expect(getState().proposals).toEqual([]);
+      expect(getState().agents).toEqual([]);
+      expect(getState().auditLog).toEqual([]);
+      expect(getState().controlResults).toEqual({});
+      expect(getState().deliveryPlans).toEqual({});
+      expect(getState().artefacts).toEqual({});
+      expect(getState().outcomes).toEqual({});
+      expect(getState().snapshots).toEqual({});
+      expect(getState().verifications).toEqual({});
+      expect(getState().nextProposalId).toBe(1);
+      expect(getState().nextAuditId).toBe(1);
+    } finally {
       setState(null);
       await fs.rm(cwd, { recursive: true, force: true }).catch(() => {});
     }
@@ -215,6 +266,46 @@ describe("persistence", () => {
       expect(read.mode).toBe("github");
       expect(read.githubSyncEnabled).toBe(true);
       expect(read.githubRepo).toBe("roundtrip/repo");
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true }).catch(() => {});
+    }
+  });
+
+  it("updateStorageSettings preserves existing integration config and isolates storage settings", async () => {
+    const cwd = `/tmp/dao-storage-coexist-test-${Date.now()}`;
+    const daoRoot = getDaoRoot(cwd);
+    const configPath = path.join(daoRoot, "config.json");
+
+    try {
+      await fs.mkdir(daoRoot, { recursive: true });
+      await fs.writeFile(
+        configPath,
+        JSON.stringify(
+          {
+            github: {
+              enabled: true,
+              token: "token",
+              owner: "owner",
+              repo: "repo",
+            },
+          },
+          null,
+          2,
+        ),
+        "utf-8",
+      );
+
+      const written = await updateStorageSettings(daoRoot, { mode: "hybrid", githubSyncEnabled: true });
+      expect(written.mode).toBe("hybrid");
+      expect(written.githubSyncEnabled).toBe(true);
+
+      const reloadedStorage = await getStorageSettings(daoRoot);
+      expect(reloadedStorage.mode).toBe("hybrid");
+      expect(reloadedStorage.githubSyncEnabled).toBe(true);
+
+      const mergedConfig = JSON.parse(await fs.readFile(configPath, "utf-8"));
+      expect(mergedConfig.github?.repo).toBe("repo");
+      expect(mergedConfig.storageSettings?.mode).toBe("hybrid");
     } finally {
       await fs.rm(cwd, { recursive: true, force: true }).catch(() => {});
     }

@@ -32,6 +32,30 @@ const PROPOSALS_DIR = "proposals";
 const DECISIONS_DIR = "decisions";
 const CONFIG_FILE = "config.json";
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isPositiveInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value > 0;
+}
+
+function normalizeStorageSettings(value: unknown, daoRoot: string): StorageSettings {
+  const settings = isRecord(value) ? value : {};
+  const mode = settings.mode;
+  const githubSyncEnabled = settings.githubSyncEnabled;
+  const githubRepo = settings.githubRepo;
+  const next: StorageSettings = {
+    mode: mode === "local" || mode === "github" || mode === "hybrid" ? mode : "local",
+    githubSyncEnabled: typeof githubSyncEnabled === "boolean" ? githubSyncEnabled : false,
+    daoRoot: typeof settings.daoRoot === "string" ? settings.daoRoot : daoRoot,
+  };
+  if (typeof githubRepo === "string") {
+    next.githubRepo = githubRepo;
+  }
+  return next;
+}
+
 // ── Paths ────────────────────────────────────────────────────
 
 export function getDaoRoot(cwd: string): string {
@@ -175,23 +199,45 @@ export async function loadState(cwd: string): Promise<DAOState | null> {
   }
   if (!loaded) return null;
 
-  // Ensure arrays exist (guard against corrupted/legacy state.json)
-  if (!loaded.proposals) loaded.proposals = [];
-  if (!loaded.agents) loaded.agents = [];
-  if (!loaded.auditLog) loaded.auditLog = [];
+  // Ensure state shape exists (guard against corrupted/legacy state.json)
+  if (!Array.isArray(loaded.proposals)) loaded.proposals = [];
+  if (!Array.isArray(loaded.agents)) loaded.agents = [];
+  if (!Array.isArray(loaded.auditLog)) loaded.auditLog = [];
+  if (!isRecord(loaded.controlResults)) loaded.controlResults = {};
+  if (!isRecord(loaded.deliveryPlans)) loaded.deliveryPlans = {};
+  if (!isRecord(loaded.artefacts)) loaded.artefacts = {};
+  if (!isRecord(loaded.outcomes)) loaded.outcomes = {};
+  if (!isRecord(loaded.snapshots)) loaded.snapshots = {};
+  if (!isRecord(loaded.verifications)) loaded.verifications = {};
+  if (!loaded.daoRoot) loaded.daoRoot = daoRoot;
+  if (!isPositiveInteger(loaded.nextProposalId)) loaded.nextProposalId = 1;
+  if (!isPositiveInteger(loaded.nextAuditId)) loaded.nextAuditId = 1;
+  if (!loaded.config) loaded.config = createInitialState(daoRoot).config;
 
   // Reconcile with sidecars
   try {
+    const persistedProposals = loaded.proposals.filter((proposal): proposal is Proposal =>
+      isPositiveInteger((proposal as { id?: unknown })?.id),
+    );
+    loaded.proposals = persistedProposals;
     const sidecars = await loadProposalsFromDisk(daoRoot);
     if (sidecars.length) {
       const byId = new Map<number, Proposal>();
-      for (const p of loaded.proposals) byId.set(p.id, p);
+      for (const p of persistedProposals) byId.set(p.id, p);
       for (const sc of sidecars) byId.set(sc.id, sc);
       loaded.proposals = Array.from(byId.values()).sort((a, b) => a.id - b.id);
     }
   } catch {
     /* ignore */
   }
+
+  const highestProposalId = loaded.proposals.reduce((max, proposal) => Math.max(max, proposal.id), 0);
+  if (loaded.nextProposalId <= highestProposalId) loaded.nextProposalId = highestProposalId + 1;
+  const highestAuditId = loaded.auditLog.reduce((max, entry) => {
+    const id = (entry as { id?: unknown })?.id;
+    return isPositiveInteger(id) ? Math.max(max, id) : max;
+  }, 0);
+  if (loaded.nextAuditId <= highestAuditId) loaded.nextAuditId = highestAuditId + 1;
 
   state = loaded;
   return state;
@@ -211,7 +257,7 @@ export async function loadProposalsFromDisk(daoRoot: string): Promise<Proposal[]
     try {
       const raw = await fs.readFile(path.join(dir, file), "utf-8");
       const p = JSON.parse(raw) as Proposal;
-      if (typeof p?.id === "number") out.push(p);
+      if (isPositiveInteger(p?.id)) out.push(p);
     } catch {
       /* skip malformed */
     }
@@ -308,7 +354,11 @@ export async function getStorageSettings(daoRoot: string): Promise<StorageSettin
   const configPath = path.join(daoRoot, CONFIG_FILE);
   try {
     const raw = await fs.readFile(configPath, "utf-8");
-    return JSON.parse(raw) as StorageSettings;
+    const parsed = JSON.parse(raw) as unknown;
+    if (isRecord(parsed) && isRecord(parsed.storageSettings)) {
+      return normalizeStorageSettings(parsed.storageSettings, daoRoot);
+    }
+    return normalizeStorageSettings(parsed, daoRoot);
   } catch {
     return { mode: "local", githubSyncEnabled: false, daoRoot };
   }
@@ -319,10 +369,21 @@ export async function updateStorageSettings(
   updates: Partial<StorageSettings>,
 ): Promise<StorageSettings> {
   const current = await getStorageSettings(daoRoot);
-  const next = { ...current, ...updates };
+  const next = normalizeStorageSettings({ ...current, ...updates }, daoRoot);
   const configPath = path.join(daoRoot, CONFIG_FILE);
   await fs.mkdir(daoRoot, { recursive: true });
-  await fs.writeFile(configPath, JSON.stringify(next, null, 2), "utf-8");
+  let rootConfig: Record<string, unknown> = {};
+  try {
+    const raw = await fs.readFile(configPath, "utf-8");
+    const parsed = JSON.parse(raw) as unknown;
+    if (isRecord(parsed)) {
+      rootConfig = parsed;
+    }
+  } catch {
+    /* ignore missing/invalid config */
+  }
+  rootConfig.storageSettings = next;
+  await fs.writeFile(configPath, JSON.stringify(rootConfig, null, 2), "utf-8");
   return next;
 }
 

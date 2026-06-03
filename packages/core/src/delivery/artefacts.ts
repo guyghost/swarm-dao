@@ -18,9 +18,10 @@ import type {
 
 function generateDecisionBrief(proposal: Proposal): DecisionBrief {
   const forVotes = proposal.votes?.filter((v) => v.position === "for") ?? [];
-  const approvalScore = proposal.votes?.length
-    ? Math.round((forVotes.reduce((s, v) => s + v.weight, 0) / proposal.votes.reduce((s, v) => s + v.weight, 0)) * 100)
-    : 0;
+  const safeWeight = (weight: number): number => (Number.isFinite(weight) && weight > 0 ? weight : 0);
+  const totalWeight = proposal.votes?.reduce((s, v) => s + safeWeight(v.weight), 0) ?? 0;
+  const forWeight = forVotes.reduce((s, v) => s + safeWeight(v.weight), 0);
+  const approvalScore = totalWeight > 0 ? Math.round((forWeight / totalWeight) * 100) : 0;
 
   return {
     proposalId: proposal.id,

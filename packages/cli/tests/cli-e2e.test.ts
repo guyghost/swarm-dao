@@ -81,6 +81,16 @@ describe("CLI E2E", () => {
     expect(show.stdout).toContain("for");
   });
 
+  it("rejects invalid vote weight", async () => {
+    await runCLI(["init"], testDir);
+    await runCLI(["setup"], testDir);
+    await runCLI(["propose", "--title=Vote Test", "--type=product-feature", "--description=Test"], testDir);
+
+    const vote = await runCLI(["vote", "1", "--position=for", "--reasoning=Looks good", "--weight=NaN"], testDir);
+    expect(vote.code).toBe(1);
+    expect(vote.stderr).toContain("--weight must be a positive number");
+  });
+
   it("audit trail", async () => {
     await runCLI(["init"], testDir);
     await runCLI(["setup"], testDir);
