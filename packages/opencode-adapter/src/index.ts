@@ -398,7 +398,6 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
         // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
         async execute(args: any, _context: any) {
           const result = await performRollback(args.proposalId);
-          await saveState();
           return formatRollback(result);
         },
       }),

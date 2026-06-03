@@ -2,7 +2,7 @@
 // Swarm DAO Core — Proposal Execution
 // ============================================================
 
-import { transitionProposal } from "../governance/lifecycle.js";
+import { canTransition, transitionProposal } from "../governance/lifecycle.js";
 import { captureSnapshot, getState, storeVerification } from "../persistence.js";
 import type { ExecutionSnapshot, ExecutionVerification, Proposal, VerificationStatus } from "../types/index.js";
 import { generateDeliveryPlan } from "./plans.js";
@@ -42,6 +42,10 @@ export async function executeProposal(proposal: Proposal): Promise<ExecutionResu
   if (!plan) {
     plan = generateDeliveryPlan(proposal);
     state.deliveryPlans[proposal.id] = plan;
+  }
+
+  if (!canTransition(proposal.status, "executed")) {
+    return { success: false, result: `Cannot execute proposal from status "${proposal.status}"` };
   }
 
   // Capture snapshot (conceptual — actual file snapshot done by adapter)

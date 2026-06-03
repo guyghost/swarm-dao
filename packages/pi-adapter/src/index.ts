@@ -588,7 +588,6 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
     parameters: Type.Object({ proposalId: Type.Number() }),
     async execute(_id, params: DaoRollbackParams) {
       const result = await performRollback(Number(params.proposalId));
-      await saveState();
       return toolResult(formatRollback(result));
     },
   });

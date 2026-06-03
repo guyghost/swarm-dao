@@ -51,4 +51,44 @@ describe("control/gates", () => {
     expect(formatted).toContain("ALL GATES PASSED");
     expect(formatted).toContain("Quorum");
   });
+
+  it("uses config typeQuorum override for quorum-quality gate", () => {
+    const proposal = {
+      id: 2,
+      title: "Quorum Override Test",
+      type: "product-feature" as const,
+      description: "Validate quorum override in gate",
+      proposedBy: "test",
+      status: "approved" as const,
+      votes: Array.from({ length: 5 }, (_, i) => ({
+        agentId: `v${i}`,
+        agentName: `Voter ${i}`,
+        position: "for" as const,
+        reasoning: "ok",
+        weight: 1,
+      })),
+      agentOutputs: Array.from({ length: 10 }, (_, i) => ({
+        agentId: `a${i}`,
+        agentName: `Agent ${i}`,
+        content: "ok",
+      })),
+      acceptanceCriteria: ["Gate should respect override"],
+      successMetrics: ["Override applied"],
+      createdAt: new Date().toISOString(),
+    };
+
+    const config = {
+      ...DEFAULT_CONFIG,
+      typeQuorum: {
+        ...DEFAULT_CONFIG.typeQuorum,
+        "product-feature": { quorumPercent: 40, approvalPercent: 55, description: "Overridden for test" },
+      },
+    };
+
+    const result = runGates(proposal, config);
+    const quorumGate = result.gates.find((g) => g.gateId === "quorum-quality");
+    expect(quorumGate).toBeDefined();
+    expect(quorumGate?.passed).toBe(true);
+    expect(quorumGate?.message).toContain("50% ≥ 40%");
+  });
 });
