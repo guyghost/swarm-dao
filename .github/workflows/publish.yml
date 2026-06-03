@@ -1,6 +1,8 @@
 name: Release
 
 on:
+  pull_request_target:
+    branches: [main]
   push:
     branches: [main]
 
@@ -8,17 +10,44 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
-# id-token: write is required for npm Trusted Publishing (OIDC).
+# id-token: write is required only for npm Trusted Publishing (OIDC).
 # Configure the npm package's Trusted Publisher to this workflow path.
-permissions:
-  contents: write
-  pull-requests: write
-  id-token: write
 
 jobs:
-  release:
-    name: Version or publish packages
+  version:
+    name: Create release version PR
+    if: github.event_name == 'pull_request_target'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Create or update release version PR
+        uses: changesets/action@v1
+        with:
+          version: bunx changeset version
+          commit: "chore(release): version packages"
+          title: "chore(release): version packages"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish:
+    name: Publish packages
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
     steps:
       - uses: actions/checkout@v6
         with:
@@ -54,13 +83,10 @@ jobs:
       - name: Validate Pi extension npm package
         run: bun run pack:pi
 
-      - name: Create Release Pull Request or Publish
+      - name: Publish packages to npm
         uses: changesets/action@v1
         with:
           publish: bun run release
-          version: bunx changeset version
-          commit: "chore(release): version packages"
-          title: "chore(release): version packages"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_CONFIG_PROVENANCE: "true"
