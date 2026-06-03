@@ -10,18 +10,17 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
-# id-token: write is required for npm Trusted Publishing (OIDC).
+# id-token: write is required only for npm Trusted Publishing (OIDC).
 # Configure the npm package's Trusted Publisher to this workflow path.
-permissions:
-  contents: write
-  pull-requests: write
-  id-token: write
 
 jobs:
   version:
     name: Create release version PR
     if: github.event_name == 'pull_request_target'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
       - uses: actions/checkout@v6
         with:
@@ -46,6 +45,9 @@ jobs:
     name: Publish packages
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
     steps:
       - uses: actions/checkout@v6
         with:
