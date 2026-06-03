@@ -285,7 +285,7 @@ GitHub Actions workflow included (`.github/workflows/ci.yml`):
 - Build verification
 
 Release workflow included (`.github/workflows/publish.yml`):
-- Creates Changesets version PRs on pull requests
+- Creates Changesets version PRs from `pull_request_target`
 - Publishes to npm from `main` via GitHub OIDC trusted publishing
 
 ## Documentation
