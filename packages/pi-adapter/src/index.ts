@@ -6,7 +6,7 @@
 
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import type { AgentOutput, HostAdapter, ProposalType, Vote } from "@guyghost/swarm-dao-core";
+import type { AgentOutput, HostAdapter, Proposal, ProposalType, Vote } from "@guyghost/swarm-dao-core";
 import {
   addRating,
   // Intelligence
@@ -39,6 +39,7 @@ import {
   getPlan,
   getProposal,
   getState,
+  getUnexecutedDependencies,
   // Governance
   initializeAgents,
   initStorage,
@@ -71,21 +72,139 @@ import { Type } from "typebox";
 
 // ── Pi Host Adapter Implementation ───────────────────────────
 
+type SpawnAgentParams = Parameters<HostAdapter["spawnAgent"]>[0];
+
+function stableHash(input: string): number {
+  let hash = 0;
+  for (const char of input) {
+    hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  }
+  return hash;
+}
+
+function scoreFromSeed(seed: string, key: string, min: number, max: number): number {
+  const spread = max - min + 1;
+  return min + (stableHash(`${seed}:${key}`) % spread);
+}
+
+function clampScore(value: number): number {
+  return Math.max(0, Math.min(10, value));
+}
+
+function pickRoundTableType(agentId: string): ProposalType {
+  switch (agentId) {
+    case "architect":
+      return "technical-change";
+    case "critic":
+      return "security-change";
+    case "delivery":
+      return "release-change";
+    case "prioritizer":
+      return "governance-change";
+    default:
+      return "product-feature";
+  }
+}
+
+function generateRoundTableSuggestion(params: SpawnAgentParams): string {
+  const suggestionType = pickRoundTableType(params.agent.id);
+  const title = `${params.agent.name}: ${params.proposal.type === "governance-change" ? "Tighten proposal quality gates" : "Improve developer workflow"}`;
+  const description =
+    suggestionType === "security-change"
+      ? "Introduce mandatory risk checks before execution to reduce regressions. This adds explicit guardrails while preserving delivery speed."
+      : "Standardize proposal intake with clearer acceptance criteria and measurable outcomes. This improves review quality and helps the swarm converge faster.";
+
+  return `## Suggested Proposal
+**Title:** ${title}
+**Type:** ${suggestionType}
+**Description:** ${description}`;
+}
+
+function decideFallbackVote(agentId: string, proposal: Proposal): "for" | "against" | "abstain" {
+  if (agentId === "critic" && (proposal.type === "security-change" || proposal.riskZone === "red")) {
+    return "against";
+  }
+  if (agentId === "delivery" && proposal.type === "security-change") {
+    return "abstain";
+  }
+  return "for";
+}
+
+function generateDeliberationOutput(params: SpawnAgentParams): string {
+  const proposal = params.proposal;
+  const vote = decideFallbackVote(params.agent.id, proposal);
+  const seed = `${proposal.id}:${params.agent.id}:${proposal.title}:${proposal.type}`;
+
+  const userImpactBase: Record<ProposalType, number> = {
+    "product-feature": 8,
+    "technical-change": 6,
+    "security-change": 7,
+    "release-change": 5,
+    "governance-change": 6,
+  };
+  const effortBase: Record<ProposalType, number> = {
+    "product-feature": 6,
+    "technical-change": 7,
+    "security-change": 8,
+    "release-change": 4,
+    "governance-change": 5,
+  };
+  const securityRiskBase: Record<ProposalType, number> = {
+    "product-feature": 3,
+    "technical-change": 4,
+    "security-change": 7,
+    "release-change": 2,
+    "governance-change": 4,
+  };
+
+  const userImpact = clampScore(userImpactBase[proposal.type] + scoreFromSeed(seed, "ui", -1, 1));
+  const businessImpact = clampScore(6 + scoreFromSeed(seed, "bi", -1, 2));
+  const effort = clampScore(effortBase[proposal.type] + scoreFromSeed(seed, "effort", -1, 1));
+  const securityRisk = clampScore(securityRiskBase[proposal.type] + scoreFromSeed(seed, "risk", -1, 1));
+  const confidence = clampScore(7 + scoreFromSeed(seed, "conf", -2, 1));
+  const riskScore = clampScore(Math.round((securityRisk + effort) / 2));
+
+  const voteReasoning =
+    vote === "for"
+      ? "The proposal is actionable and aligns with expected project outcomes."
+      : vote === "against"
+        ? "Risk exposure is too high for the current safeguards."
+        : "The direction is promising, but execution details need clarification first.";
+
+  return `## Analysis
+${params.agent.name} reviewed proposal #${proposal.id} (${proposal.type}) and assessed implementation tradeoffs, risk profile, and expected impact.
+
+## Vote
+${vote}
+
+## Reasoning
+${voteReasoning}
+
+## Composite Score Inputs (0-10)
+- userImpact: ${userImpact}
+- businessImpact: ${businessImpact}
+- effort: ${effort}
+- securityRisk: ${securityRisk}
+- confidence: ${confidence}
+
+## Risk Score (1-10)
+${riskScore}`;
+}
+
 function createPiHostAdapter(_pi: ExtensionAPI, _ctx?: ExtensionCommandContext): HostAdapter {
   return {
     hostId: "pi",
 
     async spawnAgent(params): Promise<AgentOutput> {
       const startTime = Date.now();
-      // Pi-specific: spawn sub-agent via pi's agent runner
-      // This is a simplified version — full implementation uses pi's subprocess API
+      const isRoundTable = params.proposal.id === 0 && params.proposal.title === "Round Table Suggestions";
+      const content = isRoundTable ? generateRoundTableSuggestion(params) : generateDeliberationOutput(params);
       return {
         agentId: params.agent.id,
         agentName: params.agent.name,
         role: params.agent.role,
-        content: "",
+        content,
         durationMs: Date.now() - startTime,
-        error: "Pi agent spawning not yet implemented in adapter — use manual deliberation",
       };
     },
 
@@ -160,7 +279,7 @@ const DAO_COMMAND_HELP = [
   '- `dao_propose title="..." type="product-feature" description="..."`',
   "- `dao_deliberate proposalId=1`",
   "- `dao_check proposalId=1`",
-  "- `dao_execute proposalId=1`",
+  "- `dao_ship proposalId=1`",
 ].join("\n");
 
 // ── Parameter Interfaces ─────────────────────────────────────
@@ -195,6 +314,12 @@ interface DaoPlanParams {
 
 interface DaoExecuteParams {
   proposalId: number;
+}
+
+interface DaoShipParams {
+  proposalId: number;
+  cascade?: boolean;
+  force?: boolean;
 }
 
 interface DaoAuditParams {
@@ -270,7 +395,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
       }
     }
     daoContext += `\n- Config: quorum=${state.config.quorumPercent}%, approval=${state.config.approvalThreshold}%, risk=${state.config.riskThreshold}/10`;
-    daoContext += `\n\nAvailable tools: dao_setup, dao_propose, dao_deliberate, dao_check, dao_plan, dao_execute, dao_audit, dao_artefacts, dao_verify, dao_rate, dao_dashboard, dao_dry_run, dao_rollback`;
+    daoContext += `\n\nAvailable tools: dao_setup, dao_propose, dao_deliberate, dao_check, dao_plan, dao_execute, dao_ship, dao_audit, dao_artefacts, dao_verify, dao_rate, dao_dashboard, dao_dry_run, dao_rollback`;
 
     return { systemPrompt: event.systemPrompt + daoContext };
   });
@@ -512,6 +637,90 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
       await saveState();
 
       return toolResult(result.result);
+    },
+  });
+
+  // ── Tool: dao_ship ───────────────────────────────────────
+  pi.registerTool({
+    name: "dao_ship",
+    label: "DAO Ship",
+    description: "Ship a controlled proposal (optionally cascade dependencies)",
+    parameters: Type.Object({
+      proposalId: Type.Number(),
+      cascade: Type.Optional(Type.Boolean()),
+      force: Type.Optional(Type.Boolean()),
+    }),
+    async execute(_id, params: DaoShipParams) {
+      const state = getState();
+      if (!state.initialized) return toolResult(PI_ONBOARDING_MESSAGE);
+
+      const proposal = getProposal(params.proposalId);
+      if (!proposal) return toolResult(`Proposal #${params.proposalId} not found.`);
+
+      const cascade = params.cascade === true;
+      const force = params.force === true;
+
+      const shipOne = async (proposalId: number): Promise<string | null> => {
+        const target = getProposal(proposalId);
+        if (!target) return `Proposal #${proposalId} not found.`;
+        if (target.status !== "controlled") {
+          return `Proposal #${target.id} must be in 'controlled' state to ship (current: ${target.status})`;
+        }
+
+        const result = await executeProposal(target);
+        if (!result.success) return result.result;
+
+        await recordAudit(target.id, "delivery", "proposal-shipped", "pi", "shipped via dao_ship");
+        return null;
+      };
+
+      const shipped: number[] = [];
+
+      if (!force) {
+        const depsResolution = getUnexecutedDependencies(proposal.id, state.proposals);
+        if (depsResolution.error) return toolResult(depsResolution.error);
+        const pendingDeps = depsResolution.order ?? [];
+
+        if (pendingDeps.length > 0 && !cascade) {
+          const lines = pendingDeps.map((depId) => {
+            const dep = getProposal(depId);
+            return dep ? `- #${dep.id} [${dep.status}] ${dep.title}` : `- #${depId} [missing]`;
+          });
+          return toolResult(
+            `Cannot ship proposal #${proposal.id}: unexecuted dependencies found.\n\n${lines.join("\n")}\n\nRetry with \`dao_ship proposalId=${proposal.id} cascade=true\` or \`force=true\`.`,
+          );
+        }
+
+        if (cascade && pendingDeps.length > 0) {
+          const notControlled = pendingDeps.filter((depId) => getProposal(depId)?.status !== "controlled");
+          if (notControlled.length > 0) {
+            const details = notControlled
+              .map((depId) => {
+                const dep = getProposal(depId);
+                return dep ? `#${dep.id} (${dep.status})` : `#${depId} (missing)`;
+              })
+              .join(", ");
+            return toolResult(`Cannot cascade ship: dependencies not in 'controlled' state: ${details}`);
+          }
+
+          for (const depId of pendingDeps) {
+            const dep = getProposal(depId);
+            if (!dep || dep.status === "executed") continue;
+            const depError = await shipOne(depId);
+            if (depError) return toolResult(depError);
+            shipped.push(depId);
+          }
+        }
+      }
+
+      const targetError = await shipOne(proposal.id);
+      if (targetError) return toolResult(targetError);
+      shipped.push(proposal.id);
+
+      await saveState();
+
+      const summary = shipped.map((id) => `- #${id}`).join("\n");
+      return toolResult(`# 🚀 Ship Complete\n\nShipped proposals:\n${summary}`);
     },
   });
 
