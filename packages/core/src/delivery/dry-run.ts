@@ -1,4 +1,5 @@
-import { captureSnapshot, getSnapshot, getState } from "../persistence.js";
+import { exec } from "node:child_process";
+import { captureSnapshot, getSnapshot, getState, saveState } from "../persistence.js";
 import type { DryRunResult, ExecutionSnapshot, Proposal } from "../types/index.js";
 
 export async function performDryRun(proposal: Proposal): Promise<DryRunResult> {
@@ -60,8 +61,6 @@ export function formatDryRun(result: DryRunResult): string {
 // ── Snapshot Management ─────────────────────────────────────
 
 export async function createExecutionSnapshot(proposal: Proposal, cwd: string): Promise<ExecutionSnapshot> {
-  const { exec } = await import("node:child_process");
-
   const gitInfo = await new Promise<{ branch: string; sha: string }>((resolve) => {
     exec("git branch --show-current && git rev-parse HEAD", { cwd }, (err, stdout) => {
       if (err) {
@@ -93,7 +92,7 @@ export function canRollback(proposalId: number): boolean {
   return getSnapshot(proposalId) !== undefined;
 }
 
-export function performRollback(proposalId: number): { success: boolean; message: string } {
+export async function performRollback(proposalId: number): Promise<{ success: boolean; message: string }> {
   const snapshot = getSnapshot(proposalId);
   if (!snapshot) {
     return { success: false, message: `No snapshot found for proposal #${proposalId}` };
@@ -105,6 +104,7 @@ export function performRollback(proposalId: number): { success: boolean; message
   if (proposal) {
     proposal.status = "open";
     proposal.resolvedAt = undefined;
+    await saveState();
   }
 
   return {

@@ -3,6 +3,7 @@
 // ============================================================
 
 import type { Proposal } from "../types/index.js";
+import { slugify } from "./utils.js";
 
 interface GitHubConfig {
   token: string;
@@ -37,14 +38,6 @@ function getAuthHeaders(): Record<string, string> {
     Accept: "application/vnd.github+json",
     "X-GitHub-Api-Version": "2022-11-28",
   };
-}
-
-function slugify(title: string): string {
-  return title
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "")
-    .slice(0, 40);
 }
 
 export function ghBranchNameFor(proposal: Proposal): string {

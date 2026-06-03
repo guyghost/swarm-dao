@@ -4,6 +4,7 @@
 
 import { captureSnapshot, getState, storeVerification } from "../persistence.js";
 import type { ExecutionSnapshot, ExecutionVerification, Proposal, VerificationStatus } from "../types/index.js";
+import { transitionProposal } from "../governance/lifecycle.js";
 import { generateDeliveryPlan } from "./plans.js";
 
 export interface ExecutionResult {
@@ -57,9 +58,11 @@ export async function executeProposal(proposal: Proposal): Promise<ExecutionResu
   };
   await captureSnapshot(proposal.id, snapshot);
 
-  // Mark as executed
-  proposal.status = "executed";
-  proposal.resolvedAt = new Date().toISOString();
+  // Advance state machine: controlled → executed
+  const transition = transitionProposal(proposal, "execute");
+  if (!transition.success) {
+    return { success: false, result: transition.error ?? `Cannot execute proposal from status "${proposal.status}"` };
+  }
   proposal.executionResult = `Executed with delivery plan: ${plan.branchStrategy}`;
 
   return {

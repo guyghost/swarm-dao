@@ -20,6 +20,7 @@ import {
   createProposal,
   dispatchSwarm,
   // Delivery
+  execCommand,
   executeProposal,
   formatAllArtefacts,
   formatAuditTrail,
@@ -50,6 +51,7 @@ import {
   parseVoteFromOutput,
   performDryRun,
   performRollback,
+  readFileContained,
   recordAudit,
   // Control
   runGates,
@@ -63,6 +65,7 @@ import {
   synthesize,
   tallyVotes,
   transitionProposal,
+  writeFileContained,
 } from "@guyghost/swarm-dao-core";
 import { Type } from "typebox";
 
@@ -104,25 +107,18 @@ function createPiHostAdapter(_pi: ExtensionAPI, _ctx?: ExtensionCommandContext):
     },
 
     async readFile(path: string): Promise<string> {
-      const fs = await import("node:fs/promises");
-      return fs.readFile(path, "utf-8");
+      return readFileContained(path, this.getWorkingDirectory());
     },
 
     async writeFile(path: string, content: string): Promise<void> {
-      const fs = await import("node:fs/promises");
-      await fs.writeFile(path, content, "utf-8");
+      return writeFileContained(path, content, this.getWorkingDirectory());
     },
 
     async exec(
       command: string,
       options?: { cwd?: string; timeout?: number },
     ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-      const { exec } = await import("node:child_process");
-      return new Promise((resolve) => {
-        exec(command, { cwd: options?.cwd, timeout: options?.timeout }, (error, stdout, stderr) => {
-          resolve({ stdout, stderr, exitCode: error ? ((error.code as number) ?? 1) : 0 });
-        });
-      });
+      return execCommand(command, options);
     },
 
     hasCapability(capability: string): boolean {
@@ -479,8 +475,8 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
       const _state = getState();
       const proposal = getProposal(params.proposalId);
       if (!proposal) return toolResult(`Proposal #${params.proposalId} not found.`);
-      if (proposal.status !== "approved" && proposal.status !== "controlled") {
-        return toolResult(`Must be approved or controlled (current: ${proposal.status})`);
+      if (proposal.status !== "controlled") {
+        return toolResult(`Must be controlled (current: ${proposal.status}). Run dao_control first.`);
       }
 
       const result = await executeProposal(proposal);
@@ -591,7 +587,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
     description: "Revert proposal execution to pre-execution snapshot",
     parameters: Type.Object({ proposalId: Type.Number() }),
     async execute(_id, params: DaoRollbackParams) {
-      const result = performRollback(Number(params.proposalId));
+      const result = await performRollback(Number(params.proposalId));
       await saveState();
       return toolResult(formatRollback(result));
     },
