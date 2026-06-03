@@ -115,6 +115,51 @@ describe("persistence", () => {
     }
   });
 
+  it("loadState repairs invalid collection shapes and non-positive IDs", async () => {
+    const cwd = `/tmp/dao-corruption-shape-test-${Date.now()}`;
+
+    try {
+      await initStorage(cwd);
+
+      const corruptedState = {
+        proposals: {},
+        agents: {},
+        auditLog: {},
+        config: { quorumPercent: 60 },
+        nextProposalId: -5,
+        initialized: true,
+        nextAuditId: 0.5,
+        controlResults: [],
+        deliveryPlans: [],
+        artefacts: [],
+        outcomes: [],
+        snapshots: [],
+        verifications: [],
+        daoRoot: getDaoRoot(cwd),
+      };
+      const statePath = `${getDaoRoot(cwd)}/state.json`;
+      await fs.writeFile(statePath, JSON.stringify(corruptedState), "utf-8");
+
+      const loaded = await loadState(cwd);
+      expect(loaded).not.toBeNull();
+
+      expect(getState().proposals).toEqual([]);
+      expect(getState().agents).toEqual([]);
+      expect(getState().auditLog).toEqual([]);
+      expect(getState().controlResults).toEqual({});
+      expect(getState().deliveryPlans).toEqual({});
+      expect(getState().artefacts).toEqual({});
+      expect(getState().outcomes).toEqual({});
+      expect(getState().snapshots).toEqual({});
+      expect(getState().verifications).toEqual({});
+      expect(getState().nextProposalId).toBe(1);
+      expect(getState().nextAuditId).toBe(1);
+    } finally {
+      setState(null);
+      await fs.rm(cwd, { recursive: true, force: true }).catch(() => {});
+    }
+  });
+
   // ── Storage Settings regression tests ──────────────────────────
 
   /**
