@@ -25,9 +25,7 @@ export function resolveDependencyOrder(targetId: number, proposals: Proposal[]):
 
     const proposal = proposalMap.get(id);
     if (!proposal) {
-      return isTransitiveDep
-        ? `Proposal #${id} referenced as dependency, not found`
-        : `Proposal #${id} not found`;
+      return isTransitiveDep ? `Proposal #${id} referenced as dependency, not found` : `Proposal #${id} not found`;
     }
 
     visiting.add(id);
