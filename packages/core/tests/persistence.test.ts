@@ -13,6 +13,7 @@ import {
   initStorage,
   listProposals,
   loadState,
+  migrateFromLegacy,
   padId,
   recordAudit,
   saveState,
@@ -154,6 +155,27 @@ describe("persistence", () => {
       expect(getState().verifications).toEqual({});
       expect(getState().nextProposalId).toBe(1);
       expect(getState().nextAuditId).toBe(1);
+    } finally {
+      setState(null);
+      await fs.rm(cwd, { recursive: true, force: true }).catch(() => {});
+    }
+  });
+
+  it("migrateFromLegacy ignores unsafe legacy directory entries", async () => {
+    const cwd = `/tmp/dao-legacy-safety-test-${Date.now()}`;
+    const safeLegacy = ".legacy-dao";
+    const safeLegacyRoot = path.join(cwd, safeLegacy);
+
+    try {
+      await fs.mkdir(safeLegacyRoot, { recursive: true });
+      await fs.writeFile(path.join(safeLegacyRoot, "state.json"), JSON.stringify({ initialized: false }), "utf-8");
+
+      const migrated = await migrateFromLegacy(cwd, ["", ".", "..", "../outside", "/tmp", safeLegacy]);
+      expect(migrated).toBe(true);
+
+      const migratedStatePath = path.join(getDaoRoot(cwd), "state.json");
+      const content = await fs.readFile(migratedStatePath, "utf-8");
+      expect(JSON.parse(content)).toMatchObject({ initialized: false });
     } finally {
       setState(null);
       await fs.rm(cwd, { recursive: true, force: true }).catch(() => {});

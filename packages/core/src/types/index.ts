@@ -850,7 +850,7 @@ export interface StorageSettings {
  * with the outside world (spawn agents, read files, etc.)
  */
 export interface HostAdapter {
-  /** Unique identifier for this host (e.g. "pi", "opencode") */
+  /** Unique identifier for this host */
   readonly hostId: string;
 
   /** Spawn a single agent and return its output */

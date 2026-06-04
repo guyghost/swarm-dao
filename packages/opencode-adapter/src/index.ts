@@ -168,7 +168,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
   const { directory } = ctx;
 
   await initStorage(directory);
-  const loaded = await loadState(directory);
+  const loaded = await loadState(directory, { legacyDirectories: [".opencode-dao"] });
   if (!loaded) {
     setState(getOrCreateState(directory));
   }
