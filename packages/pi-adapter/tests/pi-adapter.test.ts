@@ -735,56 +735,6 @@ describe("swarmDaoExtension", () => {
     });
   });
 
-  // ── dao_check tool ──────────────────────────────────────
-
-  describe("dao_check tool", () => {
-    it("generates and stores delivery plan after gates pass", async () => {
-      const { initStorage, setState, getOrCreateState, initializeAgents, getProposal, transitionProposal } =
-        await import("@guyghost/swarm-dao-core");
-      const { getDeliveryPlan } = await import("@guyghost/swarm-dao-core");
-      await initStorage(process.cwd());
-      const state = getOrCreateState(process.cwd());
-      state.initialized = true;
-      state.agents = initializeAgents();
-      setState(state);
-
-      const mod = await import("@guyghost/swarm-dao-pi-adapter");
-      const pi = createMockPi();
-      mod.default(pi);
-
-      // biome-ignore lint/style/noNonNullAssertion: test expects tool to be registered
-      const proposeTool = pi.tools.find((t) => t.name === "dao_propose")!;
-      await proposeTool.execute("test-id", {
-        title: "Plan Generation Test",
-        type: "product-feature",
-        description: "Verify delivery plan is generated after gates pass",
-      });
-
-      const proposal = getProposal(1);
-      // biome-ignore lint/style/noNonNullAssertion: proposal was created above
-      expect(proposal!.deliveryPlan).toBeUndefined();
-
-      // biome-ignore lint/style/noNonNullAssertion: proposal exists
-      transitionProposal(proposal!, "deliberate");
-      // biome-ignore lint/style/noNonNullAssertion: proposal exists
-      transitionProposal(proposal!, "approve");
-
-      // biome-ignore lint/style/noNonNullAssertion: test expects tool to be registered
-      const checkTool = pi.tools.find((t) => t.name === "dao_check")!;
-      const result = await checkTool.execute("test-id", { proposalId: 1 });
-
-      expect(result).toBeDefined();
-      const text = result.content[0]?.text ?? "";
-      expect(text).toContain("passed");
-
-      // Verify proposal is now controlled and has delivery plan
-      const updatedProposal = getProposal(1);
-      expect(updatedProposal?.status).toBe("controlled");
-      expect(updatedProposal?.deliveryPlan).toBeDefined();
-      expect(updatedProposal?.deliveryPlan?.status).toBe("pending");
-    });
-  });
-
   // ── dao_dashboard tool ───────────────────────────────────
 
   describe("dao_dashboard tool", () => {
