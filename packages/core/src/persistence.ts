@@ -123,8 +123,7 @@ export async function initStorage(cwd: string): Promise<string> {
 
 // ── Legacy Migration ─────────────────────────────────────────
 
-export async function migrateFromLegacy(cwd: string): Promise<boolean> {
-  const legacyRoot = path.join(cwd, ".opencode-dao");
+export async function migrateFromLegacy(cwd: string, legacyDirectories: string[] = []): Promise<boolean> {
   const newRoot = getDaoRoot(cwd);
 
   try {
@@ -134,13 +133,22 @@ export async function migrateFromLegacy(cwd: string): Promise<boolean> {
     /* .dao doesn't exist */
   }
 
-  try {
-    await fs.access(legacyRoot);
-  } catch {
+  let legacyRoot: string | null = null;
+  for (const directory of legacyDirectories) {
+    const candidate = path.join(cwd, directory);
+    try {
+      await fs.access(candidate);
+      legacyRoot = candidate;
+      break;
+    } catch {
+      /* candidate doesn't exist */
+    }
+  }
+  if (!legacyRoot) {
     return false;
   }
 
-  console.log("🔄 Migrating DAO storage: .opencode-dao → .dao");
+  console.log("🔄 Migrating DAO storage: legacy directory → .dao");
   await fs.mkdir(newRoot, { recursive: true });
 
   const entries = await fs.readdir(legacyRoot, { withFileTypes: true });
@@ -194,9 +202,9 @@ export async function migrateFromLegacy(cwd: string): Promise<boolean> {
   console.log("  ✓ Migration complete");
   try {
     await fs.rm(legacyRoot, { recursive: true, force: true });
-    console.log("  ✓ Removed legacy .opencode-dao/");
+    console.log("  ✓ Removed legacy DAO directory");
   } catch (err) {
-    console.warn("  ⚠ Could not remove .opencode-dao/:", err);
+    console.warn("  ⚠ Could not remove legacy DAO directory:", err);
   }
 
   return true;
@@ -224,8 +232,8 @@ export function getOrCreateState(cwd: string): DAOState {
 
 // ── Load / Save ──────────────────────────────────────────────
 
-export async function loadState(cwd: string): Promise<DAOState | null> {
-  await migrateFromLegacy(cwd);
+export async function loadState(cwd: string, options?: { legacyDirectories?: string[] }): Promise<DAOState | null> {
+  await migrateFromLegacy(cwd, options?.legacyDirectories ?? []);
   const daoRoot = await initStorage(cwd);
   const statePath = path.join(daoRoot, STATE_FILE);
 

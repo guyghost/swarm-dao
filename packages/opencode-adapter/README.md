@@ -266,14 +266,13 @@ open ──► deliberating ──► approved ──► controlled ──► ex
 ## Limitations
 
 - **No automatic agent spawning** — OpenCode doesn't provide an API for spawning sub-agents. Use `dao_record_outputs` to manually submit outputs from sub-agent conversations.
-- **Single-process** — All deliberation happens within the OpenCode plugin process. For large-scale parallel agent work, consider the CLI or Pi adapter.
+- **Single-process** — All deliberation happens within the OpenCode plugin process. For large-scale parallel agent work, consider the CLI.
 
 ## Related Packages
 
 | Package | Description |
 |---------|-------------|
 | [`@guyghost/swarm-dao-core`](https://github.com/guyghost/swarm-dao/tree/main/packages/core) | Pure business logic (~3000 lines) |
-| [`@guyghost/swarm-dao-pi-adapter`](https://github.com/guyghost/swarm-dao/tree/main/packages/pi-adapter) | Bridge to Pi coding agent |
 | [`@guyghost/swarm-dao-opencode-adapter`](https://github.com/guyghost/swarm-dao/tree/main/packages/opencode-adapter) | Bridge to OpenCode (this package) |
 | [`@guyghost/swarm-dao-cli`](https://github.com/guyghost/swarm-dao/tree/main/packages/cli) | Standalone CLI (`swarm-dao`) |
 
