@@ -113,6 +113,21 @@ export function getProposalPath(daoRoot: string, id: number): string {
   return path.join(getProposalsDir(daoRoot), `${padId(id)}.json`);
 }
 
+function resolveSafeLegacyDirectory(cwd: string, directory: string): string | null {
+  const trimmed = directory.trim();
+  if (!trimmed || trimmed === "." || trimmed === "..") return null;
+  if (path.isAbsolute(trimmed)) return null;
+  if (trimmed.includes(path.sep) || trimmed.includes("/") || trimmed.includes("\\")) return null;
+
+  const resolvedCwd = path.resolve(cwd);
+  const candidate = path.resolve(resolvedCwd, trimmed);
+  const relative = path.relative(resolvedCwd, candidate);
+  if (!relative || relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    return null;
+  }
+  return candidate;
+}
+
 // ── Storage Init ─────────────────────────────────────────────
 
 export async function initStorage(cwd: string): Promise<string> {
@@ -135,7 +150,8 @@ export async function migrateFromLegacy(cwd: string, legacyDirectories: string[]
 
   let legacyRoot: string | null = null;
   for (const directory of legacyDirectories) {
-    const candidate = path.join(cwd, directory);
+    const candidate = resolveSafeLegacyDirectory(cwd, directory);
+    if (!candidate) continue;
     try {
       await fs.access(candidate);
       legacyRoot = candidate;
