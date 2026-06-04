@@ -355,7 +355,6 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
           if (result.allGatesPassed) {
             transitionProposal(proposal, "control");
             await recordAudit(proposal.id, "control", "gates_passed", "system", "All gates passed");
-            
             // Generate delivery plan after gates pass, making it available before execution
             if (!state.deliveryPlans[proposal.id]) {
               const plan = generateDeliveryPlan(proposal);
@@ -431,7 +430,6 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
         async execute(args: any, _context: any) {
           const proposal = getProposal(args.proposalId);
           if (!proposal) return `Proposal #${args.proposalId} not found.`;
-          
           const plan = getPlan(args.proposalId);
           if (!plan) {
             if (proposal.status === "open") {
