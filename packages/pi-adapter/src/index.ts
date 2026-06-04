@@ -34,6 +34,7 @@ import {
   formatTallyResult,
   generateAllArtefacts,
   generateDashboard,
+  generateDeliveryPlan,
   getAllAuditLog,
   getOrCreateState,
   getPlan,
@@ -62,6 +63,7 @@ import {
   setState,
   storeCompositeScore,
   storeDeliberationBatch,
+  storeDeliveryPlan,
   storeSynthesis,
   synthesize,
   tallyVotes,
@@ -593,6 +595,12 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
       if (result.allGatesPassed) {
         transitionProposal(proposal, "control");
         await recordAudit(proposal.id, "control", "gates_passed", "system", "All gates passed");
+        
+        // Generate delivery plan after gates pass, making it available before execution
+        if (!state.deliveryPlans[proposal.id]) {
+          const plan = generateDeliveryPlan(proposal);
+          await storeDeliveryPlan(proposal.id, plan);
+        }
       } else {
         transitionProposal(proposal, "fail");
         await recordAudit(proposal.id, "control", "gates_failed", "system", `${result.blockerCount} blockers`);
@@ -610,8 +618,25 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
     description: "Get delivery plan",
     parameters: Type.Object({ proposalId: Type.Number() }),
     async execute(_id, params: DaoPlanParams) {
+      const proposal = getProposal(params.proposalId);
+      if (!proposal) return toolResult(`Proposal #${params.proposalId} not found.`);
+      
       const plan = getPlan(params.proposalId);
-      if (!plan) return toolResult("No plan yet. Run deliberation first.");
+      if (!plan) {
+        if (proposal.status === "open") {
+          return toolResult("Plan not available yet. Proposal must complete deliberation and gates first. Run `dao_deliberate` and `dao_check`.");
+        }
+        if (proposal.status === "deliberating") {
+          return toolResult("Plan not available yet. Deliberation is still running. Run `dao_deliberate` to completion first.");
+        }
+        if (proposal.status === "approved") {
+          return toolResult("Plan not available yet. Proposal must pass gates first. Run `dao_check` to proceed.");
+        }
+        if (proposal.status === "controlled" || proposal.status === "rejected") {
+          return toolResult("Plan generated during proposal execution. Run `dao_execute` to generate the delivery plan.");
+        }
+        return toolResult("Plan not available for this proposal.");
+      }
       return toolResult(formatPlan(plan));
     },
   });

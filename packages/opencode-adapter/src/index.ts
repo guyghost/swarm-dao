@@ -23,6 +23,7 @@ import {
   formatTallyResult,
   generateAllArtefacts,
   generateDashboard,
+  generateDeliveryPlan,
   getAllAuditLog,
   getOrCreateState,
   getPlan,
@@ -43,6 +44,7 @@ import {
   setState,
   storeCompositeScore,
   storeDeliberationBatch,
+  storeDeliveryPlan,
   storeSynthesis,
   synthesize,
   tallyVotes,
@@ -353,6 +355,12 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
           if (result.allGatesPassed) {
             transitionProposal(proposal, "control");
             await recordAudit(proposal.id, "control", "gates_passed", "system", "All gates passed");
+            
+            // Generate delivery plan after gates pass, making it available before execution
+            if (!state.deliveryPlans[proposal.id]) {
+              const plan = generateDeliveryPlan(proposal);
+              await storeDeliveryPlan(proposal.id, plan);
+            }
           } else {
             await recordAudit(proposal.id, "control", "gates_failed", "system", `${result.blockerCount} blockers`);
           }
@@ -421,8 +429,25 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
         args: { proposalId: schema.number() },
         // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
         async execute(args: any, _context: any) {
+          const proposal = getProposal(args.proposalId);
+          if (!proposal) return `Proposal #${args.proposalId} not found.`;
+          
           const plan = getPlan(args.proposalId);
-          if (!plan) return "No plan yet. Run deliberation first.";
+          if (!plan) {
+            if (proposal.status === "open") {
+              return "Plan not available yet. Proposal must complete deliberation and gates first. Run `dao_record_outputs` and `dao_control`.";
+            }
+            if (proposal.status === "deliberating") {
+              return "Plan not available yet. Deliberation is still running. Run `dao_record_outputs` to completion first.";
+            }
+            if (proposal.status === "approved") {
+              return "Plan not available yet. Proposal must pass gates first. Run `dao_control` to proceed.";
+            }
+            if (proposal.status === "controlled" || proposal.status === "rejected") {
+              return "Plan generated during proposal execution. Run `dao_execute` to generate the delivery plan.";
+            }
+            return "Plan not available for this proposal.";
+          }
           return formatPlan(plan);
         },
       }),
