@@ -634,10 +634,11 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
         if (proposal.status === "approved") {
           return toolResult("Plan not available yet. Proposal must pass gates first. Run `dao_check` to proceed.");
         }
-        if (proposal.status === "controlled" || proposal.status === "rejected") {
-          return toolResult(
-            "Plan generated during proposal execution. Run `dao_execute` to generate the delivery plan.",
-          );
+        if (proposal.status === "controlled") {
+          return toolResult("Plan should be available. If missing, run `dao_execute` to generate it.");
+        }
+        if (proposal.status === "rejected") {
+          return toolResult("Proposal was rejected and cannot be executed.");
         }
         return toolResult("Plan not available for this proposal.");
       }

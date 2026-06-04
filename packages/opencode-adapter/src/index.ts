@@ -433,7 +433,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
           const plan = getPlan(args.proposalId);
           if (!plan) {
             if (proposal.status === "open") {
-              return "Plan not available yet. Proposal must complete deliberation and gates first. Run `dao_record_outputs` and `dao_control`.";
+              return "Plan not available yet. Run `dao_record_outputs` (after starting deliberation with `dao_propose` and running deliberation), then `dao_control`, to generate the plan.";
             }
             if (proposal.status === "deliberating") {
               return "Plan not available yet. Deliberation is still running. Run `dao_record_outputs` to completion first.";
@@ -441,8 +441,11 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
             if (proposal.status === "approved") {
               return "Plan not available yet. Proposal must pass gates first. Run `dao_control` to proceed.";
             }
-            if (proposal.status === "controlled" || proposal.status === "rejected") {
-              return "Plan generated during proposal execution. Run `dao_execute` to generate the delivery plan.";
+            if (proposal.status === "controlled") {
+              return "Plan should be available. If missing, run `dao_execute` to generate it.";
+            }
+            if (proposal.status === "rejected") {
+              return "Proposal was rejected and cannot be executed.";
             }
             return "Plan not available for this proposal.";
           }
