@@ -4,3 +4,5 @@ export * from "./amendments.js";
 export * from "./lifecycle.js";
 export * from "./scoring.js";
 export * from "./voting.js";
+export * from "./proposal.machine.js";
+export * from "./proposal.utils.js";
