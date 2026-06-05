@@ -1,5 +1,11 @@
 # @guyghost/swarm-dao-core
 
+## 0.1.4
+
+### Patch Changes
+
+- Patch release for recent improvements across the core package and adapters.
+
 ## 0.1.2
 
 ### Patch Changes
