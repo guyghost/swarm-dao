@@ -1,6 +1,6 @@
 import { createActor } from "xstate";
-import { proposalMachine, type ProposalContext, type ProposalEvent } from "./proposal.machine.js";
-import type { Proposal, PipelineStage } from "../types/index.js";
+import type { PipelineStage, Proposal } from "../types/index.js";
+import { type ProposalContext, type ProposalEvent, proposalMachine } from "./proposal.machine.js";
 
 /**
  * Crée un acteur XState pour une proposition
@@ -15,7 +15,9 @@ export function createProposalActor(proposal: Proposal, initialStage?: string) {
     status: "open",
   };
 
-  const actor = createActor(proposalMachine, { input: initialContext as any });
+  const actor = createActor(proposalMachine, {
+    input: initialContext as unknown as never,
+  });
   actor.start();
   return actor;
 }
@@ -25,7 +27,7 @@ export function createProposalActor(proposal: Proposal, initialStage?: string) {
  */
 export function sendProposalEvent(
   actor: ReturnType<typeof createProposalActor>,
-  event: Omit<ProposalEvent, never> | Extract<ProposalEvent, { type: string }>
+  event: Omit<ProposalEvent, never> | Extract<ProposalEvent, { type: string }>,
 ) {
   actor.send(event as ProposalEvent);
   return actor.getSnapshot();
@@ -48,13 +50,14 @@ export function getProposalState(actor: ReturnType<typeof createProposalActor>) 
 /**
  * Vérifie si la proposition peut faire une transition donnée
  */
-export function canSendProposalEvent(
-  actor: ReturnType<typeof createProposalActor>,
-  eventType: string
-): boolean {
+export function canSendProposalEvent(actor: ReturnType<typeof createProposalActor>, eventType: string): boolean {
   try {
+    if (eventType === "ERROR") {
+      return false;
+    }
+
     const state = actor.getSnapshot();
-    return (state.can as any)({ type: eventType }) ?? false;
+    return state.can({ type: eventType } as ProposalEvent);
   } catch {
     return false;
   }
@@ -63,32 +66,40 @@ export function canSendProposalEvent(
 /**
  * Retourne toutes les transitions possibles depuis l'état actuel
  */
-export function getAvailableProposalEvents(
-  actor: ReturnType<typeof createProposalActor>
-): string[] {
-  const eventTypes: Array<ProposalEvent['type']> = [
-    "SUBMIT", "QUALIFY", "ANALYZE", "CRITIQUE", "SCORE",
-    "SEND_TO_COUNCIL", "VOTE", "APPROVE", "REJECT",
-    "REQUEST_SPEC", "REVIEW_SPEC", "APPROVE_SPEC",
-    "EXECUTION_GATE_PASS", "EXECUTION_GATE_FAIL", "EXECUTE",
-    "EXECUTION_SUCCESS", "EXECUTION_FAILED", "POSTMORTEM",
-    "RETRY", "DISCARD"
+export function getAvailableProposalEvents(actor: ReturnType<typeof createProposalActor>): string[] {
+  const eventTypes: Array<ProposalEvent["type"]> = [
+    "SUBMIT",
+    "QUALIFY",
+    "ANALYZE",
+    "CRITIQUE",
+    "SCORE",
+    "SEND_TO_COUNCIL",
+    "VOTE",
+    "APPROVE",
+    "REJECT",
+    "REQUEST_SPEC",
+    "REVIEW_SPEC",
+    "APPROVE_SPEC",
+    "EXECUTION_GATE_PASS",
+    "EXECUTION_GATE_FAIL",
+    "EXECUTE",
+    "EXECUTION_SUCCESS",
+    "EXECUTION_FAILED",
+    "POSTMORTEM",
+    "RETRY",
+    "DISCARD",
   ];
 
-  return eventTypes.filter(eventType =>
-    canSendProposalEvent(actor, eventType)
-  );
+  return eventTypes.filter((eventType) => canSendProposalEvent(actor, eventType));
 }
 
 /**
  * Helper pour l'auto-progression d'une proposition dans le pipeline
  * Utilise les événements de progression linéaire
  */
-export function progressProposal(
-  actor: ReturnType<typeof createProposalActor>
-): string | null {
+export function progressProposal(actor: ReturnType<typeof createProposalActor>): string | null {
   const current = actor.getSnapshot().value;
-  const progressMap: Record<string, ProposalEvent['type']> = {
+  const progressMap: Record<string, ProposalEvent["type"]> = {
     draft: "SUBMIT",
     intake: "QUALIFY",
     qualification: "ANALYZE",
@@ -104,7 +115,7 @@ export function progressProposal(
 
   const nextEventType = progressMap[String(current)];
   if (nextEventType && canSendProposalEvent(actor, nextEventType)) {
-    const event: Extract<ProposalEvent, { type: typeof nextEventType }> = { type: nextEventType } as any;
+    const event = { type: nextEventType } as ProposalEvent;
     sendProposalEvent(actor, event);
     return nextEventType;
   }
@@ -125,7 +136,7 @@ export function rejectProposal(actor: ReturnType<typeof createProposalActor>) {
  */
 export function onProposalStateChange(
   actor: ReturnType<typeof createProposalActor>,
-  callback: (state: string, context: ProposalContext) => void
+  callback: (state: string, context: ProposalContext) => void,
 ) {
   const subscription = actor.subscribe((snapshot) => {
     callback(String(snapshot.value), snapshot.context);

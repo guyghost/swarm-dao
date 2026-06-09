@@ -1,14 +1,14 @@
-import { describe, it, expect, beforeEach } from "bun:test";
+import { beforeEach, describe, expect, it } from "bun:test";
 import {
+  canSendProposalEvent,
   createProposalActor,
-  sendProposalEvent,
+  getAvailableProposalEvents,
   getProposalContext,
   getProposalState,
-  canSendProposalEvent,
-  getAvailableProposalEvents,
+  onProposalStateChange,
   progressProposal,
   rejectProposal,
-  onProposalStateChange,
+  sendProposalEvent,
 } from "@guyghost/swarm-dao-core/governance";
 import type { Proposal } from "@guyghost/swarm-dao-core/types";
 
@@ -109,7 +109,7 @@ describe("Proposal State Machine", () => {
   it("should track lastTransitionTime on state changes", () => {
     const actor = createProposalActor(mockProposal);
     const initialTime = new Date(getProposalContext(actor).lastTransitionTime);
-    
+
     sendProposalEvent(actor, { type: "SUBMIT" });
     const newTime = new Date(getProposalContext(actor).lastTransitionTime);
 
@@ -184,7 +184,7 @@ describe("Proposal State Machine", () => {
 
   it("should reset retry count on approval", () => {
     const actor = createProposalActor(mockProposal);
-    
+
     sendProposalEvent(actor, { type: "SUBMIT" });
     sendProposalEvent(actor, { type: "QUALIFY" });
     sendProposalEvent(actor, { type: "ANALYZE" });

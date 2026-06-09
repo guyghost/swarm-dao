@@ -1,10 +1,5 @@
-import { setup, assign } from "xstate";
-import type {
-  Proposal,
-  ProposalStatus,
-  PipelineStage,
-  RiskZone,
-} from "../types/index.js";
+import { assign, setup } from "xstate";
+import type { PipelineStage, Proposal, ProposalStatus, RiskZone } from "../types/index.js";
 
 // ============================================================
 // Types pour la machine
