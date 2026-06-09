@@ -33,6 +33,7 @@ describe("Proposal State Machine", () => {
     const actor = createProposalActor(mockProposal);
     const state = getProposalState(actor);
     expect(state).toBe("draft");
+    expect(getProposalContext(actor).proposal).toEqual(mockProposal);
   });
 
   it("should transition from draft to intake on SUBMIT", () => {
@@ -197,5 +198,35 @@ describe("Proposal State Machine", () => {
     const context = getProposalContext(actor);
     // After APPROVE event, retryCount should be reset to 0
     expect(context.retryCount).toBe(0);
+    expect(context.stage).toBe("spec");
+  });
+
+  it("should handle REVIEW_SPEC and EXECUTE events", () => {
+    const actor = createProposalActor(mockProposal);
+
+    sendProposalEvent(actor, { type: "SUBMIT" });
+    sendProposalEvent(actor, { type: "QUALIFY" });
+    sendProposalEvent(actor, { type: "ANALYZE" });
+    sendProposalEvent(actor, { type: "CRITIQUE" });
+    sendProposalEvent(actor, { type: "SCORE" });
+    sendProposalEvent(actor, { type: "SEND_TO_COUNCIL" });
+    sendProposalEvent(actor, { type: "VOTE" });
+    sendProposalEvent(actor, { type: "APPROVE" });
+    sendProposalEvent(actor, { type: "REVIEW_SPEC" });
+    sendProposalEvent(actor, { type: "APPROVE_SPEC" });
+    sendProposalEvent(actor, { type: "EXECUTE" });
+
+    expect(getProposalState(actor)).toBe("executing");
+  });
+
+  it("should handle DISCARD and ERROR events", () => {
+    const discardedActor = createProposalActor(mockProposal);
+    sendProposalEvent(discardedActor, { type: "DISCARD" });
+    expect(getProposalState(discardedActor)).toBe("rejected");
+
+    const erroredActor = createProposalActor(mockProposal);
+    sendProposalEvent(erroredActor, { type: "ERROR", message: "Unexpected error" });
+    expect(getProposalState(erroredActor)).toBe("executionError");
+    expect(getProposalContext(erroredActor).errorMessage).toBe("Unexpected error");
   });
 });

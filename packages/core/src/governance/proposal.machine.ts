@@ -2,7 +2,7 @@ import { assign, setup } from "xstate";
 import type { PipelineStage, Proposal, ProposalStatus, RiskZone } from "../types/index.js";
 
 // ============================================================
-// Types pour la machine
+// Machine types
 // ============================================================
 
 export interface ProposalContext {
@@ -14,6 +14,17 @@ export interface ProposalContext {
   retryCount: number;
   errorMessage?: string;
   lastTransitionTime: string;
+}
+
+export interface ProposalMachineInput {
+  proposal: Proposal;
+  stage?: PipelineStage;
+  status?: ProposalStatus;
+  riskZone?: RiskZone;
+  deliberationCount?: number;
+  retryCount?: number;
+  errorMessage?: string;
+  lastTransitionTime?: string;
 }
 
 export type ProposalEvent =
@@ -46,20 +57,40 @@ export type ProposalEvent =
 export const proposalMachine = setup({
   types: {
     context: {} as ProposalContext,
+    input: {} as ProposalMachineInput,
     events: {} as ProposalEvent,
   },
 }).createMachine({
   id: "proposalLifecycle",
   initial: "draft",
-  context: {
-    proposal: {} as Proposal,
-    stage: "intake" as PipelineStage,
-    status: "open" as ProposalStatus,
-    riskZone: undefined,
-    deliberationCount: 0,
-    retryCount: 0,
-    lastTransitionTime: new Date().toISOString(),
-  } as ProposalContext,
+  context: ({ input }) =>
+    ({
+      proposal: input.proposal,
+      stage: input.stage ?? "intake",
+      status: input.status ?? "open",
+      riskZone: input.riskZone,
+      deliberationCount: input.deliberationCount ?? 0,
+      retryCount: input.retryCount ?? 0,
+      errorMessage: input.errorMessage,
+      lastTransitionTime: input.lastTransitionTime ?? new Date().toISOString(),
+    }) as ProposalContext,
+  on: {
+    DISCARD: {
+      target: ".rejected",
+      actions: assign({
+        status: "rejected",
+        lastTransitionTime: () => new Date().toISOString(),
+      }),
+    },
+    ERROR: {
+      target: ".executionError",
+      actions: assign({
+        status: "failed",
+        errorMessage: ({ event }) => event.message,
+        lastTransitionTime: () => new Date().toISOString(),
+      }),
+    },
+  },
 
   states: {
     // ───────────────────────────────────────────────────────
@@ -231,7 +262,7 @@ export const proposalMachine = setup({
           target: "specDraft",
           actions: assign({
             status: "approved",
-            stage: "council",
+            stage: "spec",
             retryCount: 0,
             lastTransitionTime: () => new Date().toISOString(),
           }),
@@ -253,6 +284,14 @@ export const proposalMachine = setup({
     specDraft: {
       on: {
         REQUEST_SPEC: {
+          target: "specReview",
+          actions: assign({
+            status: "approved",
+            stage: "spec",
+            lastTransitionTime: () => new Date().toISOString(),
+          }),
+        },
+        REVIEW_SPEC: {
           target: "specReview",
           actions: assign({
             status: "approved",
@@ -306,6 +345,14 @@ export const proposalMachine = setup({
     executionGate: {
       on: {
         EXECUTION_GATE_PASS: {
+          target: "executing",
+          actions: assign({
+            status: "controlled",
+            stage: "execution-gate",
+            lastTransitionTime: () => new Date().toISOString(),
+          }),
+        },
+        EXECUTE: {
           target: "executing",
           actions: assign({
             status: "controlled",

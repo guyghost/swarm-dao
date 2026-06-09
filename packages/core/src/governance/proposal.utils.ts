@@ -1,54 +1,56 @@
 import { createActor } from "xstate";
 import type { PipelineStage, Proposal } from "../types/index.js";
-import { type ProposalContext, type ProposalEvent, proposalMachine } from "./proposal.machine.js";
+import {
+  type ProposalContext,
+  type ProposalEvent,
+  type ProposalMachineInput,
+  proposalMachine,
+} from "./proposal.machine.js";
 
 /**
- * Crée un acteur XState pour une proposition
+ * Creates an XState actor for a proposal
  */
-export function createProposalActor(proposal: Proposal, initialStage?: string) {
-  const initialContext: ProposalContext = {
+export function createProposalActor(proposal: Proposal, initialStage?: PipelineStage) {
+  const initialContext: ProposalMachineInput = {
     proposal,
     deliberationCount: 0,
     retryCount: 0,
     lastTransitionTime: new Date().toISOString(),
-    stage: (initialStage as PipelineStage) || "intake",
-    status: "open",
+    stage: initialStage ?? "intake",
+    status: proposal.status,
   };
 
   const actor = createActor(proposalMachine, {
-    input: initialContext as unknown as never,
+    input: initialContext,
   });
   actor.start();
   return actor;
 }
 
 /**
- * Bascule une proposition à travers ses états de manière séquentielle
+ * Moves a proposal through its states sequentially
  */
-export function sendProposalEvent(
-  actor: ReturnType<typeof createProposalActor>,
-  event: Omit<ProposalEvent, never> | Extract<ProposalEvent, { type: string }>,
-) {
-  actor.send(event as ProposalEvent);
+export function sendProposalEvent(actor: ReturnType<typeof createProposalActor>, event: ProposalEvent) {
+  actor.send(event);
   return actor.getSnapshot();
 }
 
 /**
- * Récupère le contexte actuel de la machine
+ * Returns the machine's current context
  */
 export function getProposalContext(actor: ReturnType<typeof createProposalActor>) {
   return actor.getSnapshot().context;
 }
 
 /**
- * Récupère l'état actuel de la machine
+ * Returns the machine's current state
  */
 export function getProposalState(actor: ReturnType<typeof createProposalActor>) {
   return actor.getSnapshot().value;
 }
 
 /**
- * Vérifie si la proposition peut faire une transition donnée
+ * Checks whether the proposal can take a given transition
  */
 export function canSendProposalEvent(actor: ReturnType<typeof createProposalActor>, eventType: string): boolean {
   try {
@@ -64,7 +66,7 @@ export function canSendProposalEvent(actor: ReturnType<typeof createProposalActo
 }
 
 /**
- * Retourne toutes les transitions possibles depuis l'état actuel
+ * Returns all possible transitions from the current state
  */
 export function getAvailableProposalEvents(actor: ReturnType<typeof createProposalActor>): string[] {
   const eventTypes: Array<ProposalEvent["type"]> = [
@@ -94,8 +96,8 @@ export function getAvailableProposalEvents(actor: ReturnType<typeof createPropos
 }
 
 /**
- * Helper pour l'auto-progression d'une proposition dans le pipeline
- * Utilise les événements de progression linéaire
+ * Helper for auto-progressing a proposal through the pipeline
+ * Uses linear progression events
  */
 export function progressProposal(actor: ReturnType<typeof createProposalActor>): string | null {
   const current = actor.getSnapshot().value;
@@ -124,7 +126,7 @@ export function progressProposal(actor: ReturnType<typeof createProposalActor>):
 }
 
 /**
- * Crée un gestionnaire pour basculer facilement les événements de rejet
+ * Creates a helper to trigger rejection events easily
  */
 export function rejectProposal(actor: ReturnType<typeof createProposalActor>) {
   sendProposalEvent(actor, { type: "REJECT" });
@@ -132,7 +134,7 @@ export function rejectProposal(actor: ReturnType<typeof createProposalActor>) {
 }
 
 /**
- * Listener pour surveiller les changements d'état
+ * Listener for observing state changes
  */
 export function onProposalStateChange(
   actor: ReturnType<typeof createProposalActor>,
