@@ -2,9 +2,11 @@ import { beforeEach, describe, expect, it } from "bun:test";
 import {
   canRollback,
   captureSnapshot,
+  createExecutionSnapshot,
   createInitialState,
   formatDryRun,
   formatRollback,
+  getSnapshot,
   performDryRun,
   performRollback,
   setState,
@@ -110,5 +112,32 @@ describe("delivery/dry-run", () => {
   it("formats rollback result", () => {
     expect(formatRollback({ success: true, message: "Rolled back" })).toContain("Rollback Successful");
     expect(formatRollback({ success: false, message: "No snapshot" })).toContain("Rollback Failed");
+  });
+
+  it("creates execution snapshot", async () => {
+    const proposal = {
+      id: 2,
+      title: "Test Snapshot",
+      type: "technical-change" as const,
+      description: "Testing createExecutionSnapshot",
+      proposedBy: "test",
+      status: "approved" as const,
+      votes: [],
+      agentOutputs: [],
+      affectedPaths: ["file1.txt"],
+      createdAt: "",
+    };
+
+    const snapshot = await createExecutionSnapshot(proposal, process.cwd());
+    expect(snapshot.proposalId).toBe(2);
+    expect(snapshot.filesChanged).toContain("file1.txt");
+    // Since we are in a git repo during tests, these should ideally not be "unknown"
+    // but even if they are, the function should return something.
+    expect(snapshot.branch).toBeDefined();
+    expect(snapshot.commitSha).toBeDefined();
+
+    const storedSnapshot = getSnapshot(2);
+    expect(storedSnapshot).toBeDefined();
+    expect(storedSnapshot?.proposalId).toBe(2);
   });
 });
