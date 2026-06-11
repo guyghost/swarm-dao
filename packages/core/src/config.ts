@@ -4,8 +4,8 @@
 
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { redactSensitiveFields } from "./utils/security.js";
 import type { DAOAgent, DAOConfig } from "./types/index.js";
+import { redactSensitiveFields } from "./utils/security.js";
 
 export type ActivationMode = "opt-in" | "suggest" | "enforce";
 

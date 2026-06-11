@@ -403,7 +403,7 @@ async function cmdGithubConfig(cwd: string, flags: Record<string, string | true>
   const daoRoot = getDaoRoot(cwd);
   await fs.mkdir(daoRoot, { recursive: true });
   const configPath = path.join(daoRoot, "config.json");
-  let configData: Record<string, any> = {};
+  let configData: Record<string, unknown> = {};
   try {
     configData = JSON.parse(await fs.readFile(configPath, "utf-8"));
   } catch {

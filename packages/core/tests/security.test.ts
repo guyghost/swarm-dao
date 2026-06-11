@@ -1,8 +1,8 @@
-import { describe, expect, it, afterEach } from "bun:test";
-import { redactSensitiveFields, saveConfig, ProjectConfig } from "@guyghost/swarm-dao-core";
+import { afterEach, describe, expect, it } from "bun:test";
 import { promises as fs } from "node:fs";
-import path from "node:path";
 import os from "node:os";
+import path from "node:path";
+import { type ProjectConfig, redactSensitiveFields, saveConfig } from "@guyghost/swarm-dao-core";
 
 describe("security", () => {
   const tmpDir = path.join(os.tmpdir(), `swarm-dao-test-${Math.random().toString(36).slice(2)}`);
@@ -18,10 +18,10 @@ describe("security", () => {
       github: { token: "secret-token", owner: "guyghost" },
       nested: {
         password: "my-password",
-        other: "value"
+        other: "value",
       },
       apiKey: "some-key",
-      normal: "field"
+      normal: "field",
     };
 
     const redacted = redactSensitiveFields(config);
@@ -34,7 +34,12 @@ describe("security", () => {
   it("saveConfig redacts tokens in the file", async () => {
     const config: ProjectConfig = {
       mode: "opt-in",
-      github: { enabled: true, owner: "o", repo: "r", token: "super-secret" } as any
+      github: {
+        enabled: true,
+        owner: "o",
+        repo: "r",
+        token: "super-secret",
+      } as unknown as ProjectConfig["github"],
     };
 
     await saveConfig(tmpDir, config);
