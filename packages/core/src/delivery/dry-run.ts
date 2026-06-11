@@ -1,5 +1,5 @@
 import { captureSnapshot, getSnapshot, getState, saveState } from "../persistence.js";
-import type { DryRunResult, ExecutionSnapshot, Proposal } from "../types/index.js";
+import { type DryRunResult, type ExecutionSnapshot, PROPOSAL_TYPE, type Proposal } from "../types/index.js";
 import { execCommand } from "../utils/host.js";
 
 export async function performDryRun(proposal: Proposal): Promise<DryRunResult> {
@@ -15,7 +15,7 @@ export async function performDryRun(proposal: Proposal): Promise<DryRunResult> {
   }
 
   // Risk assessment based on proposal type
-  if (proposal.type === "security-change") {
+  if (proposal.type === PROPOSAL_TYPE.SECURITY_CHANGE) {
     risks.push("Security-sensitive changes require extra review");
   }
   if (proposal.riskZone === "red") {
@@ -27,11 +27,11 @@ export async function performDryRun(proposal: Proposal): Promise<DryRunResult> {
 
   // Estimate duration based on proposal type
   const durationMap: Record<string, string> = {
-    "product-feature": "3-7 days",
-    "security-change": "1-2 weeks",
-    "technical-change": "2-5 days",
-    "release-change": "1-3 days",
-    "governance-change": "1-2 days",
+    [PROPOSAL_TYPE.PRODUCT_FEATURE]: "3-7 days",
+    [PROPOSAL_TYPE.SECURITY_CHANGE]: "1-2 weeks",
+    [PROPOSAL_TYPE.TECHNICAL_CHANGE]: "2-5 days",
+    [PROPOSAL_TYPE.RELEASE_CHANGE]: "1-3 days",
+    [PROPOSAL_TYPE.GOVERNANCE_CHANGE]: "1-2 days",
   };
 
   return {

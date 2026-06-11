@@ -4,28 +4,25 @@
 
 // ── Proposal Types ───────────────────────────────────────────
 
-/** Typed proposal categories — each maps to a council and approval flow */
-export type ProposalType =
-  | "product-feature"
-  | "security-change"
-  | "technical-change"
-  | "release-change"
-  | "governance-change";
+export const PROPOSAL_TYPE = {
+  PRODUCT_FEATURE: "product-feature",
+  SECURITY_CHANGE: "security-change",
+  TECHNICAL_CHANGE: "technical-change",
+  RELEASE_CHANGE: "release-change",
+  GOVERNANCE_CHANGE: "governance-change",
+} as const;
 
-export const PROPOSAL_TYPES: ProposalType[] = [
-  "product-feature",
-  "security-change",
-  "technical-change",
-  "release-change",
-  "governance-change",
-];
+/** Typed proposal categories — each maps to a council and approval flow */
+export type ProposalType = (typeof PROPOSAL_TYPE)[keyof typeof PROPOSAL_TYPE];
+
+export const PROPOSAL_TYPES: ProposalType[] = Object.values(PROPOSAL_TYPE);
 
 export const PROPOSAL_TYPE_LABELS: Record<ProposalType, string> = {
-  "product-feature": "✨ Product Feature",
-  "security-change": "🔒 Security Change",
-  "technical-change": "⚙️ Technical Change",
-  "release-change": "📦 Release Change",
-  "governance-change": "📜 Governance Change",
+  [PROPOSAL_TYPE.PRODUCT_FEATURE]: "✨ Product Feature",
+  [PROPOSAL_TYPE.SECURITY_CHANGE]: "🔒 Security Change",
+  [PROPOSAL_TYPE.TECHNICAL_CHANGE]: "⚙️ Technical Change",
+  [PROPOSAL_TYPE.RELEASE_CHANGE]: "📦 Release Change",
+  [PROPOSAL_TYPE.GOVERNANCE_CHANGE]: "📜 Governance Change",
 };
 
 // ── Councils ─────────────────────────────────────────────────
@@ -38,11 +35,11 @@ export type Council =
   | "user-council";
 
 export const PROPOSAL_COUNCIL: Record<ProposalType, Council[]> = {
-  "product-feature": ["product-council", "user-council"],
-  "security-change": ["security-council"],
-  "technical-change": ["product-council", "delivery-council", "user-council"],
-  "release-change": ["delivery-council", "security-council", "user-council"],
-  "governance-change": ["governance-council"],
+  [PROPOSAL_TYPE.PRODUCT_FEATURE]: ["product-council", "user-council"],
+  [PROPOSAL_TYPE.SECURITY_CHANGE]: ["security-council"],
+  [PROPOSAL_TYPE.TECHNICAL_CHANGE]: ["product-council", "delivery-council", "user-council"],
+  [PROPOSAL_TYPE.RELEASE_CHANGE]: ["delivery-council", "security-council", "user-council"],
+  [PROPOSAL_TYPE.GOVERNANCE_CHANGE]: ["governance-council"],
 };
 
 // ── Risk Zones ───────────────────────────────────────────────
@@ -97,11 +94,11 @@ export interface TypeQuorumConfig {
 }
 
 export const TYPE_QUORUM: Record<ProposalType, TypeQuorumConfig> = {
-  "governance-change": { quorumPercent: 70, approvalPercent: 66, description: "Governance / Policy" },
-  "product-feature": { quorumPercent: 60, approvalPercent: 55, description: "Product Roadmap" },
-  "security-change": { quorumPercent: 75, approvalPercent: 70, description: "Security-sensitive" },
-  "technical-change": { quorumPercent: 60, approvalPercent: 55, description: "Technical / Architecture" },
-  "release-change": { quorumPercent: 50, approvalPercent: 51, description: "Routine Release" },
+  [PROPOSAL_TYPE.GOVERNANCE_CHANGE]: { quorumPercent: 70, approvalPercent: 66, description: "Governance / Policy" },
+  [PROPOSAL_TYPE.PRODUCT_FEATURE]: { quorumPercent: 60, approvalPercent: 55, description: "Product Roadmap" },
+  [PROPOSAL_TYPE.SECURITY_CHANGE]: { quorumPercent: 75, approvalPercent: 70, description: "Security-sensitive" },
+  [PROPOSAL_TYPE.TECHNICAL_CHANGE]: { quorumPercent: 60, approvalPercent: 55, description: "Technical / Architecture" },
+  [PROPOSAL_TYPE.RELEASE_CHANGE]: { quorumPercent: 50, approvalPercent: 51, description: "Routine Release" },
 };
 
 // ── Pipeline Stages ──────────────────────────────────────────
