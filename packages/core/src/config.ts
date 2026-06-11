@@ -4,6 +4,7 @@
 
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { redactSensitiveFields } from "./utils/security.js";
 import type { DAOAgent, DAOConfig } from "./types/index.js";
 
 export type ActivationMode = "opt-in" | "suggest" | "enforce";
@@ -98,8 +99,9 @@ export async function loadConfig(daoRoot: string): Promise<ProjectConfig> {
 
 export async function saveConfig(daoRoot: string, config: ProjectConfig): Promise<void> {
   const configPath = getConfigPath(daoRoot);
+  const redacted = redactSensitiveFields(config);
   await fs.mkdir(daoRoot, { recursive: true });
-  await fs.writeFile(configPath, JSON.stringify(config, null, 2), "utf-8");
+  await fs.writeFile(configPath, JSON.stringify(redacted, null, 2), "utf-8");
 }
 
 export function mergeConfig(base: DAOConfig, overrides: Partial<DAOConfig>): DAOConfig {

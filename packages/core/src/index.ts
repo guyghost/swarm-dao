@@ -27,3 +27,4 @@ export * from "./persistence.js";
 export * from "./types/index.js";
 // Utils
 export * from "./utils/host.js";
+export * from "./utils/security.js";

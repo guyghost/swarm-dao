@@ -399,22 +399,24 @@ async function cmdGithubConfig(cwd: string, flags: Record<string, string | true>
 
   const githubConfig = { token, owner, repo, enabled: true };
 
-  // Persist to .dao/config.json
+  // Persist to .dao/config.json (WITHOUT the token)
   const daoRoot = getDaoRoot(cwd);
   await fs.mkdir(daoRoot, { recursive: true });
   const configPath = path.join(daoRoot, "config.json");
-  let configData: Record<string, unknown> = {};
+  let configData: Record<string, any> = {};
   try {
     configData = JSON.parse(await fs.readFile(configPath, "utf-8"));
   } catch {
     /* no existing config */
   }
-  configData.github = githubConfig;
+  configData.github = { ...githubConfig, token: "[REDACTED]" };
   await fs.writeFile(configPath, JSON.stringify(configData, null, 2), "utf-8");
 
   // Also configure in-memory for current process
   configureGitHub(githubConfig);
   info(`✓ GitHub config set: ${owner}/${repo}`);
+  info("⚠️  Note: The token has been redacted in .dao/config.json for security.");
+  info("   To avoid re-entering it, set the DAO_GITHUB_TOKEN environment variable.");
 }
 
 /**

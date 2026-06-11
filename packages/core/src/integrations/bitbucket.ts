@@ -24,12 +24,20 @@ export function getBitbucketConfig(): BitbucketConfig | null {
   return config;
 }
 
+function getAuthToken(): string | undefined {
+  const token = config?.token;
+  if (token && token !== "[REDACTED]") {
+    return token;
+  }
+  return process.env.DAO_BITBUCKET_TOKEN;
+}
+
 export function isBitbucketEnabled(): boolean {
-  return config?.enabled === true && !!config.token && !!config.workspace && !!config.repo;
+  return config?.enabled === true && !!getAuthToken() && !!config.workspace && !!config.repo;
 }
 
 function getAuthHeaders(): Record<string, string> {
-  const auth = Buffer.from(`${config?.username}:${config?.token}`).toString("base64");
+  const auth = Buffer.from(`${config?.username}:${getAuthToken()}`).toString("base64");
   return {
     Authorization: `Basic ${auth}`,
     "Content-Type": "application/json",
