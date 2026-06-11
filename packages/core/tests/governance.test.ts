@@ -249,6 +249,7 @@ describe("governance/amendments", () => {
 
     // Verify weight is updated in state
     const agent = getState().agents.find((a) => a.id === "strategist");
-    expect(agent?.weight).toBe(5);
+    expect(agent).toBeDefined();
+    expect(agent!.weight).toBe(5);
   });
 });
