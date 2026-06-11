@@ -1,6 +1,6 @@
-import { exec } from "node:child_process";
 import { captureSnapshot, getSnapshot, getState, saveState } from "../persistence.js";
 import type { DryRunResult, ExecutionSnapshot, Proposal } from "../types/index.js";
+import { execCommand } from "../utils/host.js";
 
 export async function performDryRun(proposal: Proposal): Promise<DryRunResult> {
   const _state = getState();
@@ -61,16 +61,13 @@ export function formatDryRun(result: DryRunResult): string {
 // ── Snapshot Management ─────────────────────────────────────
 
 export async function createExecutionSnapshot(proposal: Proposal, cwd: string): Promise<ExecutionSnapshot> {
-  const gitInfo = await new Promise<{ branch: string; sha: string }>((resolve) => {
-    exec("git branch --show-current && git rev-parse HEAD", { cwd }, (err, stdout) => {
-      if (err) {
-        resolve({ branch: "unknown", sha: "unknown" });
-        return;
-      }
-      const [branch, sha] = stdout.trim().split("\n");
-      resolve({ branch: branch || "unknown", sha: sha || "unknown" });
-    });
-  });
+  const branchResult = await execCommand("git branch --show-current", { cwd });
+  const shaResult = await execCommand("git rev-parse HEAD", { cwd });
+
+  const gitInfo = {
+    branch: branchResult.exitCode === 0 ? branchResult.stdout.trim() || "unknown" : "unknown",
+    sha: shaResult.exitCode === 0 ? shaResult.stdout.trim() || "unknown" : "unknown",
+  };
 
   const snapshot: ExecutionSnapshot = {
     proposalId: proposal.id,
