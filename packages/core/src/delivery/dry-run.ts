@@ -65,8 +65,8 @@ export async function createExecutionSnapshot(proposal: Proposal, cwd: string): 
   const shaResult = await execCommand("git rev-parse HEAD", { cwd });
 
   const gitInfo = {
-    branch: branchResult.exitCode === 0 ? branchResult.stdout.trim() : "unknown",
-    sha: shaResult.exitCode === 0 ? shaResult.stdout.trim() : "unknown",
+    branch: branchResult.exitCode === 0 ? branchResult.stdout.trim() || "unknown" : "unknown",
+    sha: shaResult.exitCode === 0 ? shaResult.stdout.trim() || "unknown" : "unknown",
   };
 
   const snapshot: ExecutionSnapshot = {
