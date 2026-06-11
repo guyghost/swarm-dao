@@ -7,8 +7,11 @@ import type { DeliveryPhase, DeliveryPlan, DeliveryTask, Proposal } from "../typ
 
 export { persistGetDeliveryPlan as getPlan, storeDeliveryPlan as storePlan };
 
-export function generateDeliveryPlan(proposal: Proposal): DeliveryPlan {
-  const phases: DeliveryPhase[] = [
+/**
+ * Generates the default set of delivery phases for a new plan.
+ */
+function createDefaultPhases(): DeliveryPhase[] {
+  return [
     {
       number: 1,
       name: "Setup & Design",
@@ -112,15 +115,25 @@ export function generateDeliveryPlan(proposal: Proposal): DeliveryPlan {
       duration: "1-2 days",
     },
   ];
+}
 
+/**
+ * Generates a standardized branch name for a proposal.
+ */
+function generateBranchName(proposal: Proposal): string {
+  const slug = proposal.title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .slice(0, 30);
+  return `feature/dao-${proposal.id}-${slug}`;
+}
+
+export function generateDeliveryPlan(proposal: Proposal): DeliveryPlan {
   return {
     proposalId: proposal.id,
     createdAt: new Date().toISOString(),
-    phases,
-    branchStrategy: `feature/dao-${proposal.id}-${proposal.title
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .slice(0, 30)}`,
+    phases: createDefaultPhases(),
+    branchStrategy: generateBranchName(proposal),
     rollbackPlan: "Revert the merge commit and redeploy previous version",
     estimatedDuration: "5-9 days",
   };
