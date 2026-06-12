@@ -171,7 +171,7 @@ async function copyLegacyFiles(legacyRoot: string, newRoot: string): Promise<voi
   );
 }
 
-async function migrateProposalIdPaddings(newRoot: string): Promise<void> {
+async function migrateProposalIdPadding(newRoot: string): Promise<void> {
   try {
     const proposalsDir = getProposalsDir(newRoot);
     const files = await fs.readdir(proposalsDir);
@@ -223,7 +223,7 @@ export async function migrateFromLegacy(cwd: string, legacyDirectories: string[]
     /* no old state */
   }
 
-  await migrateProposalIdPaddings(newRoot);
+  await migrateProposalIdPadding(newRoot);
 
   console.log("  ✓ Migration complete");
   try {
