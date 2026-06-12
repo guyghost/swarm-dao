@@ -4,7 +4,7 @@
 
 import { getState } from "../persistence.js";
 import type { ChecklistItem, ControlCheckResult, DAOConfig, GateResult, Proposal } from "../types/index.js";
-import { TYPE_QUORUM } from "../types/index.js";
+import { PROPOSAL_TYPE, TYPE_QUORUM } from "../types/index.js";
 
 // ── Gate Definitions ─────────────────────────────────────────
 
@@ -201,7 +201,7 @@ function generateChecklist(proposal: Proposal): ChecklistItem[] {
       id: "security-review",
       category: "security",
       label: "Security review completed",
-      checked: proposal.type !== "security-change",
+      checked: proposal.type !== PROPOSAL_TYPE.SECURITY_CHANGE,
       autoChecked: true,
     },
     { id: "data-handling", category: "compliance", label: "Data handling reviewed", checked: true, autoChecked: true },
@@ -273,7 +273,7 @@ export function runGates(proposal: Proposal, config: DAOConfig): ControlCheckRes
   }
 
   // Type-specific severity promotion
-  if (proposal.type === "security-change") {
+  if (proposal.type === PROPOSAL_TYPE.SECURITY_CHANGE) {
     const riskGate = gates.find((g) => g.gateId === "risk-threshold");
     if (riskGate && !riskGate.passed) {
       riskGate.severity = "blocker";
@@ -282,7 +282,7 @@ export function runGates(proposal: Proposal, config: DAOConfig): ControlCheckRes
     }
   }
 
-  if (proposal.type === "release-change") {
+  if (proposal.type === PROPOSAL_TYPE.RELEASE_CHANGE) {
     const deliveryGate = gates.find((g) => g.gateId === "dependency-readiness");
     if (deliveryGate && !deliveryGate.passed) {
       deliveryGate.severity = "blocker";

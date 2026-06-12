@@ -3,7 +3,7 @@
 // ============================================================
 
 import type { DAOAgent, HostAdapter, ProposalType } from "../types/index.js";
-import { PROPOSAL_TYPES } from "../types/index.js";
+import { PROPOSAL_TYPE, PROPOSAL_TYPES } from "../types/index.js";
 
 export interface RoundTableSuggestion {
   agentId: string;
@@ -50,7 +50,7 @@ export async function runRoundTable(
           proposal: {
             id: 0,
             title: "Round Table Suggestions",
-            type: "governance-change",
+            type: PROPOSAL_TYPE.GOVERNANCE_CHANGE,
             description: "Agents suggest proposals",
             proposedBy: "system",
             status: "open",
