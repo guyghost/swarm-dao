@@ -1,5 +1,6 @@
 import { captureSnapshot, getSnapshot, getState, saveState } from "../persistence.js";
-import { type DryRunResult, type ExecutionSnapshot, PROPOSAL_TYPE, type Proposal } from "../types/index.js";
+import type { DryRunResult, ExecutionSnapshot, Proposal } from "../types/index.js";
+import { PROPOSAL_TYPE } from "../types/index.js";
 import { execCommand } from "../utils/host.js";
 
 export async function performDryRun(proposal: Proposal): Promise<DryRunResult> {
