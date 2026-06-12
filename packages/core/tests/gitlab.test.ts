@@ -23,4 +23,25 @@ describe("integrations/gitlab.ts", () => {
     expect(isGitLabEnabled()).toBe(true);
     expect(glBranchNameFor(proposal)).toContain("dao/18-rbac-support");
   });
+
+  it("uses DAO_GITLAB_TOKEN when configured token is redacted", () => {
+    const previous = process.env.DAO_GITLAB_TOKEN;
+    delete process.env.DAO_GITLAB_TOKEN;
+
+    configureGitLab({
+      enabled: true,
+      token: "[REDACTED]",
+      projectId: "p",
+    });
+    expect(isGitLabEnabled()).toBe(false);
+
+    process.env.DAO_GITLAB_TOKEN = "env-token";
+    expect(isGitLabEnabled()).toBe(true);
+
+    if (previous === undefined) {
+      delete process.env.DAO_GITLAB_TOKEN;
+    } else {
+      process.env.DAO_GITLAB_TOKEN = previous;
+    }
+  });
 });
