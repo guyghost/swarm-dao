@@ -1,5 +1,5 @@
 // ============================================================
-// Swarm DAO Core — Internal Logging Utility
+// Swarm DAO Core — Logging Utility
 // ============================================================
 
 export type LogLevel = "info" | "warn" | "error" | "debug";
