@@ -6,6 +6,9 @@
  * Recursively redacts sensitive fields in an object.
  * Replaces values of keys like 'token', 'secret', 'password', 'key' with '[REDACTED]'.
  */
+const SENSITIVE_KEYS = new Set(["token", "secret", "password", "key", "apikey"]);
+const REDACTED_VALUE = "[REDACTED]";
+
 export function redactSensitiveFields<T>(obj: T): T {
   if (obj === null || typeof obj !== "object") {
     return obj;
@@ -15,13 +18,11 @@ export function redactSensitiveFields<T>(obj: T): T {
     return obj.map((item) => redactSensitiveFields(item)) as unknown as T;
   }
 
-  const SENSITIVE_KEYS = ["token", "secret", "password", "key", "apikey"];
   const redacted: Record<string, unknown> = {};
 
   for (const [k, v] of Object.entries(obj)) {
-    if (SENSITIVE_KEYS.includes(k.toLowerCase()) && typeof v === "string" && v.length > 0) {
-      redacted[k] = "[REDACTED]";
-    } else if (typeof v === "object") {
+    if (SENSITIVE_KEYS.has(k.toLowerCase()) && typeof v === "string" && v.length > 0) {
+      redacted[k] = REDACTED_VALUE;
       redacted[k] = redactSensitiveFields(v);
     } else {
       redacted[k] = v;
