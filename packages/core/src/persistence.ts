@@ -139,35 +139,21 @@ export async function initStorage(cwd: string): Promise<string> {
 
 // ── Legacy Migration ─────────────────────────────────────────
 
-export async function migrateFromLegacy(cwd: string, legacyDirectories: string[] = []): Promise<boolean> {
-  const newRoot = getDaoRoot(cwd);
-
-  try {
-    await fs.access(newRoot);
-    return false;
-  } catch {
-    /* .dao doesn't exist */
-  }
-
-  let legacyRoot: string | null = null;
+async function findLegacyRoot(cwd: string, legacyDirectories: string[]): Promise<string | null> {
   for (const directory of legacyDirectories) {
     const candidate = resolveSafeLegacyDirectory(cwd, directory);
     if (!candidate) continue;
     try {
       await fs.access(candidate);
-      legacyRoot = candidate;
-      break;
+      return candidate;
     } catch {
       /* candidate doesn't exist */
     }
   }
-  if (!legacyRoot) {
-    return false;
-  }
+  return null;
+}
 
-  logger.info("🔄 Migrating DAO storage: legacy directory → .dao");
-  await fs.mkdir(newRoot, { recursive: true });
-
+async function copyLegacyFiles(legacyRoot: string, newRoot: string): Promise<void> {
   const entries = await fs.readdir(legacyRoot, { withFileTypes: true });
   await Promise.all(
     entries.map(async (entry) => {
@@ -184,18 +170,9 @@ export async function migrateFromLegacy(cwd: string, legacyDirectories: string[]
       await fs.copyFile(srcPath, destPath);
     }),
   );
+}
 
-  const oldStatePath = path.join(newRoot, "dao-state.json");
-  const newStatePath = path.join(newRoot, STATE_FILE);
-  try {
-    await fs.access(oldStatePath);
-    await fs.rename(oldStatePath, newStatePath);
-    logger.info("  ✓ Renamed dao-state.json → state.json");
-  } catch {
-    /* no old state */
-  }
-
-  // Migrate proposal IDs to 3-digit padding
+async function migrateProposalIdPaddings(newRoot: string): Promise<void> {
   try {
     const proposalsDir = getProposalsDir(newRoot);
     const files = await fs.readdir(proposalsDir);
@@ -215,6 +192,39 @@ export async function migrateFromLegacy(cwd: string, legacyDirectories: string[]
   } catch {
     /* no proposals yet */
   }
+}
+
+export async function migrateFromLegacy(cwd: string, legacyDirectories: string[] = []): Promise<boolean> {
+  const newRoot = getDaoRoot(cwd);
+
+  try {
+    await fs.access(newRoot);
+    return false;
+  } catch {
+    /* .dao doesn't exist */
+  }
+
+  const legacyRoot = await findLegacyRoot(cwd, legacyDirectories);
+  if (!legacyRoot) {
+    return false;
+  }
+
+  logger.info("🔄 Migrating DAO storage: legacy directory → .dao");
+  await fs.mkdir(newRoot, { recursive: true });
+
+  await copyLegacyFiles(legacyRoot, newRoot);
+
+  const oldStatePath = path.join(newRoot, "dao-state.json");
+  const newStatePath = path.join(newRoot, STATE_FILE);
+  try {
+    await fs.access(oldStatePath);
+    await fs.rename(oldStatePath, newStatePath);
+    logger.info("  ✓ Renamed dao-state.json → state.json");
+  } catch {
+    /* no old state */
+  }
+
+  await migrateProposalIdPaddings(newRoot);
 
   logger.info("  ✓ Migration complete");
   try {
