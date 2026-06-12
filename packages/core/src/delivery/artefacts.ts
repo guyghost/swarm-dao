@@ -13,6 +13,7 @@ import type {
   RiskReport,
   TestPlan,
 } from "../types/index.js";
+import { PROPOSAL_TYPE } from "../types/index.js";
 
 // ── Decision Brief ───────────────────────────────────────────
 
@@ -83,7 +84,7 @@ function formatADR(adr: ADR): string {
 
 function generateRiskReport(proposal: Proposal): RiskReport {
   const risks = [];
-  if (proposal.type === "security-change") {
+  if (proposal.type === PROPOSAL_TYPE.SECURITY_CHANGE) {
     risks.push({
       category: "Security",
       description: "Security-sensitive change requires extra review",
@@ -112,8 +113,9 @@ function generateRiskReport(proposal: Proposal): RiskReport {
     overallRiskScore: proposal.riskZone === "red" ? 8 : proposal.riskZone === "orange" ? 5 : 2,
     riskLevel: proposal.riskZone === "red" ? "critical" : proposal.riskZone === "orange" ? "medium" : "low",
     risks,
-    permissions: proposal.type === "security-change" ? ["authentication", "authorization"] : [],
-    dataSurfaces: proposal.type === "security-change" ? ["user credentials", "session tokens"] : ["application state"],
+    permissions: proposal.type === PROPOSAL_TYPE.SECURITY_CHANGE ? ["authentication", "authorization"] : [],
+    dataSurfaces:
+      proposal.type === PROPOSAL_TYPE.SECURITY_CHANGE ? ["user credentials", "session tokens"] : ["application state"],
     guardrails: ["Code review required", "Tests must pass", "Security review for red zone"],
   };
 }

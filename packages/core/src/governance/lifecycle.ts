@@ -3,7 +3,7 @@
 // ============================================================
 
 import type { Proposal, ProposalStatus, RiskZone } from "../types/index.js";
-import { PROPOSAL_COUNCIL, RISK_ZONE_DEFINITIONS } from "../types/index.js";
+import { PROPOSAL_COUNCIL, PROPOSAL_TYPE, RISK_ZONE_DEFINITIONS } from "../types/index.js";
 
 // ── Transitions ──────────────────────────────────────────────
 
@@ -48,8 +48,8 @@ export function transitionProposal(
 // ── Risk Zone Classification ─────────────────────────────────
 
 export function classifyRiskZone(proposal: Proposal): RiskZone {
-  // Security and governance changes are at least orange
-  if (proposal.type === "security-change" || proposal.type === "governance-change") {
+  // Security and governance changes are classified as red
+  if (proposal.type === PROPOSAL_TYPE.SECURITY_CHANGE || proposal.type === PROPOSAL_TYPE.GOVERNANCE_CHANGE) {
     return "red";
   }
 
@@ -71,8 +71,8 @@ export function classifyRiskZone(proposal: Proposal): RiskZone {
   }
 
   // Default based on type
-  if (proposal.type === "release-change") return "green";
-  if (proposal.type === "product-feature") return "orange";
+  if (proposal.type === PROPOSAL_TYPE.RELEASE_CHANGE) return "green";
+  if (proposal.type === PROPOSAL_TYPE.PRODUCT_FEATURE) return "orange";
 
   return "orange";
 }
