@@ -4,6 +4,7 @@
 
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { logger } from "./observability/logging.js";
 import { recordProposalExecuted, recordVoteCast } from "./observability/metrics.js";
 import type {
   AgentOutput,
@@ -138,35 +139,21 @@ export async function initStorage(cwd: string): Promise<string> {
 
 // ── Legacy Migration ─────────────────────────────────────────
 
-export async function migrateFromLegacy(cwd: string, legacyDirectories: string[] = []): Promise<boolean> {
-  const newRoot = getDaoRoot(cwd);
-
-  try {
-    await fs.access(newRoot);
-    return false;
-  } catch {
-    /* .dao doesn't exist */
-  }
-
-  let legacyRoot: string | null = null;
+async function findLegacyRoot(cwd: string, legacyDirectories: string[]): Promise<string | null> {
   for (const directory of legacyDirectories) {
     const candidate = resolveSafeLegacyDirectory(cwd, directory);
     if (!candidate) continue;
     try {
       await fs.access(candidate);
-      legacyRoot = candidate;
-      break;
+      return candidate;
     } catch {
       /* candidate doesn't exist */
     }
   }
-  if (!legacyRoot) {
-    return false;
-  }
+  return null;
+}
 
-  console.log("🔄 Migrating DAO storage: legacy directory → .dao");
-  await fs.mkdir(newRoot, { recursive: true });
-
+async function copyLegacyFiles(legacyRoot: string, newRoot: string): Promise<void> {
   const entries = await fs.readdir(legacyRoot, { withFileTypes: true });
   await Promise.all(
     entries.map(async (entry) => {
@@ -183,18 +170,9 @@ export async function migrateFromLegacy(cwd: string, legacyDirectories: string[]
       await fs.copyFile(srcPath, destPath);
     }),
   );
+}
 
-  const oldStatePath = path.join(newRoot, "dao-state.json");
-  const newStatePath = path.join(newRoot, STATE_FILE);
-  try {
-    await fs.access(oldStatePath);
-    await fs.rename(oldStatePath, newStatePath);
-    console.log("  ✓ Renamed dao-state.json → state.json");
-  } catch {
-    /* no old state */
-  }
-
-  // Migrate proposal IDs to 3-digit padding
+async function migrateProposalIdPaddings(newRoot: string): Promise<void> {
   try {
     const proposalsDir = getProposalsDir(newRoot);
     const files = await fs.readdir(proposalsDir);
@@ -207,20 +185,53 @@ export async function migrateFromLegacy(cwd: string, legacyDirectories: string[]
         const paddedName = `${padId(id)}.json`;
         if (file !== paddedName) {
           await fs.rename(path.join(proposalsDir, file), path.join(proposalsDir, paddedName));
-          console.log(`  ✓ Renamed ${file} → ${paddedName}`);
+          logger.info(`  ✓ Renamed ${file} → ${paddedName}`);
         }
       }),
     );
   } catch {
     /* no proposals yet */
   }
+}
 
-  console.log("  ✓ Migration complete");
+export async function migrateFromLegacy(cwd: string, legacyDirectories: string[] = []): Promise<boolean> {
+  const newRoot = getDaoRoot(cwd);
+
+  try {
+    await fs.access(newRoot);
+    return false;
+  } catch {
+    /* .dao doesn't exist */
+  }
+
+  const legacyRoot = await findLegacyRoot(cwd, legacyDirectories);
+  if (!legacyRoot) {
+    return false;
+  }
+
+  logger.info("🔄 Migrating DAO storage: legacy directory → .dao");
+  await fs.mkdir(newRoot, { recursive: true });
+
+  await copyLegacyFiles(legacyRoot, newRoot);
+
+  const oldStatePath = path.join(newRoot, "dao-state.json");
+  const newStatePath = path.join(newRoot, STATE_FILE);
+  try {
+    await fs.access(oldStatePath);
+    await fs.rename(oldStatePath, newStatePath);
+    logger.info("  ✓ Renamed dao-state.json → state.json");
+  } catch {
+    /* no old state */
+  }
+
+  await migrateProposalIdPaddings(newRoot);
+
+  logger.info("  ✓ Migration complete");
   try {
     await fs.rm(legacyRoot, { recursive: true, force: true });
-    console.log("  ✓ Removed legacy DAO directory");
+    logger.info("  ✓ Removed legacy DAO directory");
   } catch (err) {
-    console.warn("  ⚠ Could not remove legacy DAO directory:", err);
+    logger.warn("  ⚠ Could not remove legacy DAO directory:", err);
   }
 
   return true;
@@ -290,7 +301,7 @@ export async function loadState(cwd: string, options?: { legacyDirectories?: str
       loaded.proposals = Array.from(byId.values()).sort((a, b) => a.id - b.id);
     }
   } catch (error) {
-    console.warn(`⚠ Failed to reconcile proposal sidecars: ${getErrorMessage(error)}`);
+    logger.warn(`⚠ Failed to reconcile proposal sidecars: ${getErrorMessage(error)}`);
   }
 
   const highestProposalId = loaded.proposals.reduce((max, proposal) => Math.max(max, proposal.id), 0);
@@ -322,7 +333,7 @@ export async function loadProposalsFromDisk(daoRoot: string): Promise<Proposal[]
           const proposal = await readJsonFile<Proposal>(filePath);
           return isPositiveInteger(proposal?.id) ? proposal : null;
         } catch (error) {
-          console.warn(`⚠ Skipping malformed proposal sidecar ${filePath}: ${getErrorMessage(error)}`);
+          logger.warn(`⚠ Skipping malformed proposal sidecar ${filePath}: ${getErrorMessage(error)}`);
           return null;
         }
       }),
@@ -370,7 +381,7 @@ export async function saveState(): Promise<void> {
           await fs.unlink(orphanPath);
         } catch (error) {
           if (hasErrorCode(error, "ENOENT")) return;
-          console.warn(`⚠ Failed to remove orphan proposal sidecar ${orphanPath}: ${getErrorMessage(error)}`);
+          logger.warn(`⚠ Failed to remove orphan proposal sidecar ${orphanPath}: ${getErrorMessage(error)}`);
         }
       }),
     );
@@ -437,7 +448,7 @@ export async function updateStorageSettings(
     }
   } catch (error) {
     if (!hasErrorCode(error, "ENOENT")) {
-      console.warn(`⚠ Ignoring invalid storage config at ${configPath}: ${getErrorMessage(error)}`);
+      logger.warn(`⚠ Ignoring invalid storage config at ${configPath}: ${getErrorMessage(error)}`);
     }
   }
   rootConfig.storageSettings = next;
