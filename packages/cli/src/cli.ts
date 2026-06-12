@@ -399,7 +399,7 @@ async function cmdGithubConfig(cwd: string, flags: Record<string, string | true>
 
   const githubConfig = { token, owner, repo, enabled: true };
 
-  // Persist to .dao/config.json (WITHOUT the token)
+  // Persist to .dao/config.json (with token redacted)
   const daoRoot = getDaoRoot(cwd);
   await fs.mkdir(daoRoot, { recursive: true });
   const configPath = path.join(daoRoot, "config.json");
