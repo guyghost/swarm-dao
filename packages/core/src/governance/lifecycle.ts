@@ -48,7 +48,7 @@ export function transitionProposal(
 // ── Risk Zone Classification ─────────────────────────────────
 
 export function classifyRiskZone(proposal: Proposal): RiskZone {
-  // Security and governance changes are at least orange
+  // Security and governance changes are classified as red
   if (proposal.type === PROPOSAL_TYPE.SECURITY_CHANGE || proposal.type === PROPOSAL_TYPE.GOVERNANCE_CHANGE) {
     return "red";
   }

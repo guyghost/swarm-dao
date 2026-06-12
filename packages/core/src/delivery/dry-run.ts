@@ -26,7 +26,7 @@ export async function performDryRun(proposal: Proposal): Promise<DryRunResult> {
   }
 
   // Estimate duration based on proposal type
-  const durationMap: Record<string, string> = {
+  const durationMap: Record<Proposal["type"], string> = {
     [PROPOSAL_TYPE.PRODUCT_FEATURE]: "3-7 days",
     [PROPOSAL_TYPE.SECURITY_CHANGE]: "1-2 weeks",
     [PROPOSAL_TYPE.TECHNICAL_CHANGE]: "2-5 days",
@@ -36,10 +36,10 @@ export async function performDryRun(proposal: Proposal): Promise<DryRunResult> {
 
   return {
     proposalId: proposal.id,
-    preview: `This proposal would modify ${filesAffected.length || "unknown number of"} files and requires ${durationMap[proposal.type] || "unknown duration"}.`,
+    preview: `This proposal would modify ${filesAffected.length || "unknown number of"} files and requires ${durationMap[proposal.type]}.`,
     filesAffected,
     risks,
-    estimatedDuration: durationMap[proposal.type] || "TBD",
+    estimatedDuration: durationMap[proposal.type],
     canProceed: risks.filter((r) => r.includes("high risk") || r.includes("Security-sensitive")).length === 0,
   };
 }
