@@ -7,6 +7,7 @@ import {
   DEFAULT_CONFIG,
   executeAmendment,
   formatAgentsTable,
+  getState,
   initializeAgents,
   parseVoteFromOutput,
   setState,
@@ -246,7 +247,9 @@ describe("governance/amendments", () => {
     const result = executeAmendment(payload);
     expect(result.success).toBe(true);
 
-    setState(null);
-    // Weight should be updated in state
+    // Verify weight is updated in state
+    const agent = getState().agents.find((a) => a.id === "strategist");
+    expect(agent).toBeDefined();
+    expect(agent!.weight).toBe(5);
   });
 });
