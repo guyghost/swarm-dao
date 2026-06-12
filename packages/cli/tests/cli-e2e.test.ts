@@ -125,7 +125,7 @@ describe("CLI E2E", () => {
         const configPath = path.join(testDir, ".dao", "config.json");
         const configData = JSON.parse(await fs.readFile(configPath, "utf-8"));
         expect(configData.github).toBeDefined();
-        expect(configData.github.token).toBe("ghp_test123");
+        expect(configData.github.token).toBe("[REDACTED]");
         expect(configData.github.owner).toBe("myorg");
         expect(configData.github.repo).toBe("myrepo");
       } else {
@@ -136,6 +136,8 @@ describe("CLI E2E", () => {
 
     it("github-branch without config shows error about missing configuration", async () => {
       await runCLI(["init"], testDir);
+      await runCLI(["setup"], testDir);
+      await runCLI(["propose", "--title=Test", "--type=product-feature", "--description=Test"], testDir);
 
       const result = await runCLI(["github-branch", "1"], testDir);
 
@@ -150,6 +152,8 @@ describe("CLI E2E", () => {
 
     it("github-pr without config shows error about missing configuration", async () => {
       await runCLI(["init"], testDir);
+      await runCLI(["setup"], testDir);
+      await runCLI(["propose", "--title=Test", "--type=product-feature", "--description=Test"], testDir);
 
       const result = await runCLI(["github-pr", "1", "--head-branch=feat/test"], testDir);
 

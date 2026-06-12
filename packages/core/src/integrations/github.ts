@@ -25,8 +25,16 @@ export function getGitHubConfig(): GitHubConfig | null {
   return config;
 }
 
+function getAuthToken(): string | undefined {
+  const token = config?.token;
+  if (token && token !== "[REDACTED]") {
+    return token;
+  }
+  return process.env.DAO_GITHUB_TOKEN;
+}
+
 export function isGitHubEnabled(): boolean {
-  return config?.enabled === true && !!config.token && !!config.owner && !!config.repo;
+  return config?.enabled === true && !!getAuthToken() && !!config.owner && !!config.repo;
 }
 
 function getApiBase(): string {
@@ -35,7 +43,7 @@ function getApiBase(): string {
 
 function getAuthHeaders(): Record<string, string> {
   return {
-    Authorization: `Bearer ${config?.token}`,
+    Authorization: `Bearer ${getAuthToken()}`,
     Accept: "application/vnd.github+json",
     "X-GitHub-Api-Version": "2022-11-28",
   };

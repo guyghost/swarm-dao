@@ -25,6 +25,7 @@ import type {
   Vote,
 } from "./types/index.js";
 import { createInitialState } from "./types/index.js";
+import { redactSensitiveFields } from "./utils/security.js";
 
 let state: DAOState | null = null;
 
@@ -452,7 +453,8 @@ export async function updateStorageSettings(
     }
   }
   rootConfig.storageSettings = next;
-  await writeJsonFile(configPath, rootConfig);
+  const redacted = redactSensitiveFields(rootConfig);
+  await writeJsonFile(configPath, redacted);
   return next;
 }
 

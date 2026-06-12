@@ -23,8 +23,16 @@ export function getGitLabConfig(): GitLabConfig | null {
   return config;
 }
 
+function getAuthToken(): string | undefined {
+  const token = config?.token;
+  if (token && token !== "[REDACTED]") {
+    return token;
+  }
+  return process.env.DAO_GITLAB_TOKEN;
+}
+
 export function isGitLabEnabled(): boolean {
-  return config?.enabled === true && !!config.token && !!config.projectId;
+  return config?.enabled === true && !!getAuthToken() && !!config.projectId;
 }
 
 function getApiBase(): string {
@@ -34,7 +42,7 @@ function getApiBase(): string {
 
 function getAuthHeaders(): Record<string, string> {
   return {
-    "PRIVATE-TOKEN": config?.token ?? "",
+    "PRIVATE-TOKEN": getAuthToken() ?? "",
     "Content-Type": "application/json",
   };
 }
