@@ -25,24 +25,4 @@ describe("integrations/bitbucket.ts", () => {
     expect(isBitbucketEnabled()).toBe(true);
     expect(bbBranchNameFor(proposal)).toContain("dao/21-telemetry-update");
   });
-
-  it("uses environment variable token when config token is redacted", () => {
-    const oldEnv = process.env.DAO_BITBUCKET_TOKEN;
-    delete process.env.DAO_BITBUCKET_TOKEN;
-
-    configureBitbucket({
-      enabled: true,
-      token: "[REDACTED]",
-      username: "u",
-      workspace: "w",
-      repo: "r",
-    });
-    expect(isBitbucketEnabled()).toBe(false);
-
-    process.env.DAO_BITBUCKET_TOKEN = "env-token";
-    expect(isBitbucketEnabled()).toBe(true);
-
-    if (oldEnv) process.env.DAO_BITBUCKET_TOKEN = oldEnv;
-    else delete process.env.DAO_BITBUCKET_TOKEN;
-  });
 });

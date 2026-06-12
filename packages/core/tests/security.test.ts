@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { type ProjectConfig, redactSensitiveFields, saveConfig } from "@guyghost/swarm-dao-core";
+import { type ProjectConfig, saveConfig } from "../src/config.js";
+import { redactSensitiveFields } from "../src/utils/security.js";
 
 describe("security", () => {
   const tmpDir = path.join(os.tmpdir(), `swarm-dao-test-${Math.random().toString(36).slice(2)}`);
