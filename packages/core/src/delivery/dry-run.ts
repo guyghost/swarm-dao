@@ -33,13 +33,14 @@ export async function performDryRun(proposal: Proposal): Promise<DryRunResult> {
     [PROPOSAL_TYPE.RELEASE_CHANGE]: "1-3 days",
     [PROPOSAL_TYPE.GOVERNANCE_CHANGE]: "1-2 days",
   };
+  const estimatedDuration = durationMap[proposal.type] ?? "TBD";
 
   return {
     proposalId: proposal.id,
-    preview: `This proposal would modify ${filesAffected.length || "unknown number of"} files and requires ${durationMap[proposal.type]}.`,
+    preview: `This proposal would modify ${filesAffected.length || "unknown number of"} files and requires ${estimatedDuration}.`,
     filesAffected,
     risks,
-    estimatedDuration: durationMap[proposal.type],
+    estimatedDuration,
     canProceed: risks.filter((r) => r.includes("high risk") || r.includes("Security-sensitive")).length === 0,
   };
 }
