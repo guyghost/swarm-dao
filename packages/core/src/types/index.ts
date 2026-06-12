@@ -4,14 +4,6 @@
 
 // ── Proposal Types ───────────────────────────────────────────
 
-/** Typed proposal categories — each maps to a council and approval flow */
-export type ProposalType =
-  | "product-feature"
-  | "security-change"
-  | "technical-change"
-  | "release-change"
-  | "governance-change";
-
 export const PROPOSAL_TYPE = {
   PRODUCT_FEATURE: "product-feature",
   SECURITY_CHANGE: "security-change",
@@ -20,13 +12,10 @@ export const PROPOSAL_TYPE = {
   GOVERNANCE_CHANGE: "governance-change",
 } as const;
 
-export const PROPOSAL_TYPES: ProposalType[] = [
-  PROPOSAL_TYPE.PRODUCT_FEATURE,
-  PROPOSAL_TYPE.SECURITY_CHANGE,
-  PROPOSAL_TYPE.TECHNICAL_CHANGE,
-  PROPOSAL_TYPE.RELEASE_CHANGE,
-  PROPOSAL_TYPE.GOVERNANCE_CHANGE,
-];
+/** Typed proposal categories — each maps to a council and approval flow */
+export type ProposalType = (typeof PROPOSAL_TYPE)[keyof typeof PROPOSAL_TYPE];
+
+export const PROPOSAL_TYPES: ProposalType[] = Object.values(PROPOSAL_TYPE);
 
 export const PROPOSAL_TYPE_LABELS: Record<ProposalType, string> = {
   [PROPOSAL_TYPE.PRODUCT_FEATURE]: "✨ Product Feature",

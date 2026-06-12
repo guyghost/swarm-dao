@@ -27,7 +27,7 @@ export async function performDryRun(proposal: Proposal): Promise<DryRunResult> {
   }
 
   // Estimate duration based on proposal type
-  const durationMap: Record<string, string> = {
+  const durationMap: Record<Proposal["type"], string> = {
     [PROPOSAL_TYPE.PRODUCT_FEATURE]: "3-7 days",
     [PROPOSAL_TYPE.SECURITY_CHANGE]: "1-2 weeks",
     [PROPOSAL_TYPE.TECHNICAL_CHANGE]: "2-5 days",
