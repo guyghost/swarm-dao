@@ -92,8 +92,13 @@ export function execCommand(
 function resolveContainedPath(filePath: string, baseDir: string): string {
   const resolvedBase = path.resolve(baseDir);
   const resolvedPath = path.resolve(resolvedBase, filePath);
-  const relative = path.relative(resolvedBase, resolvedPath);
-  if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+
+  // Ensure base has a trailing separator for a foolproof prefix check,
+  // handle the case where it might already have one (like root "/").
+  const baseWithSep = resolvedBase.endsWith(path.sep) ? resolvedBase : resolvedBase + path.sep;
+
+  // The path is contained if it IS the base directory, OR if it starts with "base + separator"
+  if (resolvedPath !== resolvedBase && !resolvedPath.startsWith(baseWithSep)) {
     throw new Error(`Path traversal denied: "${filePath}" is outside "${baseDir}"`);
   }
   return resolvedPath;
