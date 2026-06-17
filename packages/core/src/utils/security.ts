@@ -18,9 +18,11 @@ export function redactSensitiveFields<T>(obj: T): T {
   }
 
   const redacted: Record<string, unknown> = {};
+  const sensitiveList = Array.from(SENSITIVE_KEYS);
 
   for (const [k, v] of Object.entries(obj)) {
-    if (SENSITIVE_KEYS.has(k.toLowerCase()) && typeof v === "string" && v.length > 0) {
+    const isSensitive = sensitiveList.some((s) => k.toLowerCase().includes(s));
+    if (isSensitive && typeof v === "string" && v.length > 0) {
       redacted[k] = "[REDACTED]";
     } else if (typeof v === "object") {
       redacted[k] = redactSensitiveFields(v);
