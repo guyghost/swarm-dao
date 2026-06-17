@@ -25,7 +25,7 @@ import type {
   Vote,
 } from "./types/index.js";
 import { createInitialState } from "./types/index.js";
-import { redactSensitiveFields } from "./utils/security.js";
+import { redactSensitiveFields, SENSITIVE_KEYS } from "./utils/security.js";
 
 let state: DAOState | null = null;
 
@@ -42,8 +42,21 @@ function isPositiveInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value > 0;
 }
 
+function sanitizeErrorMessage(message: string): string {
+  let sanitized = message;
+  for (const key of SENSITIVE_KEYS) {
+    // Regex to find patterns like "key=value", "key: value", '"key": "value"'
+    // We want to be careful not to over-redact, but since this is for error messages,
+    // it's better to be safe.
+    const regex = new RegExp(`(${key})\\s*[=:]\\s*([^\\s,"'}]+|"[^"]*"|'[^']*')`, "gi");
+    sanitized = sanitized.replace(regex, "$1=[REDACTED]");
+  }
+  return sanitized;
+}
+
 function getErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  const message = error instanceof Error ? error.message : String(error);
+  return sanitizeErrorMessage(message);
 }
 
 function hasErrorCode(error: unknown, code: string): boolean {
