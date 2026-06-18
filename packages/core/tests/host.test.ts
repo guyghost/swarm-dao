@@ -25,4 +25,23 @@ describe("utils/host.ts", () => {
     await expect(readFileContained("../outside.txt", root)).rejects.toThrow("Path traversal denied");
     await fs.rm(root, { recursive: true, force: true });
   });
+
+  it("rejects partial-prefix sibling paths", async () => {
+    const parent = path.join(tmpdir(), `swarm-host-${Date.now()}`);
+    const root = path.join(parent, "root");
+    const sibling = path.join(parent, "root2");
+    await fs.mkdir(root, { recursive: true });
+    await fs.mkdir(sibling, { recursive: true });
+    await expect(writeFileContained("../root2/outside.txt", "nope", root)).rejects.toThrow("Path traversal denied");
+    await fs.rm(parent, { recursive: true, force: true });
+  });
+
+  it("allows paths resolving exactly to the base", async () => {
+    const root = path.join(tmpdir(), `swarm-host-${Date.now()}`);
+    const baseFile = path.join(root, "base.txt");
+    await fs.mkdir(root, { recursive: true });
+    await fs.writeFile(baseFile, "base", "utf-8");
+    expect(await readFileContained("", baseFile)).toBe("base");
+    await fs.rm(root, { recursive: true, force: true });
+  });
 });
