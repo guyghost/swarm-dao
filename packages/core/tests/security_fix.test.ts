@@ -9,7 +9,22 @@ describe("Security Fix: generic JSON parse errors", () => {
   let capturedLogs: { level: LogLevel; message: string }[] = [];
 
   afterEach(() => {
-    setLogHandler(null); // Reset to default (which console.log/warns)
+    setLogHandler((level, message, ...args) => {
+      switch (level) {
+        case "info":
+          console.log(message, ...args);
+          break;
+        case "warn":
+          console.warn(message, ...args);
+          break;
+        case "error":
+          console.error(message, ...args);
+          break;
+        case "debug":
+          console.debug(message, ...args);
+          break;
+      }
+    });
     capturedLogs = [];
   });
 
@@ -47,7 +62,7 @@ describe("Security Fix: generic JSON parse errors", () => {
 
       // Should NOT contain the low-level JSON parse error snippets
       expect(message).not.toContain("JSON Parse error");
-      expect(message).not.toContain("Unexpected EOF");
+      expect(message).not.toContain("Unexpected end of JSON input");
     } finally {
       await fs.rm(tmpDir, { recursive: true, force: true });
     }
