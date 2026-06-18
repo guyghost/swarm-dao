@@ -42,14 +42,21 @@ function isPositiveInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value > 0;
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function sanitizeErrorMessage(message: string): string {
   let sanitized = message;
   for (const key of SENSITIVE_KEYS) {
-    // Regex to find patterns like "key=value", "key: value", '"key": "value"'
-    // We want to be careful not to over-redact, but since this is for error messages,
-    // it's better to be safe.
-    const regex = new RegExp(`(${key})\\s*[=:]\\s*([^\\s,"'}]+|"[^"]*"|'[^']*')`, "gi");
-    sanitized = sanitized.replace(regex, "$1=[REDACTED]");
+    const escapedKey = escapeRegExp(key);
+    const regex = new RegExp(
+      `((?:"|')?\\b${escapedKey}\\b(?:"|')?\\s*(?:=|:)\\s*)(?:(["'])(?:\\\\.|(?!\\2).)*\\2|([^\\s,}\\]]+))`,
+      "gi",
+    );
+    sanitized = sanitized.replace(regex, (_match, prefix: string, quote: string | undefined) =>
+      quote ? `${prefix}${quote}[REDACTED]${quote}` : `${prefix}[REDACTED]`,
+    );
   }
   return sanitized;
 }

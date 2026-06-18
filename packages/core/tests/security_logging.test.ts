@@ -17,15 +17,14 @@ describe("Security Logging", () => {
       await fs.rm(tmpDir, { recursive: true, force: true });
     }
     mock.restore();
-    setLogHandler(null); // Restore default
+    setLogHandler(null); // Disable custom logger
   });
 
   it("should redact sensitive information in logs if it appears in error messages", async () => {
-    // Actually, I can mock fs.readFile to throw a custom error
     const originalReadFile = fs.readFile;
     // @ts-expect-error
-    fs.readFile = mock(() => {
-      throw new Error("Failed to read config: secret=my-secret-value");
+    fs.readFile = mock(async () => {
+      throw new Error('Failed to read config: secret=my-secret-value, "secret": "json-secret-value"');
     });
 
     const warnSpy = mock();
@@ -45,11 +44,10 @@ describe("Security Logging", () => {
     const calls = warnSpy.mock.calls;
     expect(calls.length).toBeGreaterThan(0);
 
-    const logMessage = calls[0][0] as string;
-    console.log("Captured log message:", logMessage);
-
-    // This should PASS now
-    expect(logMessage).not.toContain("my-secret-value");
-    expect(logMessage).toContain("secret=[REDACTED]");
+    const logMessages = calls.map((call) => String(call[0]));
+    expect(logMessages.some((message) => message.includes("my-secret-value"))).toBe(false);
+    expect(logMessages.some((message) => message.includes("json-secret-value"))).toBe(false);
+    expect(logMessages.some((message) => message.includes("secret=[REDACTED]"))).toBe(true);
+    expect(logMessages.some((message) => message.includes('"secret": "[REDACTED]"'))).toBe(true);
   });
 });
