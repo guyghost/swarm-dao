@@ -39,7 +39,14 @@ describe("utils/host.ts", () => {
   it("allows paths resolving exactly to the base directory", async () => {
     const root = path.join(tmpdir(), `swarm-host-${Date.now()}`);
     await fs.mkdir(root, { recursive: true });
-    await expect(readFileContained(".", root)).rejects.not.toThrow("Path traversal denied");
+    const result = await readFileContained(".", root).then(
+      () => ({ ok: true as const }),
+      (error) => ({ ok: false as const, error }),
+    );
+    if (!result.ok) {
+      const message = result.error instanceof Error ? result.error.message : String(result.error);
+      expect(message).not.toContain("Path traversal denied");
+    }
     await fs.rm(root, { recursive: true, force: true });
   });
 });
