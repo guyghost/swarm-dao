@@ -50,13 +50,15 @@ function sanitizeErrorMessage(message: string): string {
   let sanitized = message;
   for (const key of SENSITIVE_KEYS) {
     const escapedKey = escapeRegExp(key);
-    const regex = new RegExp(
-      `((?:"|')?\\b${escapedKey}\\b(?:"|')?\\s*(?:=|:)\\s*)(?:(["'])(?:\\\\.|(?!\\2).)*\\2|([^\\s,}\\]]+))`,
-      "gi",
-    );
-    sanitized = sanitized.replace(regex, (_match, prefix: string, quote: string | undefined) =>
-      quote ? `${prefix}${quote}[REDACTED]${quote}` : `${prefix}[REDACTED]`,
-    );
+    const keyPattern = `(?:"|')?\\b${escapedKey}\\b(?:"|')?`;
+    const separatorPattern = "\\s*(?:=|:)\\s*";
+    const quotedValuePattern = `"(?:\\\\.|[^"\\\\])*"|'(?:\\\\.|[^'\\\\])*'`;
+    const bareValuePattern = "[^\\s,}\\];)\\]]+";
+    const regex = new RegExp(`(${keyPattern}${separatorPattern})(${quotedValuePattern}|${bareValuePattern})`, "gi");
+    sanitized = sanitized.replace(regex, (_match, prefix: string, value: string) => {
+      const quote = value.startsWith('"') ? '"' : value.startsWith("'") ? "'" : "";
+      return quote ? `${prefix}${quote}[REDACTED]${quote}` : `${prefix}[REDACTED]`;
+    });
   }
   return sanitized;
 }

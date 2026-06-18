@@ -5,6 +5,9 @@ import path from "node:path";
 import { setLogHandler } from "../src/observability/logging.js";
 import { updateStorageSettings } from "../src/persistence.js";
 
+const SECRET_VALUE = "my-secret-value";
+const PASSWORD_VALUE = "json-password-value";
+
 describe("Security Logging", () => {
   let tmpDir: string;
 
@@ -24,7 +27,7 @@ describe("Security Logging", () => {
     const originalReadFile = fs.readFile;
     // @ts-expect-error
     fs.readFile = mock(async () => {
-      throw new Error('Failed to read config: secret=my-secret-value, "secret": "json-secret-value"');
+      throw new Error(`Failed to read config: secret=${SECRET_VALUE}, "password": "${PASSWORD_VALUE}"`);
     });
 
     const warnSpy = mock();
@@ -45,9 +48,13 @@ describe("Security Logging", () => {
     expect(calls.length).toBeGreaterThan(0);
 
     const logMessages = calls.map((call) => String(call[0]));
-    expect(logMessages.some((message) => message.includes("my-secret-value"))).toBe(false);
-    expect(logMessages.some((message) => message.includes("json-secret-value"))).toBe(false);
-    expect(logMessages.some((message) => message.includes("secret=[REDACTED]"))).toBe(true);
-    expect(logMessages.some((message) => message.includes('"secret": "[REDACTED]"'))).toBe(true);
+    expect(logMessages.some((message) => message.includes(SECRET_VALUE))).toBe(false);
+    expect(logMessages.some((message) => message.includes(PASSWORD_VALUE))).toBe(false);
+    const relevantMessages = logMessages.filter(
+      (message) => message.includes("secret=") || message.includes('"password":'),
+    );
+    expect(relevantMessages.length).toBeGreaterThan(0);
+    expect(relevantMessages.every((message) => message.includes("secret=[REDACTED]"))).toBe(true);
+    expect(relevantMessages.every((message) => message.includes('"password": "[REDACTED]"'))).toBe(true);
   });
 });
