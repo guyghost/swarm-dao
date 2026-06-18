@@ -32,6 +32,21 @@ describe("security", () => {
     expect(redacted.normal).toBe("field");
   });
 
+  it("redacts partial matches and different casings", () => {
+    const config = {
+      github_token: "secret-github-token",
+      apiToken: "secret-api-token",
+      userPassword: "secret-password",
+      AWS_SECRET_ACCESS_KEY: "secret-aws-key",
+    };
+
+    const redacted = redactSensitiveFields(config);
+    expect(redacted.github_token).toBe("[REDACTED]");
+    expect(redacted.apiToken).toBe("[REDACTED]");
+    expect(redacted.userPassword).toBe("[REDACTED]");
+    expect(redacted.AWS_SECRET_ACCESS_KEY).toBe("[REDACTED]");
+  });
+
   it("saveConfig redacts tokens in the file", async () => {
     const config: ProjectConfig = {
       mode: "opt-in",
