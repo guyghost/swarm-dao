@@ -25,7 +25,7 @@ import type {
   Vote,
 } from "./types/index.js";
 import { createInitialState } from "./types/index.js";
-import { redactSensitiveFields } from "./utils/security.js";
+import { redactSensitiveFields, SENSITIVE_KEYS } from "./utils/security.js";
 
 let state: DAOState | null = null;
 
@@ -42,8 +42,30 @@ function isPositiveInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value > 0;
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function sanitizeErrorMessage(message: string): string {
+  let sanitized = message;
+  for (const key of SENSITIVE_KEYS) {
+    const escapedKey = escapeRegExp(key);
+    const keyPattern = `(?:"|')?\\b${escapedKey}\\b(?:"|')?`;
+    const separatorPattern = "\\s*(?:=|:)\\s*";
+    const quotedValuePattern = `"(?:\\\\.|[^"\\\\])*"|'(?:\\\\.|[^'\\\\])*'`;
+    const bareValuePattern = "[^\\s,}\\];)\\]]+";
+    const regex = new RegExp(`(${keyPattern}${separatorPattern})(${quotedValuePattern}|${bareValuePattern})`, "gi");
+    sanitized = sanitized.replace(regex, (_match, prefix: string, value: string) => {
+      const quote = value.startsWith('"') ? '"' : value.startsWith("'") ? "'" : "";
+      return quote ? `${prefix}${quote}[REDACTED]${quote}` : `${prefix}[REDACTED]`;
+    });
+  }
+  return sanitized;
+}
+
 function getErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  const message = error instanceof Error ? error.message : String(error);
+  return sanitizeErrorMessage(message);
 }
 
 function hasErrorCode(error: unknown, code: string): boolean {
@@ -59,8 +81,8 @@ function hasErrorCode(error: unknown, code: string): boolean {
 function parseJsonText<T>(text: string, context: string): T {
   try {
     return JSON.parse(text) as T;
-  } catch (error) {
-    throw new Error(`Invalid JSON in ${context}: ${getErrorMessage(error)}`);
+  } catch (_error) {
+    throw new Error(`Invalid JSON in ${context}`);
   }
 }
 

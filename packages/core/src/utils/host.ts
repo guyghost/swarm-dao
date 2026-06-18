@@ -92,8 +92,8 @@ export function execCommand(
 function resolveContainedPath(filePath: string, baseDir: string): string {
   const resolvedBase = path.resolve(baseDir);
   const resolvedPath = path.resolve(resolvedBase, filePath);
-  const relative = path.relative(resolvedBase, resolvedPath);
-  if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+  const relativePath = path.relative(resolvedBase, resolvedPath);
+  if (relativePath === ".." || relativePath.startsWith(`..${path.sep}`) || path.isAbsolute(relativePath)) {
     throw new Error(`Path traversal denied: "${filePath}" is outside "${baseDir}"`);
   }
   return resolvedPath;
