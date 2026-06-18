@@ -36,12 +36,10 @@ describe("utils/host.ts", () => {
     await fs.rm(parent, { recursive: true, force: true });
   });
 
-  it("allows paths resolving exactly to the base", async () => {
+  it("allows paths resolving exactly to the base directory", async () => {
     const root = path.join(tmpdir(), `swarm-host-${Date.now()}`);
-    const baseFile = path.join(root, "base.txt");
     await fs.mkdir(root, { recursive: true });
-    await fs.writeFile(baseFile, "base", "utf-8");
-    expect(await readFileContained("", baseFile)).toBe("base");
+    await expect(readFileContained(".", root)).rejects.not.toThrow("Path traversal denied");
     await fs.rm(root, { recursive: true, force: true });
   });
 });

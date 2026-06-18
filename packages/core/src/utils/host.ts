@@ -93,7 +93,7 @@ function resolveContainedPath(filePath: string, baseDir: string): string {
   const resolvedBase = path.resolve(baseDir);
   const resolvedPath = path.resolve(resolvedBase, filePath);
   const relativePath = path.relative(resolvedBase, resolvedPath);
-  if (relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
+  if (relativePath === ".." || relativePath.startsWith(`..${path.sep}`) || path.isAbsolute(relativePath)) {
     throw new Error(`Path traversal denied: "${filePath}" is outside "${baseDir}"`);
   }
   return resolvedPath;
