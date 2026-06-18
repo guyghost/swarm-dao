@@ -81,8 +81,8 @@ function hasErrorCode(error: unknown, code: string): boolean {
 function parseJsonText<T>(text: string, context: string): T {
   try {
     return JSON.parse(text) as T;
-  } catch (error) {
-    throw new Error(`Invalid JSON in ${context}: ${getErrorMessage(error)}`);
+  } catch (_error) {
+    throw new Error(`Invalid JSON in ${context}`);
   }
 }
 
