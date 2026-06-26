@@ -35,7 +35,7 @@ Inside Pi:
 > dao_propose        # Create a proposal
 > dao_deliberate     # Run swarm deliberation
 > dao_check          # Quality gates
-> dao_execute        # Execute approved proposal
+> dao_ship           # Ship approved proposal (checks deps)
 ```
 
 ## Architecture
@@ -171,8 +171,8 @@ The Pi extension is auto-discovered from `.pi/extensions/` or `~/.pi/agent/exten
 # Check quality gates
 > dao_check proposalId=1
 
-# Execute
-> dao_execute proposalId=1
+# Ship (execute, with dependency check)
+> dao_ship proposalId=1
 
 # View audit
 > dao_audit proposalId=1

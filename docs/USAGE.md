@@ -197,10 +197,12 @@ opencode
 
 # ✅ ALL GATES PASSED
 
-# Step 4: Execute
-> dao_execute proposalId=1
+# Step 4: Ship (execute, with dependency check)
+> dao_ship proposalId=1
 
-# ✅ Proposal Executed — #1
+# 🚀 Ship Complete
+# Shipped proposals:
+# - #1
 ```
 
 #### In OpenCode:
@@ -440,7 +442,7 @@ dao_setup
 | Propose | `dao_propose` | `dao_propose` | Create a proposal |
 | Deliberate | `dao_deliberate` | `dao_deliberate` + `dao_record_outputs` | Swarm vote |
 | Control | `dao_check` | `dao_control` | Quality gates |
-| Execute | `dao_execute` | `dao_execute` | Execute proposal |
+| Execute | `dao_ship` | `dao_execute` | Execute / ship proposal |
 | Artefacts | `dao_artefacts` | `dao_artefacts` | Generate documents |
 | Dashboard | `dao_dashboard` | `dao_dashboard` | Overview |
 | Help | *(n/a)* | `dao_help` | Onboarding + tool discovery |
