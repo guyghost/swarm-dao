@@ -35,6 +35,11 @@ describe("CLI E2E", () => {
   let testDir: string;
 
   beforeEach(async () => {
+    // Reset the core module-level state singleton so each test starts from a
+    // fresh DAO. Without this, proposal IDs leak across test files that share
+    // the same Bun process (the singleton is keyed globally, not per-cwd).
+    const { setState } = await import("@guyghost/swarm-dao-core");
+    setState(null);
     testDir = path.join(tmpdir(), `swarm-dao-test-${Date.now()}`);
     await fs.mkdir(testDir, { recursive: true });
   });

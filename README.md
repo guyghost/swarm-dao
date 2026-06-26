@@ -2,7 +2,7 @@
 
 > **Unified AI Agent Governance** — One DAO core, multiple host adapters.
 
-Swarm DAO unifies the governance systems from [pi-swarm-dao](https://github.com/guyghost/pi-swarm-dao) and [opencode-dao](https://github.com/guyghost/opencode-dao) into a single, extensible architecture.
+Swarm DAO unifies the governance systems from [pi-swarm-dao](https://github.com/guyghost/pi-swarm-dao) and the legacy opencode-dao project into a single, extensible architecture.
 
 ## Quick Start
 
@@ -13,7 +13,9 @@ cd swarm-dao
 
 # Install dependencies
 bun install
-bun add typebox
+
+# Create local type stubs for optional host SDKs (required for typecheck/build)
+bun run setup-stubs
 
 # Link workspace package (Bun workspaces may need manual symlink)
 mkdir -p node_modules/@guyghost
@@ -125,6 +127,20 @@ swarm-dao show 1
 
 # Cast a vote
 swarm-dao vote 1 --position for --reasoning "Low risk, high impact" --weight 3
+
+# Ship (execute) a proposal
+swarm-dao ship 1
+swarm-dao ship 1 --cascade   # also ship unexecuted dependencies first
+swarm-dao ship 1 --force     # skip dependency checks
+
+# Configure GitHub integration
+swarm-dao github-config --token <github-token> --owner myorg --repo myrepo
+
+# Create a branch for a proposal
+swarm-dao github-branch 1
+
+# Open a pull request for a proposal
+swarm-dao github-pr 1 --head-branch dao/1-add-dark-mode
 
 # View audit trail
 swarm-dao audit
@@ -280,9 +296,11 @@ bun test packages/cli/tests
 ## CI/CD
 
 GitHub Actions workflow included (`.github/workflows/ci.yml`):
+- Lint
 - Type checking
 - Test execution
 - Build verification
+- Pi extension npm package validation
 
 Release workflow included (`.github/workflows/publish.yml`):
 - Creates Changesets version PRs from `pull_request_target`
@@ -294,6 +312,7 @@ Release workflow included (`.github/workflows/publish.yml`):
 - [Extension Guide](docs/EXTENSION-GUIDE.md)
 - [Usage Guide](docs/USAGE.md)
 - [Agent Prompts](docs/AGENT-PROMPTS.md)
+- [XState Proposal Machine](docs/XSTATE_PROPOSAL_MACHINE.md)
 
 ## License
 

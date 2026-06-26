@@ -61,6 +61,8 @@
     "url": "https://github.com/guyghost/swarm-dao/issues"
   },
   "homepage": "https://github.com/guyghost/swarm-dao#readme",
+  "author": "guyghost",
+  "license": "MIT",
   "publishConfig": {
     "access": "public"
   }

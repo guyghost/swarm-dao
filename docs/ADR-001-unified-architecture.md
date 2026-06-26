@@ -76,4 +76,4 @@ interface HostAdapter {
 
 ## References
 - [pi-swarm-dao](https://github.com/guyghost/pi-swarm-dao)
-- [opencode-dao](https://github.com/guyghost/opencode-dao)
+- opencode-dao (legacy predecessor, not publicly released)

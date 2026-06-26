@@ -217,7 +217,7 @@ Per-project configuration in `.dao/config.json`:
 │                              │                               │
 │  ┌───────────────────────────┴───────────────────────────┐  │
 │  │        OpenCode Adapter (this package)                 │  │
-│  │   OpenCodeDAO plugin • 15 tools • HostAdapter impl     │  │
+│  │   OpenCodeDAO plugin • 16 tools • HostAdapter impl     │  │
 │  └───────────────────────────┬───────────────────────────┘  │
 │                              │                               │
 │  ┌───────────────────────────┴───────────────────────────┐  │

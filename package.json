@@ -1,6 +1,6 @@
 {
   "name": "swarm-dao",
-  "version": "0.1.0",
+  "version": "0.1.4",
   "description": "Unified Swarm DAO — Multi-host AI agent governance (Pi, OpenCode, and beyond)",
   "private": true,
   "workspaces": [
@@ -12,7 +12,7 @@
     "lint": "bun run --filter '*' lint",
     "typecheck": "bun run --filter '*' typecheck",
     "pack:pi": "bun run --cwd packages/pi-adapter build && npm pack --workspace @guyghost/swarm-dao-pi-adapter --dry-run",
-    "prepare": "bun run build",
+    "prepare": "bun run setup-stubs && bun run build",
     "setup-stubs": "bash scripts/setup-stubs.sh",
     "changeset": "changeset",
     "release": "changeset publish"
@@ -36,6 +36,14 @@
   ],
   "author": "guyghost",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/guyghost/swarm-dao.git"
+  },
+  "bugs": {
+    "url": "https://github.com/guyghost/swarm-dao/issues"
+  },
+  "homepage": "https://github.com/guyghost/swarm-dao#readme",
   "dependencies": {
     "typebox": "^1.1.38"
   }

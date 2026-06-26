@@ -12,6 +12,9 @@ cd swarm-dao
 # Install dependencies (requires Bun >= 1.3)
 bun install
 
+# Create local type stubs for optional host SDKs (required for typecheck/build)
+bun run setup-stubs
+
 # Run tests
 bun test
 

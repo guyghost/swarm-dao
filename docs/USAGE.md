@@ -356,7 +356,7 @@ opencode
 | **Events** | `session_start`, `before_agent_start` | Hooks via plugin API |
 | **Commands** | `/dao`, `/dao:propose`, etc. | `/dao/init`, `/dao/propose`, etc. |
 | **Tool syntax** | `dao_propose title="..."` | `dao_propose({ title: "..." })` |
-| **Standalone CLI** | Via Pi | `opencode-dao` binary included |
+| **Standalone CLI** | Via Pi | `swarm-dao` CLI (standalone) |
 
 ### Why is deliberation different?
 
