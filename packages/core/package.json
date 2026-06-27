@@ -46,11 +46,11 @@
     "prepublishOnly": "bun run build"
   },
   "dependencies": {
-    "xstate": "^5.14.0"
+    "xstate": "^5.32.2"
   },
   "devDependencies": {
     "@types/bun": "latest",
-    "@types/node": "^25.9.3"
+    "@types/node": "^26.0.1"
   },
   "repository": {
     "type": "git",
