@@ -1,9 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import {
-  buildModelResolutionContext,
-  describeModelResolution,
-  resolveAgentModel,
-} from "../src/intelligence/model.js";
+import { buildModelResolutionContext, describeModelResolution, resolveAgentModel } from "../src/intelligence/model.js";
 import type { DAOAgent } from "../src/types/index.js";
 
 const baseAgent: DAOAgent = {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import { buildDispatchInstructions, formatDispatchPlan } from "../src/intelligence/swarm.js";
 import { buildModelResolutionContext } from "../src/intelligence/model.js";
+import { buildDispatchInstructions, formatDispatchPlan } from "../src/intelligence/swarm.js";
 import type { DAOAgent, Proposal } from "../src/types/index.js";
 
 describe("intelligence/swarm.ts", () => {

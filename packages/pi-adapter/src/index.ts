@@ -17,9 +17,6 @@ import {
   createProposal,
   createProposalsBatch,
   dispatchSwarm,
-  filterEnabledAgents,
-  loadAgentDefinitions,
-  loadConfig,
   // Delivery
   execCommand,
   executeProposal,
@@ -45,6 +42,8 @@ import {
   // Governance
   initializeAgents,
   initStorage,
+  loadAgentDefinitions,
+  loadConfig,
   // Persistence
   loadState,
   PROPOSAL_TYPE_LABELS,

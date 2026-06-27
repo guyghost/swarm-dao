@@ -1,12 +1,8 @@
 import { describe, expect, it } from "bun:test";
 import { promises as fs } from "node:fs";
-import path from "node:path";
 import { tmpdir } from "node:os";
-import {
-  DEFAULT_AGENT_MODEL,
-  initializeAgents,
-  loadAgentDefinitionsFromMarkdown,
-} from "../src/governance/agents.js";
+import path from "node:path";
+import { DEFAULT_AGENT_MODEL, initializeAgents, loadAgentDefinitionsFromMarkdown } from "../src/governance/agents.js";
 
 describe("governance/agents.ts", () => {
   it("initializes agents with the default model", () => {

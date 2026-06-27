@@ -366,10 +366,7 @@ export async function loadAgentDefinitionsFromMarkdown(
   });
 }
 
-export async function loadAgentDefinitions(
-  daoRoot: string,
-  projectConfig?: ProjectConfig,
-): Promise<DAOAgent[]> {
+export async function loadAgentDefinitions(daoRoot: string, projectConfig?: ProjectConfig): Promise<DAOAgent[]> {
   const candidateDirs = [
     path.join(daoRoot, "agents"),
     path.join(daoRoot, "..", "agents"),

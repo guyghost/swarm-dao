@@ -20,7 +20,19 @@ bun test
 
 # Type check
 bun run --filter '*' typecheck
+
+# Run full CI locally (same gates as GitHub Actions)
+bun run ci
+
+# Fix lint/format issues
+bun run lint:fix
 ```
+
+## Git Hooks
+
+After `bun install`, a **pre-push** hook runs automatically and executes `bun run ci` before every push. This mirrors the GitHub Actions workflow (lint, typecheck, test, build, pack validation).
+
+To bypass in an emergency: `git push --no-verify` (use sparingly).
 
 ## Project Structure
 
@@ -60,7 +72,7 @@ Quick checklist:
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/amazing-feature`)
 3. Make your changes
-4. Run tests (`bun test`)
+4. Run CI locally (`bun run ci`)
 5. Commit with clear messages
 6. Open a PR with description of changes
 

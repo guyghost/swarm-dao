@@ -10,9 +10,11 @@
     "build": "bun run --filter '*' build",
     "test": "bun run --filter '*' test",
     "lint": "bun run --filter '*' lint",
+    "lint:fix": "biome check --write --unsafe .",
     "typecheck": "bun run --filter '*' typecheck",
+    "ci": "bun run setup-stubs && bun run lint && bun run typecheck && bun test && bun run build && bun run pack:pi",
     "pack:pi": "bun run --cwd packages/pi-adapter build && npm pack --workspace @guyghost/swarm-dao-pi-adapter --dry-run",
-    "prepare": "bun run setup-stubs && bun run build",
+    "prepare": "husky && bun run setup-stubs && bun run build",
     "setup-stubs": "bash scripts/setup-stubs.sh",
     "changeset": "changeset",
     "release": "changeset publish"
@@ -21,6 +23,7 @@
     "@biomejs/biome": "^2.5.1",
     "@changesets/cli": "^2.31.0",
     "@types/node": "^26.0.1",
+    "husky": "^9.1.7",
     "typescript": "^6.0.3"
   },
   "overrides": {

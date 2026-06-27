@@ -24,16 +24,10 @@ function pickModel(...candidates: Array<string | undefined>): string | undefined
  * agent.model → parent session → config.defaultModel → host default
  */
 export function resolveAgentModel(agent: DAOAgent, ctx: ModelResolutionContext): string {
-  return (
-    pickModel(agent.model, ctx.parentSessionModel, ctx.configDefaultModel, ctx.hostDefaultModel) ?? "default"
-  );
+  return pickModel(agent.model, ctx.parentSessionModel, ctx.configDefaultModel, ctx.hostDefaultModel) ?? "default";
 }
 
-export function describeModelResolution(
-  agent: DAOAgent,
-  resolved: string,
-  ctx: ModelResolutionContext,
-): string {
+export function describeModelResolution(agent: DAOAgent, resolved: string, ctx: ModelResolutionContext): string {
   if (agent.model) {
     return `${resolved} (agent override)`;
   }

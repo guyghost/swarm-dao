@@ -4,7 +4,7 @@
 
 import type { DAOAgent, HostAdapter, ProposalType } from "../types/index.js";
 import { PROPOSAL_TYPE, PROPOSAL_TYPES } from "../types/index.js";
-import { resolveAgentModel, type ModelResolutionContext } from "./model.js";
+import { type ModelResolutionContext, resolveAgentModel } from "./model.js";
 
 export interface RoundTableSuggestion {
   agentId: string;
