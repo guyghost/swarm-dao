@@ -1,5 +1,19 @@
 # @guyghost/swarm-dao-core
 
+## 0.2.0
+
+### Minor Changes
+
+- Release 0.2.0 — model resolution, lifecycle hardening, security, and CI reliability.
+
+  - Add XState state machine for proposal lifecycle management
+  - Inherit model resolution when spawning DAO agents (agent override → parent session → DAO default → host default)
+  - Harden security: secret redaction in config and logs, path traversal protection, sanitized persistence errors
+  - Replace proposal type magic strings with typed constants
+  - Add Husky pre-push hook and `bun run ci` script mirroring GitHub Actions
+  - Pin Bun version in CI workflows and align publish workflow with lint gate
+  - Update dependencies and documentation
+
 ## 0.1.4
 
 ### Patch Changes
