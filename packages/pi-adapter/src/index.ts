@@ -4,21 +4,22 @@
 // Bridges the Swarm DAO core to Pi's ExtensionAPI.
 // Registers tools, commands, and event hooks.
 
+import { spawn } from "node:child_process";
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import type { AgentOutput, HostAdapter, Proposal, ProposalType, Vote } from "@guyghost/swarm-dao-core";
 import {
   addRating,
-  // Intelligence
-  buildDispatchInstructions,
   calculateCompositeScore,
-  // Lifecycle
   classifyRiskZone,
-  // Health Score
   computeHealthScore,
+  createDispatchModelContext,
   createProposal,
   createProposalsBatch,
   dispatchSwarm,
+  filterEnabledAgents,
+  loadAgentDefinitions,
+  loadConfig,
   // Delivery
   execCommand,
   executeProposal,
@@ -75,6 +76,87 @@ import { Type } from "typebox";
 // ── Pi Host Adapter Implementation ───────────────────────────
 
 type SpawnAgentParams = Parameters<HostAdapter["spawnAgent"]>[0];
+
+let currentSessionModel: string | undefined = process.env.PI_MODEL;
+
+function detectParentSessionModel(ctx?: ExtensionCommandContext): string | undefined {
+  return ctx?.session?.model ?? currentSessionModel ?? process.env.PI_MODEL;
+}
+
+function extractPiJsonContent(stdout: string): string | null {
+  try {
+    const parsed: unknown = JSON.parse(stdout.trim());
+    if (typeof parsed === "string") return parsed;
+    if (parsed && typeof parsed === "object") {
+      const record = parsed as Record<string, unknown>;
+      if (typeof record.content === "string") return record.content;
+      if (typeof record.text === "string") return record.text;
+      if (typeof record.output === "string") return record.output;
+      if (Array.isArray(record.content)) {
+        const text = record.content
+          .filter((block): block is { type: string; text: string } => {
+            return (
+              typeof block === "object" &&
+              block !== null &&
+              (block as { type?: string }).type === "text" &&
+              typeof (block as { text?: string }).text === "string"
+            );
+          })
+          .map((block) => block.text)
+          .join("\n");
+        return text.length > 0 ? text : null;
+      }
+    }
+  } catch {
+    // stdout is not JSON
+  }
+  const trimmed = stdout.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+async function spawnPiSubprocess(
+  systemPrompt: string,
+  model: string,
+  timeoutMs?: number,
+): Promise<{ content: string | null; error?: string }> {
+  return new Promise((resolve) => {
+    const args = ["--mode", "json", "-p", "--no-session", "--model", model, "-e", systemPrompt];
+    const child = spawn("pi", args, { stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    let timedOut = false;
+    const timeout =
+      typeof timeoutMs === "number" && timeoutMs > 0
+        ? setTimeout(() => {
+            timedOut = true;
+            child.kill("SIGTERM");
+          }, timeoutMs)
+        : undefined;
+
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on("error", (error) => {
+      if (timeout) clearTimeout(timeout);
+      resolve({ content: null, error: error.message });
+    });
+    child.on("close", (code) => {
+      if (timeout) clearTimeout(timeout);
+      if (timedOut) {
+        resolve({ content: null, error: `Pi subprocess timed out after ${timeoutMs}ms` });
+        return;
+      }
+      if (code !== 0) {
+        resolve({ content: null, error: stderr.trim() || `Pi subprocess exited with code ${code ?? 1}` });
+        return;
+      }
+      resolve({ content: extractPiJsonContent(stdout), error: undefined });
+    });
+  });
+}
 
 function stableHash(input: string): number {
   let hash = 0;
@@ -193,13 +275,40 @@ ${voteReasoning}
 ${riskScore}`;
 }
 
-function createPiHostAdapter(_pi: ExtensionAPI, _ctx?: ExtensionCommandContext): HostAdapter {
+function createPiHostAdapter(_pi: ExtensionAPI, ctx?: ExtensionCommandContext): HostAdapter {
+  const parentSessionModel = detectParentSessionModel(ctx);
+
   return {
     hostId: "pi",
 
+    getSessionModel() {
+      return parentSessionModel;
+    },
+
     async spawnAgent(params): Promise<AgentOutput> {
       const startTime = Date.now();
+      const model = params.model;
       const isRoundTable = params.proposal.id === 0 && params.proposal.title === "Round Table Suggestions";
+
+      const piSpawnEnabled = process.env.SWARM_DAO_ENABLE_PI_SPAWN === "1";
+      if (piSpawnEnabled && model && model !== "default") {
+        const subprocess = await spawnPiSubprocess(params.systemPrompt, model, params.timeoutMs);
+        if (subprocess.content) {
+          return {
+            agentId: params.agent.id,
+            agentName: params.agent.name,
+            role: params.agent.role,
+            content: subprocess.content,
+            durationMs: Date.now() - startTime,
+          };
+        }
+        await this.log({
+          level: "warn",
+          service: "pi-adapter",
+          message: `Pi subprocess spawn failed for ${params.agent.id} (${model}): ${subprocess.error ?? "empty output"}; using fallback output`,
+        });
+      }
+
       const content = isRoundTable ? generateRoundTableSuggestion(params) : generateDeliberationOutput(params);
       return {
         agentId: params.agent.id,
@@ -242,7 +351,7 @@ function createPiHostAdapter(_pi: ExtensionAPI, _ctx?: ExtensionCommandContext):
     },
 
     hasCapability(capability: string): boolean {
-      const caps = ["read_file", "write_file", "exec", "log"];
+      const caps = ["read_file", "write_file", "exec", "log", "spawn_agent"];
       return caps.includes(capability);
     },
   };
@@ -374,6 +483,10 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
 
   // System prompt injection
   pi.on("before_agent_start", async (event, _ctx) => {
+    if (typeof event.model === "string" && event.model.length > 0) {
+      currentSessionModel = event.model;
+    }
+
     const state = getState();
     if (!state.initialized) {
       return {
@@ -498,19 +611,25 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
 
       const startTime = Date.now();
       const adapter = createPiHostAdapter(pi, ctx);
+      const projectConfig = await loadConfig(state.daoRoot);
+      const agents = await loadAgentDefinitions(state.daoRoot, projectConfig);
+      const modelContext = createDispatchModelContext(state.config.defaultModel, adapter);
 
-      // For Pi, we build instructions but let the host spawn agents
-      const _instructions = buildDispatchInstructions(proposal, state.agents);
-
-      // Attempt automatic dispatch if Pi supports it
-      const outputs = await dispatchSwarm(proposal, state.agents, adapter, state.config.maxConcurrent, (update) => {
-        if (onUpdate) {
-          onUpdate({
-            content: [{ type: "text", text: `${update.agentName}: ${update.phase}` }],
-            details: {},
-          });
-        }
-      });
+      const outputs = await dispatchSwarm(
+        proposal,
+        agents,
+        adapter,
+        state.config.maxConcurrent,
+        modelContext,
+        (update) => {
+          if (onUpdate) {
+            onUpdate({
+              content: [{ type: "text", text: `${update.agentName}: ${update.phase}` }],
+              details: {},
+            });
+          }
+        },
+      );
 
       // Parse votes
       const votes: Vote[] = [];
@@ -520,11 +639,11 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
           const vote = parseVoteFromOutput(
             output.agentId,
             output.agentName,
-            state.agents.find((a) => a.id === output.agentId)?.weight ?? 1,
+            agents.find((a) => a.id === output.agentId)?.weight ?? 1,
             output.content,
           );
           if (vote) {
-            vote.weight = state.agents.find((a) => a.id === output.agentId)?.weight ?? 1;
+            vote.weight = agents.find((a) => a.id === output.agentId)?.weight ?? 1;
             votes.push(vote);
           }
         }
@@ -542,7 +661,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
 
       // Synthesis
       const tally = tallyVotes(proposal, state.config);
-      const synthesisText = synthesize(proposal, state.agents, outputs, tally);
+      const synthesisText = synthesize(proposal, agents, outputs, tally);
       proposal.synthesis = synthesisText;
       await storeSynthesis(proposal.id, synthesisText);
 
@@ -868,7 +987,10 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
       if (!state.initialized) return toolResult(PI_ONBOARDING_MESSAGE);
 
       const adapter = createPiHostAdapter(pi, ctx);
-      const suggestions = await runRoundTable(adapter, state.agents, state.config.maxConcurrent);
+      const projectConfig = await loadConfig(state.daoRoot);
+      const agents = await loadAgentDefinitions(state.daoRoot, projectConfig);
+      const modelContext = createDispatchModelContext(state.config.defaultModel, adapter);
+      const suggestions = await runRoundTable(adapter, agents, state.config.maxConcurrent, modelContext);
 
       // Create proposals from valid suggestions
       const proposalIds = new Map<string, number>();

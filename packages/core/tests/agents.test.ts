@@ -1,131 +1,37 @@
-import { beforeEach, describe, expect, it } from "bun:test";
+import { describe, expect, it } from "bun:test";
+import { promises as fs } from "node:fs";
+import path from "node:path";
+import { tmpdir } from "node:os";
 import {
-  compareVariants,
-  createPromptVariant,
-  formatPromptComparison,
-  getPromptVariant,
-  getSystemPrompt,
-  promoteBestVariant,
-  recordPromptInvocation,
-  registerAgentPrompts,
-  resetPromptRegistries,
-} from "@guyghost/swarm-dao-core";
+  DEFAULT_AGENT_MODEL,
+  initializeAgents,
+  loadAgentDefinitionsFromMarkdown,
+} from "../src/governance/agents.js";
 
-describe("agents/prompts", () => {
-  beforeEach(() => {
-    resetPromptRegistries();
+describe("governance/agents.ts", () => {
+  it("initializes agents with the default model", () => {
+    const agents = initializeAgents();
+    expect(agents.length).toBe(7);
+    expect(agents.every((agent) => agent.model === DEFAULT_AGENT_MODEL)).toBe(true);
   });
 
-  it("creates prompt variant", () => {
-    const variant = createPromptVariant("strategist", "v1", "Standard", "You are a strategist", 100);
-    expect(variant.id).toBe("v1");
-    expect(variant.weight).toBe(100);
-    expect(variant.metrics.invocations).toBe(0);
-  });
+  it("loads model overrides from markdown frontmatter", async () => {
+    const agentsDir = path.join(tmpdir(), `swarm-agents-${Date.now()}`);
+    await fs.mkdir(agentsDir, { recursive: true });
+    await fs.writeFile(
+      path.join(agentsDir, "dao-architect.md"),
+      `---
+id: architect
+name: Solution Architect
+model: custom/architect-model
+weight: 3
+---
+`,
+      "utf-8",
+    );
 
-  it("registers and retrieves prompt variants", () => {
-    const v1 = createPromptVariant("strategist", "v1", "Standard", "Prompt A", 70);
-    const v2 = createPromptVariant("strategist", "v2", "Experimental", "Prompt B", 30);
-    registerAgentPrompts("strategist", [v1, v2]);
-
-    const registry = getPromptVariant("strategist", "v1");
-    expect(registry).toBeDefined();
-    expect(registry?.name).toBe("Standard");
-  });
-
-  it("returns system prompt with variant", () => {
-    const agent = {
-      id: "strategist",
-      name: "Strategist",
-      role: "vision",
-      description: "test",
-      weight: 3,
-      systemPrompt: "Default prompt",
-    };
-
-    const v1 = createPromptVariant("strategist", "v1", "Standard", "Variant prompt", 100);
-    registerAgentPrompts("strategist", [v1]);
-
-    // biome-ignore lint/suspicious/noExplicitAny: test mock agent satisfies partial DAOAgent shape
-    const prompt = getSystemPrompt(agent as any, "v1");
-    expect(prompt).toBe("Variant prompt");
-
-    // biome-ignore lint/suspicious/noExplicitAny: test mock agent satisfies partial DAOAgent shape
-    const defaultPrompt = getSystemPrompt(agent as any);
-    expect(defaultPrompt).toBe("Variant prompt"); // v1 is only variant, so it's selected
-  });
-
-  it("falls back to agent default prompt", () => {
-    const agent = {
-      id: "strategist",
-      name: "Strategist",
-      role: "vision",
-      description: "test",
-      weight: 3,
-      systemPrompt: "Default prompt",
-    };
-
-    // biome-ignore lint/suspicious/noExplicitAny: test mock agent satisfies partial DAOAgent shape
-    const prompt = getSystemPrompt(agent as any);
-    expect(prompt).toBe("Default prompt");
-  });
-
-  it("records prompt invocation metrics", () => {
-    const v1 = createPromptVariant("strategist", "v1", "Standard", "Prompt", 100);
-    registerAgentPrompts("strategist", [v1]);
-
-    recordPromptInvocation("strategist", "v1", 1500, { position: "for", confidence: 8 });
-    recordPromptInvocation("strategist", "v1", 2000, { position: "against", confidence: 6 });
-
-    // biome-ignore lint/style/noNonNullAssertion: test asserts variant exists by prior setup
-    const variant = getPromptVariant("strategist", "v1")!;
-    expect(variant.metrics.invocations).toBe(2);
-    expect(variant.metrics.votesFor).toBe(1);
-    expect(variant.metrics.votesAgainst).toBe(1);
-    expect(variant.metrics.avgResponseTimeMs).toBe(1750);
-  });
-
-  it("compares variants by score", () => {
-    const v1 = createPromptVariant("strategist", "v1", "Standard", "Prompt A", 50);
-    const v2 = createPromptVariant("strategist", "v2", "Experimental", "Prompt B", 50);
-    registerAgentPrompts("strategist", [v1, v2]);
-
-    // v1 gets good votes
-    for (let i = 0; i < 5; i++) {
-      recordPromptInvocation("strategist", "v1", 1000, { position: "for", confidence: 9 });
-    }
-
-    // v2 gets bad votes
-    for (let i = 0; i < 5; i++) {
-      recordPromptInvocation("strategist", "v2", 1000, { position: "against", confidence: 3 });
-    }
-
-    const comparison = compareVariants("strategist");
-    expect(comparison.length).toBe(2);
-    expect(comparison[0].variant.id).toBe("v1"); // v1 should score higher
-    expect(comparison[0].score).toBeGreaterThan(comparison[1].score);
-  });
-
-  it("promotes best variant", () => {
-    const v1 = createPromptVariant("strategist", "v1", "Standard", "Prompt A", 50);
-    const v2 = createPromptVariant("strategist", "v2", "Experimental", "Prompt B", 50);
-    registerAgentPrompts("strategist", [v1, v2]);
-
-    recordPromptInvocation("strategist", "v1", 1000, { position: "for", confidence: 10 });
-    recordPromptInvocation("strategist", "v2", 1000, { position: "against", confidence: 2 });
-
-    const best = promoteBestVariant("strategist");
-    expect(best?.id).toBe("v1");
-  });
-
-  it("formats prompt comparison", () => {
-    const v1 = createPromptVariant("strategist", "v1", "Standard", "Prompt A", 100);
-    registerAgentPrompts("strategist", [v1]);
-    recordPromptInvocation("strategist", "v1", 1200, { position: "for", confidence: 7 });
-
-    const formatted = formatPromptComparison("strategist");
-    expect(formatted).toContain("A/B Test Results");
-    expect(formatted).toContain("Standard");
-    expect(formatted).toContain("Best variant");
+    const agents = await loadAgentDefinitionsFromMarkdown(agentsDir);
+    const architect = agents.find((agent) => agent.id === "architect");
+    expect(architect?.model).toBe("custom/architect-model");
   });
 });

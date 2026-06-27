@@ -211,6 +211,11 @@ declare module "@earendil-works/pi-coding-agent" {
       /** Get the current branch identifier */
       getBranch: () => string;
     };
+    /** Active Pi session metadata, when exposed by the host */
+    session?: {
+      /** Model identifier for the current parent session */
+      model?: string;
+    };
   }
 
   /**
@@ -231,6 +236,8 @@ declare module "@earendil-works/pi-coding-agent" {
   interface BeforeAgentStartEvent {
     /** The system prompt that will be sent to the LLM */
     systemPrompt: string;
+    /** Model identifier for the upcoming agent turn, when exposed by Pi */
+    model?: string;
   }
 
   /**

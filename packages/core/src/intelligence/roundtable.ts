@@ -4,6 +4,7 @@
 
 import type { DAOAgent, HostAdapter, ProposalType } from "../types/index.js";
 import { PROPOSAL_TYPE, PROPOSAL_TYPES } from "../types/index.js";
+import { resolveAgentModel, type ModelResolutionContext } from "./model.js";
 
 export interface RoundTableSuggestion {
   agentId: string;
@@ -36,6 +37,7 @@ export async function runRoundTable(
   adapter: HostAdapter,
   agents: DAOAgent[],
   maxConcurrent: number,
+  modelContext: ModelResolutionContext,
 ): Promise<RoundTableSuggestion[]> {
   const suggestions: RoundTableSuggestion[] = [];
 
@@ -59,6 +61,7 @@ export async function runRoundTable(
             createdAt: new Date().toISOString(),
           },
           systemPrompt: `${agent.systemPrompt}\n\n${SUGGESTION_PROMPT}`,
+          model: resolveAgentModel(agent, modelContext),
           timeoutMs: 60_000,
         });
 

@@ -2,14 +2,21 @@
 // Swarm DAO — OpenCode Adapter
 // ============================================================
 
+import { promises as fs } from "node:fs";
+import path from "node:path";
 import type { AgentOutput, DAOAgent, HostAdapter, Vote } from "@guyghost/swarm-dao-core";
 import {
+  buildDispatchInstructions,
   calculateCompositeScore,
   classifyRiskZone,
   computeHealthScore,
+  createDispatchModelContext,
   createProposal,
   createProposalsBatch,
   execCommand,
+  formatDispatchPlan,
+  loadAgentDefinitions,
+  loadConfig,
   executeProposal,
   formatAllArtefacts,
   formatAuditTrail,
@@ -65,15 +72,20 @@ const OPENCODE_ONBOARDING_MESSAGE = [
   '3. Start your first proposal with `dao_propose title="..." type="product-feature" description="..."`.',
 ].join("\n");
 
+const sessionModels = new Map<string, string>();
+const hostDefaultModels = new Map<string, string | undefined>();
+
 const OPENCODE_HELP_MESSAGE = [
   "# DAO Help",
   "",
   "Recommended flow:",
   "1. `dao_setup`",
   '2. `dao_propose title="..." type="product-feature" description="..."`',
-  "3. `dao_record_outputs proposalId=1 outputs='[...]'`",
-  "4. `dao_control proposalId=1`",
-  "5. `dao_execute proposalId=1`",
+  "3. `dao_deliberate proposalId=1`",
+  "4. Spawn sub-agents via `task` using the resolved models from the dispatch plan",
+  "5. `dao_record_outputs proposalId=1 outputs='[...]'`",
+  "6. `dao_control proposalId=1`",
+  "7. `dao_execute proposalId=1`",
   "",
   "Discovery tools:",
   "- `dao_list` — proposals overview",
@@ -111,6 +123,48 @@ function parseSafeJson<T>(input: string, context: string): T {
   return parsed as T;
 }
 
+async function loadOpenCodeHostDefaultModel(directory: string): Promise<string | undefined> {
+  const cached = hostDefaultModels.get(directory);
+  if (cached !== undefined || hostDefaultModels.has(directory)) {
+    return cached;
+  }
+
+  const candidates = [
+    path.join(directory, ".opencode", "config.json"),
+    path.join(process.env.HOME ?? "", ".config", "opencode", "config.json"),
+  ];
+
+  for (const configPath of candidates) {
+    try {
+      const raw = await fs.readFile(configPath, "utf-8");
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      const model =
+        typeof parsed.model === "string"
+          ? parsed.model
+          : typeof parsed.defaultModel === "string"
+            ? parsed.defaultModel
+            : undefined;
+      if (model) {
+        hostDefaultModels.set(directory, model);
+        return model;
+      }
+    } catch {
+      // try next candidate
+    }
+  }
+
+  hostDefaultModels.set(directory, undefined);
+  return undefined;
+}
+
+function detectParentModel(context: { sessionID?: string } | undefined, directory: string): string | undefined {
+  if (context?.sessionID) {
+    const sessionModel = sessionModels.get(context.sessionID);
+    if (sessionModel) return sessionModel;
+  }
+  return hostDefaultModels.get(directory) ?? process.env.OPENCODE_MODEL;
+}
+
 function formatAgentsTable(agents: DAOAgent[]): string {
   let table = "| Agent | Weight | Role |\n|-------|--------|------|\n";
   for (const agent of agents) {
@@ -119,9 +173,13 @@ function formatAgentsTable(agents: DAOAgent[]): string {
   return table;
 }
 
-function createOpenCodeHostAdapter(ctx: PluginInput): HostAdapter {
+function createOpenCodeHostAdapter(
+  ctx: PluginInput,
+  options?: { getSessionModel?: () => string | undefined },
+): HostAdapter {
   return {
     hostId: "opencode",
+    getSessionModel: options?.getSessionModel,
     async spawnAgent(params) {
       return {
         agentId: params.agent.id,
@@ -172,8 +230,17 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
   if (!loaded) {
     setState(getOrCreateState(directory));
   }
+  await loadOpenCodeHostDefaultModel(directory);
 
   return {
+    // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
+    "chat.params": async (input: any, output: any) => {
+      const sessionID = input?.sessionID ?? input?.sessionId;
+      const model = output?.model ?? input?.model ?? input?.params?.model;
+      if (typeof sessionID === "string" && typeof model === "string" && model.length > 0) {
+        sessionModels.set(sessionID, model);
+      }
+    },
     tool: {
       // ── dao_help ─────────────────────────────────────────
       dao_help: tool({
@@ -246,6 +313,59 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
           await saveState();
 
           return `# 📋 Proposal Created — #${proposal.id}\n\n**Title:** ${args.title}\n**Type:** ${args.type}\n**Zone:** ${zone}\n\nRun \`dao_deliberate proposalId=${proposal.id}\``;
+        },
+      }),
+
+      // ── dao_deliberate ───────────────────────────────────
+      dao_deliberate: tool({
+        description: "Build a swarm dispatch plan with resolved models for manual sub-agent execution",
+        args: {
+          proposalId: schema.number(),
+        },
+        // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
+        async execute(args: any, context: any) {
+          const state = getState();
+          if (!state.initialized) return OPENCODE_ONBOARDING_MESSAGE;
+
+          const proposal = getProposal(args.proposalId);
+          if (!proposal) return `Proposal #${args.proposalId} not found.`;
+          if (proposal.status !== "open") {
+            return `Proposal #${proposal.id} is ${proposal.status}, must be open.`;
+          }
+
+          const transition = transitionProposal(proposal, "deliberate");
+          if (!transition.success) return `Cannot deliberate: ${transition.error}`;
+
+          await recordAudit(
+            proposal.id,
+            "governance",
+            "deliberation_started",
+            "system",
+            `Deliberation plan generated for #${proposal.id}`,
+          );
+          await saveState();
+
+          const parentSessionModel = detectParentModel(context, directory);
+          const hostDefaultModel = await loadOpenCodeHostDefaultModel(directory);
+          const adapter = createOpenCodeHostAdapter(ctx, {
+            getSessionModel: () => detectParentModel(context, directory),
+          });
+          const projectConfig = await loadConfig(state.daoRoot);
+          const agents = await loadAgentDefinitions(state.daoRoot, projectConfig);
+          const modelContext = createDispatchModelContext(state.config.defaultModel, adapter, {
+            parentSessionModel,
+            hostDefaultModel,
+          });
+          const instructions = buildDispatchInstructions(proposal, agents, modelContext);
+          const plan = formatDispatchPlan(proposal, instructions);
+
+          const parentNote = parentSessionModel
+            ? `\n\n**Parent session model:** ${parentSessionModel}`
+            : hostDefaultModel
+              ? `\n\n**Host default model:** ${hostDefaultModel}`
+              : "";
+
+          return `${plan}${parentNote}`;
         },
       }),
 
@@ -512,12 +632,21 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
         description: "Ask every agent to suggest a proposal idea",
         args: {},
         // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
-        async execute(_args: any, _context: any) {
+        async execute(_args: any, context: any) {
           const state = getState();
           if (!state.initialized) return OPENCODE_ONBOARDING_MESSAGE;
 
-          const adapter = createOpenCodeHostAdapter(ctx);
-          const suggestions = await runRoundTable(adapter, state.agents, state.config.maxConcurrent);
+          const adapter = createOpenCodeHostAdapter(ctx, {
+            getSessionModel: () => detectParentModel(context, directory),
+          });
+          const projectConfig = await loadConfig(state.daoRoot);
+          const agents = await loadAgentDefinitions(state.daoRoot, projectConfig);
+          const hostDefaultModel = await loadOpenCodeHostDefaultModel(directory);
+          const modelContext = createDispatchModelContext(state.config.defaultModel, adapter, {
+            parentSessionModel: detectParentModel(context, directory),
+            hostDefaultModel,
+          });
+          const suggestions = await runRoundTable(adapter, agents, state.config.maxConcurrent, modelContext);
 
           const proposalIds = new Map<string, number>();
           const parsedSuggestions = suggestions

@@ -855,11 +855,15 @@ export interface HostAdapter {
     agent: DAOAgent;
     proposal: Proposal;
     systemPrompt: string;
+    model?: string;
     timeoutMs?: number;
   }): Promise<AgentOutput>;
 
   /** Spawn multiple agents concurrently (up to maxConcurrent) */
   spawnAgents(params: { agents: DAOAgent[]; proposal: Proposal; maxConcurrent: number }): Promise<AgentOutput[]>;
+
+  /** Return the current host session model, if available */
+  getSessionModel?(): string | undefined;
 
   /** Log a message to the host's logging system */
   log(params: { level: "info" | "warn" | "error"; message: string; service: string }): Promise<void>;

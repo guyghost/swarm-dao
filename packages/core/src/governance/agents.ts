@@ -2,7 +2,13 @@
 // Swarm DAO Core — Agent Registry & Default Agents
 // ============================================================
 
+import { promises as fs } from "node:fs";
+import path from "node:path";
+import type { ProjectConfig } from "../config.js";
+import { filterEnabledAgents } from "../config.js";
 import type { DAOAgent } from "../types/index.js";
+
+export const DEFAULT_AGENT_MODEL = "z.ai/GLM-5.1";
 
 export const DEFAULT_AGENTS: DAOAgent[] = [
   {
@@ -294,11 +300,105 @@ for | against | abstain
   },
 ];
 
+function parseAgentFrontmatter(content: string): Partial<DAOAgent> & { id?: string } {
+  const match = content.match(/^---\n([\s\S]*?)\n---/);
+  if (!match?.[1]) return {};
+
+  const parsed: Partial<DAOAgent> & { id?: string } = {};
+  for (const line of match[1].split("\n")) {
+    const field = line.match(/^([A-Za-z0-9_-]+):\s*(.+)$/);
+    if (!field) continue;
+    const [, key, rawValue] = field;
+    if (!key || !rawValue) continue;
+    const value = rawValue.trim();
+
+    switch (key) {
+      case "id":
+        parsed.id = value;
+        break;
+      case "name":
+        parsed.name = value;
+        break;
+      case "role":
+        parsed.role = value;
+        break;
+      case "model":
+        parsed.model = value;
+        break;
+      case "weight":
+        parsed.weight = Number(value);
+        break;
+      default:
+        break;
+    }
+  }
+  return parsed;
+}
+
+export async function loadAgentDefinitionsFromMarkdown(
+  agentsDir: string,
+  baseAgents: DAOAgent[] = DEFAULT_AGENTS,
+): Promise<DAOAgent[]> {
+  let entries: string[] = [];
+  try {
+    entries = await fs.readdir(agentsDir);
+  } catch {
+    return baseAgents.map((agent) => ({ ...agent, model: agent.model ?? DEFAULT_AGENT_MODEL }));
+  }
+
+  const markdownAgents = new Map<string, Partial<DAOAgent>>();
+  for (const entry of entries) {
+    if (!entry.startsWith("dao-") || !entry.endsWith(".md")) continue;
+    const content = await fs.readFile(path.join(agentsDir, entry), "utf-8");
+    const frontmatter = parseAgentFrontmatter(content);
+    if (frontmatter.id) {
+      markdownAgents.set(frontmatter.id, frontmatter);
+    }
+  }
+
+  return baseAgents.map((agent) => {
+    const override = markdownAgents.get(agent.id);
+    return {
+      ...agent,
+      ...(override ?? {}),
+      model: override?.model ?? agent.model ?? DEFAULT_AGENT_MODEL,
+    };
+  });
+}
+
+export async function loadAgentDefinitions(
+  daoRoot: string,
+  projectConfig?: ProjectConfig,
+): Promise<DAOAgent[]> {
+  const candidateDirs = [
+    path.join(daoRoot, "agents"),
+    path.join(daoRoot, "..", "agents"),
+    path.join(daoRoot, "..", "..", "agents"),
+  ];
+
+  let agents = initializeAgents();
+  for (const agentsDir of candidateDirs) {
+    const loaded = await loadAgentDefinitionsFromMarkdown(agentsDir, agents);
+    const hasMarkdownOverrides = loaded.some(
+      (agent, index) =>
+        agent.model !== agents[index]?.model ||
+        agent.name !== agents[index]?.name ||
+        agent.role !== agents[index]?.role,
+    );
+    if (hasMarkdownOverrides) {
+      agents = loaded;
+      break;
+    }
+  }
+
+  return projectConfig ? filterEnabledAgents(agents, projectConfig) : agents;
+}
+
 export function initializeAgents(customAgents?: DAOAgent[]): DAOAgent[] {
   if (customAgents && customAgents.length > 0) {
     return customAgents;
   }
-  return DEFAULT_AGENTS.map((a) => ({ ...a }));
+  return DEFAULT_AGENTS.map((a) => ({ ...a, model: a.model ?? DEFAULT_AGENT_MODEL }));
 }
 
 export function formatAgentsTable(agents: DAOAgent[]): string {

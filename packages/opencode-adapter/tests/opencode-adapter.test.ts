@@ -105,6 +105,7 @@ describe("opencode-adapter", () => {
         "dao_help",
         "dao_setup",
         "dao_propose",
+        "dao_deliberate",
         "dao_record_outputs",
         "dao_control",
         "dao_execute",
@@ -288,6 +289,45 @@ describe("opencode-adapter", () => {
       );
       expect(secResult).not.toContain("not found");
       expect(secResult).toMatch(/red/i);
+    });
+  });
+
+  describe("dao_deliberate", () => {
+    let testDir: string;
+
+    beforeEach(async () => {
+      testDir = path.join(tmpdir(), `swarm-oc-deliberate-${Date.now()}`);
+      await fs.mkdir(testDir, { recursive: true });
+    });
+
+    afterEach(async () => {
+      setState(null);
+      await fs.rm(testDir, { recursive: true, force: true });
+    });
+
+    it("returns a dispatch plan with resolved models and transitions proposal to deliberating", async () => {
+      const { plugin } = await setupPlugin(testDir);
+      await plugin.tool.dao_setup.execute({}, { directory: testDir });
+      await plugin.tool.dao_propose.execute(
+        {
+          title: "Model inheritance test",
+          type: "product-feature",
+          description: "Verify dispatch plan includes resolved models",
+        },
+        { directory: testDir, sessionID: "session-1" },
+      );
+
+      const result = await plugin.tool.dao_deliberate.execute(
+        { proposalId: 1 },
+        { directory: testDir, sessionID: "session-1" },
+      );
+
+      expect(result).toContain("Swarm Dispatch Plan");
+      expect(result).toContain('model="z.ai/GLM-5.1"');
+      expect(result).toContain("agent override");
+
+      const state = getState();
+      expect(state.proposals[0]?.status).toBe("deliberating");
     });
   });
 
