@@ -4,59 +4,41 @@
 
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import type { AgentOutput, DAOAgent, HostAdapter, Vote } from "@guyghost/swarm-dao-core";
+import type { HostAdapter } from "@guyghost/swarm-dao-core";
 import {
-  buildDispatchInstructions,
-  calculateCompositeScore,
-  classifyRiskZone,
-  computeHealthScore,
-  createDispatchModelContext,
-  createProposal,
-  createProposalsBatch,
+  buildDaoHelpMessage,
+  DAO_ONBOARDING_MESSAGE,
+  type DaoToolContext,
   execCommand,
-  executeProposal,
-  formatAllArtefacts,
-  formatAuditTrail,
-  formatCompositeScore,
-  formatControlResult,
-  formatDispatchPlan,
-  formatDryRun,
-  formatHealthScore,
-  formatPlan,
-  formatRollback,
-  formatRoundTableResults,
-  formatTallyResult,
-  generateAllArtefacts,
-  generateDashboard,
-  generateDeliveryPlan,
-  getAllAuditLog,
   getOrCreateState,
-  getPlan,
-  getProposal,
   getState,
-  initializeAgents,
+  handleDaoAgents,
+  handleDaoArtefacts,
+  handleDaoAudit,
+  handleDaoConfigGithub,
+  handleDaoControl,
+  handleDaoDashboard,
+  handleDaoDeliberate,
+  handleDaoDryRun,
+  handleDaoExecute,
+  handleDaoGithubCreateBranch,
+  handleDaoGithubOpenPr,
+  handleDaoList,
+  handleDaoPlan,
+  handleDaoPropose,
+  handleDaoProposeAmendment,
+  handleDaoRate,
+  handleDaoRecordOutputs,
+  handleDaoRollback,
+  handleDaoRoundtable,
+  handleDaoSetup,
+  handleDaoShip,
+  handleDaoUpdateProposal,
   initStorage,
-  loadAgentDefinitions,
-  loadConfig,
   loadState,
   PROPOSAL_TYPES,
-  parseVoteFromOutput,
-  performDryRun,
-  performRollback,
   readFileContained,
-  recordAudit,
-  runGates,
-  runRoundTable,
-  saveState,
   setState,
-  storeCompositeScore,
-  storeDeliberationBatch,
-  storeDeliveryPlan,
-  storeSynthesis,
-  synthesize,
-  tallyVotes,
-  transitionProposal,
-  validateAmendmentPayload,
   writeFileContained,
 } from "@guyghost/swarm-dao-core";
 import type { Plugin, PluginInput } from "@opencode-ai/plugin";
@@ -64,64 +46,8 @@ import { tool } from "@opencode-ai/plugin";
 
 const schema = tool.schema;
 
-const OPENCODE_ONBOARDING_MESSAGE = [
-  "# DAO not initialized",
-  "",
-  "1. Run `dao_setup` to create the default governance agents.",
-  "2. Run `dao_help` to see the full workflow and available tools.",
-  '3. Start your first proposal with `dao_propose title="..." type="product-feature" description="..."`.',
-].join("\n");
-
 const sessionModels = new Map<string, string>();
 const hostDefaultModels = new Map<string, string | undefined>();
-
-const OPENCODE_HELP_MESSAGE = [
-  "# DAO Help",
-  "",
-  "Recommended flow:",
-  "1. `dao_setup`",
-  '2. `dao_propose title="..." type="product-feature" description="..."`',
-  "3. `dao_deliberate proposalId=1`",
-  "4. Spawn sub-agents via `task` using the resolved models from the dispatch plan",
-  "5. `dao_record_outputs proposalId=1 outputs='[...]'`",
-  "6. `dao_control proposalId=1`",
-  "7. `dao_execute proposalId=1`",
-  "",
-  "Discovery tools:",
-  "- `dao_list` — proposals overview",
-  "- `dao_agents` — configured agents",
-  "- `dao_dashboard` — governance health summary",
-  "- `dao_audit` — audit trail",
-].join("\n");
-
-const FORBIDDEN_JSON_KEYS = new Set(["__proto__", "prototype", "constructor"]);
-
-function assertSafeJsonValue(value: unknown, context: string): void {
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      assertSafeJsonValue(item, context);
-    }
-    return;
-  }
-  if (typeof value !== "object" || value === null) return;
-  for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
-    if (FORBIDDEN_JSON_KEYS.has(key)) {
-      throw new Error(`Unsafe key "${key}" in ${context}`);
-    }
-    assertSafeJsonValue(nested, context);
-  }
-}
-
-function parseSafeJson<T>(input: string, context: string): T {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(input);
-  } catch (error) {
-    throw new Error(`Invalid JSON in ${context}: ${error instanceof Error ? error.message : String(error)}`);
-  }
-  assertSafeJsonValue(parsed, context);
-  return parsed as T;
-}
 
 async function loadOpenCodeHostDefaultModel(directory: string): Promise<string | undefined> {
   const cached = hostDefaultModels.get(directory);
@@ -165,14 +91,6 @@ function detectParentModel(context: { sessionID?: string } | undefined, director
   return hostDefaultModels.get(directory) ?? process.env.OPENCODE_MODEL;
 }
 
-function formatAgentsTable(agents: DAOAgent[]): string {
-  let table = "| Agent | Weight | Role |\n|-------|--------|------|\n";
-  for (const agent of agents) {
-    table += `| ${agent.name} | ${agent.weight} | ${agent.role} |\n`;
-  }
-  return table;
-}
-
 function createOpenCodeHostAdapter(
   ctx: PluginInput,
   options?: { getSessionModel?: () => string | undefined },
@@ -190,7 +108,7 @@ function createOpenCodeHostAdapter(
         error: "OpenCode agent spawning requires manual dispatch via task tool",
       };
     },
-    async spawnAgents(_params) {
+    async spawnAgents() {
       return [];
     },
     async log(params) {
@@ -207,11 +125,11 @@ function createOpenCodeHostAdapter(
     getWorkingDirectory() {
       return ctx.directory;
     },
-    async readFile(path: string) {
-      return readFileContained(path, this.getWorkingDirectory());
+    async readFile(filePath: string) {
+      return readFileContained(filePath, this.getWorkingDirectory());
     },
-    async writeFile(path: string, content: string) {
-      return writeFileContained(path, content, this.getWorkingDirectory());
+    async writeFile(filePath: string, content: string) {
+      return writeFileContained(filePath, content, this.getWorkingDirectory());
     },
     async exec(command, options) {
       return execCommand(command, options);
@@ -219,6 +137,20 @@ function createOpenCodeHostAdapter(
     hasCapability(capability) {
       return ["read_file", "write_file", "exec", "log"].includes(capability);
     },
+  };
+}
+
+function createOpenCodeToolContext(ctx: PluginInput, context: { sessionID?: string } | undefined): DaoToolContext {
+  return {
+    adapter: createOpenCodeHostAdapter(ctx, {
+      getSessionModel: () => detectParentModel(context, ctx.directory),
+    }),
+    workDir: ctx.directory,
+    deliberationMode: "manual",
+    controlToolName: "dao_control",
+    failOnGateFailure: false,
+    getSessionModel: () => detectParentModel(context, ctx.directory),
+    hostDefaultModel: hostDefaultModels.get(ctx.directory),
   };
 }
 
@@ -242,19 +174,17 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
       }
     },
     tool: {
-      // ── dao_help ─────────────────────────────────────────
       dao_help: tool({
         description: "Show onboarding and available DAO tools",
         args: {},
         // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
         async execute(_args: any, _context: any) {
           const state = getState();
-          if (!state.initialized) return OPENCODE_ONBOARDING_MESSAGE;
-          return OPENCODE_HELP_MESSAGE;
+          if (!state.initialized) return DAO_ONBOARDING_MESSAGE;
+          return buildDaoHelpMessage({ manualDeliberation: true, controlTool: "dao_control" });
         },
       }),
 
-      // ── dao_setup ────────────────────────────────────────
       dao_setup: tool({
         description: "Initialize the DAO with default 7 product agents",
         args: {
@@ -262,24 +192,10 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
         },
         // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
         async execute(_args: any, context: any) {
-          const workDir = context.directory;
-          await initStorage(workDir);
-          const state = getOrCreateState(workDir);
-
-          if (state.initialized) {
-            return `DAO already initialized with ${state.agents.length} agents.`;
-          }
-
-          const agents = initializeAgents();
-          state.agents = agents;
-          state.initialized = true;
-          await saveState();
-
-          return `# DAO Initialized\n\n${formatAgentsTable(agents)}\n\nRun \`dao_help\` to discover the workflow, then \`dao_propose\` to create proposals.`;
+          return handleDaoSetup(createOpenCodeToolContext(ctx, context), _args.useDefaults !== false);
         },
       }),
 
-      // ── dao_propose ──────────────────────────────────────
       dao_propose: tool({
         description: "Create a new DAO proposal",
         args: {
@@ -295,81 +211,21 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
         },
         // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
         async execute(args: any, _context: any) {
-          const state = getState();
-          if (!state.initialized) return OPENCODE_ONBOARDING_MESSAGE;
-
-          const proposal = await createProposal(args.title, args.type, args.description, "user", args.context);
-          if (args.problemStatement !== undefined) proposal.problemStatement = args.problemStatement;
-          if (args.acceptanceCriteria !== undefined) proposal.acceptanceCriteria = args.acceptanceCriteria;
-          if (args.successMetrics !== undefined) proposal.successMetrics = args.successMetrics;
-          if (args.rollbackConditions !== undefined) proposal.rollbackConditions = args.rollbackConditions;
-          if (args.affectedPaths !== undefined) proposal.affectedPaths = args.affectedPaths;
-
-          const zone = classifyRiskZone(proposal);
-          proposal.riskZone = zone;
-          await saveState();
-
-          await recordAudit(proposal.id, "governance", "proposal_created", "user", `Proposal "${args.title}" created`);
-          await saveState();
-
-          return `# 📋 Proposal Created — #${proposal.id}\n\n**Title:** ${args.title}\n**Type:** ${args.type}\n**Zone:** ${zone}\n\nRun \`dao_deliberate proposalId=${proposal.id}\``;
+          return handleDaoPropose(args);
         },
       }),
 
-      // ── dao_deliberate ───────────────────────────────────
       dao_deliberate: tool({
         description: "Build a swarm dispatch plan with resolved models for manual sub-agent execution",
-        args: {
-          proposalId: schema.number(),
-        },
+        args: { proposalId: schema.number() },
         // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
         async execute(args: any, context: any) {
-          const state = getState();
-          if (!state.initialized) return OPENCODE_ONBOARDING_MESSAGE;
-
-          const proposal = getProposal(args.proposalId);
-          if (!proposal) return `Proposal #${args.proposalId} not found.`;
-          if (proposal.status !== "open") {
-            return `Proposal #${proposal.id} is ${proposal.status}, must be open.`;
-          }
-
-          const transition = transitionProposal(proposal, "deliberate");
-          if (!transition.success) return `Cannot deliberate: ${transition.error}`;
-
-          await recordAudit(
-            proposal.id,
-            "governance",
-            "deliberation_started",
-            "system",
-            `Deliberation plan generated for #${proposal.id}`,
-          );
-          await saveState();
-
-          const parentSessionModel = detectParentModel(context, directory);
-          const hostDefaultModel = await loadOpenCodeHostDefaultModel(directory);
-          const adapter = createOpenCodeHostAdapter(ctx, {
-            getSessionModel: () => detectParentModel(context, directory),
-          });
-          const projectConfig = await loadConfig(state.daoRoot);
-          const agents = await loadAgentDefinitions(state.daoRoot, projectConfig);
-          const modelContext = createDispatchModelContext(state.config.defaultModel, adapter, {
-            parentSessionModel,
-            hostDefaultModel,
-          });
-          const instructions = buildDispatchInstructions(proposal, agents, modelContext);
-          const plan = formatDispatchPlan(proposal, instructions);
-
-          const parentNote = parentSessionModel
-            ? `\n\n**Parent session model:** ${parentSessionModel}`
-            : hostDefaultModel
-              ? `\n\n**Host default model:** ${hostDefaultModel}`
-              : "";
-
-          return `${plan}${parentNote}`;
+          const toolCtx = createOpenCodeToolContext(ctx, context);
+          toolCtx.hostDefaultModel = await loadOpenCodeHostDefaultModel(directory);
+          return handleDaoDeliberate(toolCtx, args.proposalId);
         },
       }),
 
-      // ── dao_record_outputs ───────────────────────────────
       dao_record_outputs: tool({
         description: "Record sub-agent outputs and finalize deliberation",
         args: {
@@ -385,329 +241,156 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
           ),
         },
         // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
-        async execute(args: any, _context: any) {
-          const state = getState();
-          if (!state.initialized) return OPENCODE_ONBOARDING_MESSAGE;
-
-          const proposal = getProposal(args.proposalId);
-          if (!proposal) return `Proposal #${args.proposalId} not found.`;
-          if (proposal.status !== "deliberating") return `Expected deliberating (current: ${proposal.status})`;
-
-          const votes: Vote[] = [];
-          const enrichedOutputs: AgentOutput[] = [];
-
-          for (const raw of args.outputs) {
-            const agent = state.agents.find((a) => a.id === raw.agentId);
-            if (!agent) continue;
-
-            const output: AgentOutput = {
-              agentId: agent.id,
-              agentName: agent.name,
-              role: agent.role,
-              content: raw.content || "",
-              durationMs: raw.durationMs ?? 0,
-              error: raw.error,
-            };
-
-            const vote = parseVoteFromOutput(agent.id, agent.name, agent.weight, output.content);
-            if (vote) {
-              output.vote = vote;
-              votes.push(vote);
-            }
-
-            enrichedOutputs.push(output);
-          }
-          await storeDeliberationBatch(proposal.id, votes, enrichedOutputs);
-
-          proposal.votes = votes;
-
-          const compositeScore = calculateCompositeScore(enrichedOutputs);
-          proposal.compositeScore = compositeScore;
-          await storeCompositeScore(proposal.id, compositeScore);
-
-          const synthesisText = synthesize(proposal, state.agents, enrichedOutputs);
-          proposal.synthesis = synthesisText;
-          await storeSynthesis(proposal.id, synthesisText);
-
-          const tally = tallyVotes(proposal, state.config);
-
-          if (tally.approved) {
-            transitionProposal(proposal, "approve");
-            await recordAudit(
-              proposal.id,
-              "intelligence",
-              "deliberation_approved",
-              "system",
-              `Approved: ${tally.approvalScore}%`,
-            );
-          } else {
-            transitionProposal(proposal, "reject");
-            await recordAudit(
-              proposal.id,
-              "intelligence",
-              "deliberation_rejected",
-              "system",
-              `Rejected: ${tally.approvalScore}%`,
-            );
-          }
-
-          await saveState();
-
-          return `# 🗳️ Deliberation Complete — #${proposal.id}\n\n${formatTallyResult(tally)}\n\n${formatCompositeScore(compositeScore)}\n\n${synthesisText}\n\n> Next: \`dao_control proposalId=${proposal.id}\``;
+        async execute(args: any, context: any) {
+          return handleDaoRecordOutputs(createOpenCodeToolContext(ctx, context), args.proposalId, args.outputs);
         },
       }),
 
-      // ── dao_control ──────────────────────────────────────
       dao_control: tool({
         description: "Run quality control gates",
         args: { proposalId: schema.number() },
         // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
-        async execute(args: any, _context: any) {
-          const state = getState();
-          if (!state.initialized) return OPENCODE_ONBOARDING_MESSAGE;
-
-          const proposal = getProposal(args.proposalId);
-          if (!proposal) return `Proposal #${args.proposalId} not found.`;
-          if (proposal.status !== "approved") return `Must be approved (current: ${proposal.status})`;
-
-          const result = runGates(proposal, state.config);
-
-          if (result.allGatesPassed) {
-            transitionProposal(proposal, "control");
-            await recordAudit(proposal.id, "control", "gates_passed", "system", "All gates passed");
-            // Generate delivery plan after gates pass, making it available before execution
-            if (!state.deliveryPlans[proposal.id]) {
-              const plan = generateDeliveryPlan(proposal);
-              await storeDeliveryPlan(proposal.id, plan);
-            }
-          } else {
-            await recordAudit(proposal.id, "control", "gates_failed", "system", `${result.blockerCount} blockers`);
-          }
-
-          await saveState();
-          return formatControlResult(result);
+        async execute(args: any, context: any) {
+          return handleDaoControl(createOpenCodeToolContext(ctx, context), args.proposalId);
         },
       }),
 
-      // ── dao_execute ──────────────────────────────────────
       dao_execute: tool({
         description: "Execute an approved or controlled proposal",
         args: { proposalId: schema.number() },
         // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
         async execute(args: any, _context: any) {
-          const _state = getState();
-          const proposal = getProposal(args.proposalId);
-          if (!proposal) return `Proposal #${args.proposalId} not found.`;
-          if (proposal.status !== "controlled") {
-            return `Must be controlled (current: ${proposal.status}). Run dao_control first.`;
-          }
-
-          const result = await executeProposal(proposal);
-          await saveState();
-
-          await recordAudit(proposal.id, "delivery", "proposal_executed", "user", `Executed #${proposal.id}`);
-          await saveState();
-
-          return result.result;
+          return handleDaoExecute(args.proposalId);
         },
       }),
 
-      // ── dao_list ─────────────────────────────────────────
+      dao_ship: tool({
+        description: "Ship a controlled proposal (optionally cascade dependencies)",
+        args: {
+          proposalId: schema.number(),
+          cascade: schema.boolean().optional(),
+          force: schema.boolean().optional(),
+        },
+        // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
+        async execute(args: any, context: any) {
+          return handleDaoShip(createOpenCodeToolContext(ctx, context), args.proposalId, {
+            cascade: args.cascade,
+            force: args.force,
+          });
+        },
+      }),
+
       dao_list: tool({
         description: "List all DAO proposals",
         args: {},
         // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
         async execute(_args: any, _context: any) {
-          const state = getState();
-          if (!state.initialized) return OPENCODE_ONBOARDING_MESSAGE;
-          if (state.proposals.length === 0) return "No proposals yet.";
-
-          let output = "# DAO Proposals\n\n";
-          for (const p of state.proposals) {
-            output += `## #${p.id}: ${p.title}\n${p.status} · ${p.type}\n\n`;
-          }
-          return output;
+          return handleDaoList();
         },
       }),
 
-      // ── dao_agents ───────────────────────────────────────
       dao_agents: tool({
         description: "List all DAO agents",
         args: {},
         // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
         async execute(_args: any, _context: any) {
-          const state = getState();
-          if (!state.initialized) return OPENCODE_ONBOARDING_MESSAGE;
-          return `# DAO Agents\n\n${formatAgentsTable(state.agents)}`;
+          return handleDaoAgents();
         },
       }),
 
-      // ── dao_plan ─────────────────────────────────────────
       dao_plan: tool({
         description: "Get delivery plan",
         args: { proposalId: schema.number() },
         // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
         async execute(args: any, _context: any) {
-          const proposal = getProposal(args.proposalId);
-          if (!proposal) return `Proposal #${args.proposalId} not found.`;
-          const plan = getPlan(args.proposalId);
-          if (!plan) {
-            if (proposal.status === "open") {
-              return "Plan not available yet. Run `dao_record_outputs` (after starting deliberation with `dao_propose` and running deliberation), then `dao_control`, to generate the plan.";
-            }
-            if (proposal.status === "deliberating") {
-              return "Plan not available yet. Deliberation is still running. Run `dao_record_outputs` to completion first.";
-            }
-            if (proposal.status === "approved") {
-              return "Plan not available yet. Proposal must pass gates first. Run `dao_control` to proceed.";
-            }
-            if (proposal.status === "controlled") {
-              return "Plan should be available. If missing, run `dao_execute` to generate it.";
-            }
-            if (proposal.status === "rejected") {
-              return "Proposal was rejected and cannot be executed.";
-            }
-            return "Plan not available for this proposal.";
-          }
-          return formatPlan(plan);
+          return handleDaoPlan(args.proposalId, "dao_control");
         },
       }),
 
-      // ── dao_artefacts ────────────────────────────────────
       dao_artefacts: tool({
         description: "View auto-generated artefacts for a proposal",
         args: { proposalId: schema.number() },
         // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
         async execute(args: any, _context: any) {
-          const proposal = getProposal(args.proposalId);
-          if (!proposal) return `Proposal #${args.proposalId} not found.`;
-          const artefacts = generateAllArtefacts(proposal);
-          return formatAllArtefacts(artefacts);
+          return handleDaoArtefacts(args.proposalId);
         },
       }),
 
-      // ── dao_dry_run ──────────────────────────────────────
       dao_dry_run: tool({
         description: "Preview execution without applying changes",
         args: { proposalId: schema.number() },
         // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
         async execute(args: any, _context: any) {
-          const proposal = getProposal(args.proposalId);
-          if (!proposal) return `Proposal #${args.proposalId} not found.`;
-          const result = await performDryRun(proposal);
-          proposal.dryRunAt = new Date().toISOString();
-          proposal.dryRunCanProceed = result.canProceed;
-          await saveState();
-          return formatDryRun(result);
+          return handleDaoDryRun(args.proposalId);
         },
       }),
 
-      // ── dao_rollback ─────────────────────────────────────
       dao_rollback: tool({
         description: "Revert proposal execution to pre-execution snapshot",
         args: { proposalId: schema.number() },
         // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
         async execute(args: any, _context: any) {
-          const result = await performRollback(args.proposalId);
-          return formatRollback(result);
+          return handleDaoRollback(args.proposalId);
         },
       }),
 
-      // ── dao_dashboard ────────────────────────────────────
       dao_dashboard: tool({
         description: "View outcome tracking dashboard",
         args: {},
         // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
         async execute(_args: any, _context: any) {
-          const state = getState();
-          if (!state.initialized) return OPENCODE_ONBOARDING_MESSAGE;
-          const dashboard = generateDashboard(state.proposals, state.outcomes, state.agents, state.healthSnapshots);
-          const health = computeHealthScore(state.proposals, state.outcomes, state.config.healthWeights);
-          return `${dashboard}\n\n${formatHealthScore(health)}`;
+          return handleDaoDashboard();
         },
       }),
 
-      // ── dao_roundtable ───────────────────────────────────
       dao_roundtable: tool({
         description: "Ask every agent to suggest a proposal idea",
         args: {},
         // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
         async execute(_args: any, context: any) {
-          const state = getState();
-          if (!state.initialized) return OPENCODE_ONBOARDING_MESSAGE;
-
-          const adapter = createOpenCodeHostAdapter(ctx, {
-            getSessionModel: () => detectParentModel(context, directory),
-          });
-          const projectConfig = await loadConfig(state.daoRoot);
-          const agents = await loadAgentDefinitions(state.daoRoot, projectConfig);
-          const hostDefaultModel = await loadOpenCodeHostDefaultModel(directory);
-          const modelContext = createDispatchModelContext(state.config.defaultModel, adapter, {
-            parentSessionModel: detectParentModel(context, directory),
-            hostDefaultModel,
-          });
-          const suggestions = await runRoundTable(adapter, agents, state.config.maxConcurrent, modelContext);
-
-          const proposalIds = new Map<string, number>();
-          const parsedSuggestions = suggestions
-            .map((suggestion) => ({ suggestion, parsed: suggestion.parsed }))
-            .filter(
-              (
-                entry,
-              ): entry is {
-                suggestion: (typeof suggestions)[number];
-                parsed: NonNullable<(typeof suggestions)[number]["parsed"]>;
-              } => Boolean(entry.parsed),
-            );
-          try {
-            const proposals = await createProposalsBatch(
-              parsedSuggestions.map(({ suggestion, parsed }) => ({
-                title: parsed.title,
-                type: parsed.type,
-                description: parsed.description,
-                proposedBy: suggestion.agentId,
-              })),
-            );
-            for (const [index, { suggestion }] of parsedSuggestions.entries()) {
-              const proposal = proposals[index];
-              if (!proposal) continue;
-              proposal.riskZone = classifyRiskZone(proposal);
-              suggestion.proposalId = proposal.id;
-              proposalIds.set(suggestion.agentId, proposal.id);
-              await recordAudit(
-                proposal.id,
-                "intelligence",
-                "roundtable_proposal_created",
-                suggestion.agentId,
-                `Auto-created from round table`,
-              );
-            }
-          } catch (error: unknown) {
-            const message = error instanceof Error ? error.message : String(error);
-            for (const { suggestion } of parsedSuggestions) {
-              suggestion.error = `Failed to create proposal: ${message}`;
-            }
-          }
-
-          await saveState();
-          return formatRoundTableResults(suggestions, proposalIds);
+          const toolCtx = createOpenCodeToolContext(ctx, context);
+          toolCtx.hostDefaultModel = await loadOpenCodeHostDefaultModel(directory);
+          return handleDaoRoundtable(toolCtx);
         },
       }),
 
-      // ── dao_audit ────────────────────────────────────────
       dao_audit: tool({
         description: "View audit trail",
         args: { proposalId: schema.number({ description: "Optional proposal ID" }) },
         // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
         async execute(args: any, _context: any) {
-          const entries = args.proposalId
-            ? getAllAuditLog().filter((e) => e.proposalId === args.proposalId)
-            : getAllAuditLog();
-          return formatAuditTrail(entries, args.proposalId);
+          return handleDaoAudit(args.proposalId);
         },
       }),
 
-      // ── dao_propose_amendment ────────────────────────────
+      dao_rate: tool({
+        description: "Rate a proposal outcome post-execution (1-5 stars)",
+        args: {
+          proposalId: schema.number(),
+          score: schema.number(),
+          comment: schema.string(),
+        },
+        // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
+        async execute(args: any, _context: any) {
+          return handleDaoRate(args.proposalId, args.score as 1 | 2 | 3 | 4 | 5, args.comment);
+        },
+      }),
+
+      dao_update_proposal: tool({
+        description: "Update structured fields on an open proposal",
+        args: {
+          proposalId: schema.number(),
+          problemStatement: schema.string().optional(),
+          acceptanceCriteria: schema.array(schema.string()).optional(),
+          successMetrics: schema.array(schema.string()).optional(),
+          rollbackConditions: schema.array(schema.string()).optional(),
+        },
+        // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
+        async execute(args: any, _context: any) {
+          return handleDaoUpdateProposal(args.proposalId, args);
+        },
+      }),
+
       dao_propose_amendment: tool({
         description: "Propose an amendment to the DAO",
         args: {
@@ -734,66 +417,41 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
         },
         // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
         async execute(args: any, _context: any) {
-          const state = getState();
-          if (!state.initialized) return OPENCODE_ONBOARDING_MESSAGE;
+          return handleDaoProposeAmendment(args);
+        },
+      }),
 
-          let payload: import("@guyghost/swarm-dao-core").AmendmentPayload;
-          try {
-            switch (args.amendmentType) {
-              case "agent-update":
-                payload = {
-                  type: "agent-update",
-                  agentId: args.agentId,
-                  changes: parseSafeJson(args.agentChanges, "agentChanges"),
-                };
-                break;
-              case "agent-add":
-                payload = {
-                  type: "agent-add",
-                  agent: {
-                    id: args.newAgentId,
-                    name: args.newAgentName,
-                    role: args.newAgentRole,
-                    weight: args.newAgentWeight,
-                    description: "Custom agent",
-                    systemPrompt: "",
-                  },
-                };
-                break;
-              case "agent-remove":
-                payload = { type: "agent-remove", agentId: args.agentId };
-                break;
-              case "config-update":
-                payload = { type: "config-update", changes: parseSafeJson(args.configChanges, "configChanges") };
-                break;
-              case "quorum-update":
-                payload = { type: "quorum-update", typeQuorum: parseSafeJson(args.quorumChanges, "quorumChanges") };
-                break;
-              case "gate-update":
-                payload = { type: "gate-update", addGates: args.addGates, removeGates: args.removeGates };
-                break;
-              default:
-                return `Error: Unknown amendment type "${args.amendmentType}"`;
-            }
-          } catch (err: unknown) {
-            const message = err instanceof Error ? err.message : String(err);
-            return `Error: ${message}`;
-          }
+      dao_config_github: tool({
+        description: "Configure GitHub integration for branch/PR tools",
+        args: {
+          token: schema.string(),
+          owner: schema.string(),
+          repo: schema.string(),
+        },
+        // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
+        async execute(args: any, context: any) {
+          return handleDaoConfigGithub(createOpenCodeToolContext(ctx, context), args);
+        },
+      }),
 
-          const validation = validateAmendmentPayload(payload);
-          if (!validation.valid) return `❌ Validation failed:\n${validation.errors.join("\n")}`;
+      dao_github_create_branch: tool({
+        description: "Create a GitHub branch for a proposal",
+        args: { proposalId: schema.number() },
+        // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
+        async execute(args: any, context: any) {
+          return handleDaoGithubCreateBranch(createOpenCodeToolContext(ctx, context), args.proposalId);
+        },
+      }),
 
-          const proposal = await createProposal(args.title, "governance-change", args.description, "user");
-          proposal.amendmentPayload = payload;
-          proposal.amendmentOrigin = { source: "human" };
-          proposal.amendmentState = "pending-vote";
-          proposal.riskZone = classifyRiskZone(proposal);
-          await saveState();
-
-          await recordAudit(proposal.id, "governance", "amendment_proposed", "user", `Amendment: ${payload.type}`);
-          await saveState();
-
-          return `# 📜 Amendment Proposed — #${proposal.id}\n\nType: ${payload.type}\n\nRun \`dao_deliberate proposalId=${proposal.id}\``;
+      dao_github_open_pr: tool({
+        description: "Open a GitHub pull request for a proposal",
+        args: {
+          proposalId: schema.number(),
+          headBranch: schema.string(),
+        },
+        // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
+        async execute(args: any, context: any) {
+          return handleDaoGithubOpenPr(createOpenCodeToolContext(ctx, context), args.proposalId, args.headBranch);
         },
       }),
     },

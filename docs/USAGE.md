@@ -1,6 +1,6 @@
 # Swarm DAO Usage Guide
 
-> Installation, configuration, and complete workflows for Pi and OpenCode.
+> Installation, configuration, and complete workflows for Pi, OpenCode, and MCP hosts (Cursor, Cline, Claude Code, Continue).
 
 ---
 
@@ -8,8 +8,9 @@
 
 - [Installation in Pi](#installation-in-pi)
 - [Installation in OpenCode](#installation-in-opencode)
+- [Installation via MCP (Cursor, Cline, Claude Code, Continue)](#installation-via-mcp-cursor-cline-claude-code-continue)
 - [Common Workflows](#common-workflows)
-- [Pi vs OpenCode Differences](#pi-vs-opencode-differences)
+- [Host Comparison](#host-comparison)
 - [Troubleshooting](#troubleshooting)
 
 ---
@@ -163,6 +164,91 @@ opencode
 # Proposal overview: ...
 # Config: quorum=60%, approval=55%, risk=7/10
 ```
+
+---
+
+## Installation via MCP (Cursor, Cline, Claude Code, Continue)
+
+The [`@guyghost/swarm-dao-mcp`](../packages/mcp-server) package exposes all DAO tools over the Model Context Protocol. One server works across any MCP-compatible host.
+
+### Prerequisites
+
+- Bun ≥ 1.3 (for `bunx`)
+- Your host IDE/agent with MCP support
+
+### Cursor
+
+Create `.cursor/mcp.json` in your project:
+
+```json
+{
+  "mcpServers": {
+    "swarm-dao": {
+      "command": "bunx",
+      "args": ["@guyghost/swarm-dao-mcp"],
+      "env": {
+        "DAO_ROOT": "${workspaceFolder}"
+      }
+    }
+  }
+}
+```
+
+Reload Cursor. DAO tools appear under MCP in the agent panel.
+
+### Cline
+
+Open **MCP Servers → Configure → Configure MCP Servers** and add:
+
+```json
+{
+  "mcpServers": {
+    "swarm-dao": {
+      "command": "bunx",
+      "args": ["@guyghost/swarm-dao-mcp"],
+      "env": { "DAO_ROOT": "/absolute/path/to/your/project" },
+      "disabled": false
+    }
+  }
+}
+```
+
+### Claude Code
+
+Use the bundled plugin at [`packages/claude-code-adapter`](../packages/claude-code-adapter):
+
+```bash
+claude plugin add /path/to/swarm-dao/packages/claude-code-adapter
+```
+
+Or copy the `.mcp.json` from that package into your project `.claude/` settings.
+
+### Continue
+
+Add to `~/.continue/config.yaml`:
+
+```yaml
+mcpServers:
+  - name: swarm-dao
+    command: bunx
+    args:
+      - "@guyghost/swarm-dao-mcp"
+    env:
+      DAO_ROOT: /absolute/path/to/your/project
+```
+
+### MCP workflow (manual deliberation)
+
+MCP hosts use the same two-step deliberation as OpenCode:
+
+1. `dao_setup`
+2. `dao_propose`
+3. `dao_deliberate` — returns dispatch plan with per-agent prompts
+4. Spawn sub-agents via your host's **Task** or **Agent** tool
+5. `dao_record_outputs` — submit outputs for voting and synthesis
+6. `dao_control` → `dao_execute` (or `dao_ship` with dependency cascade)
+
+Set `DAO_GITHUB_TOKEN` after `dao_config_github` to avoid re-entering tokens.
 
 ---
 
@@ -347,18 +433,16 @@ opencode
 
 ---
 
-## Pi vs OpenCode Differences
+## Host Comparison
 
-| Aspect | Pi | OpenCode |
-|--------|-----|----------|
-| **Integration type** | Extension (`ExtensionAPI`) | Plugin (`@opencode-ai/plugin`) |
-| **Installation** | `.pi/extensions/` symlink | `.opencode/config.json` plugins |
-| **Deliberation** | Automatic (sub-process `pi --mode json`) | Manual (plan + `task` tool + `dao_record_outputs`) |
-| **Sub-agents** | Spawned automatically by the core | Spawned manually via native `task` tool |
-| **Events** | `session_start`, `before_agent_start` | Hooks via plugin API |
-| **Commands** | `/dao`, `/dao:propose`, etc. | `/dao/init`, `/dao/propose`, etc. |
-| **Tool syntax** | `dao_propose title="..."` | `dao_propose({ title: "..." })` |
-| **Standalone CLI** | Via Pi | `swarm-dao` CLI (standalone) |
+| Aspect | Pi | OpenCode | MCP (Cursor, Cline, …) |
+|--------|-----|----------|------------------------|
+| **Integration** | Pi Extension | OpenCode Plugin | MCP stdio server |
+| **Install** | `.pi/extensions/` | `opencode.json` plugins | `.cursor/mcp.json`, etc. |
+| **Deliberation** | Automatic (`dispatchSwarm`) | Manual plan + `task` | Manual plan + Task/Agent |
+| **Control tool** | `dao_check` | `dao_control` | `dao_control` |
+| **Ship tool** | `dao_ship` (cascade) | `dao_execute` / `dao_ship` | `dao_execute` / `dao_ship` |
+| **GitHub tools** | `dao_config_github`, … | `dao_config_github`, … | `dao_config_github`, … |
 
 ### Why is deliberation different?
 
@@ -436,17 +520,16 @@ dao_setup
 
 ## Quick Command Reference
 
-| Command | Pi | OpenCode | Description |
-|---------|-----|----------|-------------|
-| Initialize | `dao_setup` | `dao_setup` | Create the 7 default agents |
-| Propose | `dao_propose` | `dao_propose` | Create a proposal |
-| Deliberate | `dao_deliberate` | `dao_deliberate` + `dao_record_outputs` | Swarm vote |
-| Control | `dao_check` | `dao_control` | Quality gates |
-| Execute | `dao_ship` | `dao_execute` | Execute / ship proposal |
-| Artefacts | `dao_artefacts` | `dao_artefacts` | Generate documents |
-| Dashboard | `dao_dashboard` | `dao_dashboard` | Overview |
-| Help | *(n/a)* | `dao_help` | Onboarding + tool discovery |
-| Dry-run | `dao_dry_run` | `dao_dry_run` | Preview changes |
+| Command | Pi | OpenCode | MCP | Description |
+|---------|-----|----------|-----|-------------|
+| Initialize | `dao_setup` | `dao_setup` | `dao_setup` | Create the 7 default agents |
+| Propose | `dao_propose` | `dao_propose` | `dao_propose` | Create a proposal |
+| Deliberate | `dao_deliberate` | `dao_deliberate` + `dao_record_outputs` | same as OpenCode | Swarm vote |
+| Control | `dao_check` | `dao_control` | `dao_control` | Quality gates |
+| Execute | `dao_ship` | `dao_execute` | `dao_execute` / `dao_ship` | Execute / ship proposal |
+| GitHub | `dao_config_github` | `dao_config_github` | `dao_config_github` | Configure GitHub |
+| Rate | `dao_rate` | `dao_rate` | `dao_rate` | Post-execution rating |
+| Help | `/dao help` | `dao_help` | `dao_help` | Onboarding + discovery |
 | Rollback | `dao_rollback` | `dao_rollback` | Revert execution |
 | Roundtable | `dao_roundtable` | `dao_roundtable` | Agent suggestions |
 | Audit | `dao_audit` | `dao_audit` | History |

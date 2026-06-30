@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "swarm-dao": {
+      "command": "bunx",
+      "args": ["@guyghost/swarm-dao-mcp"],
+      "env": {
+        "DAO_ROOT": "${CLAUDE_PLUGIN_ROOT}/../.."
+      }
+    }
+  }
+}

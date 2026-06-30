@@ -16,8 +16,8 @@ import {
   createDispatchModelContext,
   createProposal,
   createProposalsBatch,
+  type DaoToolContext,
   dispatchSwarm,
-  // Delivery
   execCommand,
   executeProposal,
   formatAllArtefacts,
@@ -39,25 +39,22 @@ import {
   getProposal,
   getState,
   getUnexecutedDependencies,
-  // Governance
+  handleDaoConfigGithub,
+  handleDaoGithubCreateBranch,
+  handleDaoGithubOpenPr,
   initializeAgents,
   initStorage,
   loadAgentDefinitions,
   loadConfig,
-  // Persistence
   loadState,
   PROPOSAL_TYPE_LABELS,
-  // Types
   PROPOSAL_TYPES,
-  // Voting & Scoring
   parseVoteFromOutput,
   performDryRun,
   performRollback,
   readFileContained,
   recordAudit,
-  // Control
   runGates,
-  // Round Table
   runRoundTable,
   saveState,
   setState,
@@ -353,6 +350,17 @@ function createPiHostAdapter(_pi: ExtensionAPI, ctx?: ExtensionCommandContext): 
       const caps = ["read_file", "write_file", "exec", "log", "spawn_agent"];
       return caps.includes(capability);
     },
+  };
+}
+
+function createPiToolContext(pi: ExtensionAPI, ctx?: ExtensionCommandContext): DaoToolContext {
+  return {
+    adapter: createPiHostAdapter(pi, ctx),
+    workDir: process.cwd(),
+    deliberationMode: "auto",
+    controlToolName: "dao_check",
+    failOnGateFailure: true,
+    getSessionModel: () => detectParentSessionModel(ctx),
   };
 }
 
@@ -1062,6 +1070,49 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
 
       await saveState();
       return toolResult(`# 📝 Proposal Updated — #${proposal.id}\n\nUpdated fields applied.`);
+    },
+  });
+
+  // ── Tool: dao_config_github ──────────────────────────────
+  pi.registerTool({
+    name: "dao_config_github",
+    label: "DAO Config GitHub",
+    description: "Configure GitHub integration for branch/PR tools",
+    parameters: Type.Object({
+      token: Type.String(),
+      owner: Type.String(),
+      repo: Type.String(),
+    }),
+    async execute(_id, params: { token: string; owner: string; repo: string }, _signal, _onUpdate, ctx) {
+      const result = await handleDaoConfigGithub(createPiToolContext(pi, ctx), params);
+      return toolResult(result);
+    },
+  });
+
+  // ── Tool: dao_github_create_branch ───────────────────────
+  pi.registerTool({
+    name: "dao_github_create_branch",
+    label: "DAO GitHub Create Branch",
+    description: "Create a GitHub branch for a proposal",
+    parameters: Type.Object({ proposalId: Type.Number() }),
+    async execute(_id, params: { proposalId: number }, _signal, _onUpdate, ctx) {
+      const result = await handleDaoGithubCreateBranch(createPiToolContext(pi, ctx), params.proposalId);
+      return toolResult(result);
+    },
+  });
+
+  // ── Tool: dao_github_open_pr ─────────────────────────────
+  pi.registerTool({
+    name: "dao_github_open_pr",
+    label: "DAO GitHub Open PR",
+    description: "Open a GitHub pull request for a proposal",
+    parameters: Type.Object({
+      proposalId: Type.Number(),
+      headBranch: Type.String(),
+    }),
+    async execute(_id, params: { proposalId: number; headBranch: string }, _signal, _onUpdate, ctx) {
+      const result = await handleDaoGithubOpenPr(createPiToolContext(pi, ctx), params.proposalId, params.headBranch);
+      return toolResult(result);
     },
   });
 

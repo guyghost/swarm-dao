@@ -1,0 +1,60 @@
+{
+  "name": "@guyghost/swarm-dao-mcp",
+  "version": "0.1.0",
+  "description": "Swarm DAO MCP server — universal governance tools for Cursor, Cline, Claude Code, and other MCP hosts",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "swarm-dao-mcp": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "bun test",
+    "lint": "biome check .",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "bun run build"
+  },
+  "dependencies": {
+    "@guyghost/swarm-dao-core": "^0.2.0",
+    "@modelcontextprotocol/sdk": "^1.17.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "keywords": [
+    "swarm-dao",
+    "mcp",
+    "model-context-protocol",
+    "cursor",
+    "cline",
+    "claude-code",
+    "dao",
+    "governance"
+  ],
+  "author": "guyghost",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/guyghost/swarm-dao.git",
+    "directory": "packages/mcp-server"
+  },
+  "bugs": {
+    "url": "https://github.com/guyghost/swarm-dao/issues"
+  },
+  "homepage": "https://github.com/guyghost/swarm-dao#readme",
+  "publishConfig": {
+    "access": "public"
+  }
+}

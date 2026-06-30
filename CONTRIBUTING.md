@@ -42,6 +42,8 @@ swarm-dao/
 │   ├── core/              # Business logic (host-agnostic)
 │   ├── pi-adapter/        # Pi coding agent bridge
 │   ├── opencode-adapter/  # OpenCode bridge
+│   ├── mcp-server/        # Universal MCP server
+│   ├── claude-code-adapter/  # Claude Code plugin
 │   └── cli/               # Standalone CLI
 ├── agents/                # Shared agent prompts
 ├── docs/                  # Documentation

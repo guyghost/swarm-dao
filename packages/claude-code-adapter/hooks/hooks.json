@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "Swarm DAO is available via MCP tools (dao_setup, dao_propose, dao_deliberate, dao_record_outputs, dao_control, dao_execute). For deliberation: run dao_deliberate, spawn sub-agents with the Agent tool using the dispatch plan, then dao_record_outputs."
+          }
+        ]
+      }
+    ]
+  }
+}
