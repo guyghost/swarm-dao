@@ -109,6 +109,7 @@ describe("opencode-adapter", () => {
         "dao_record_outputs",
         "dao_control",
         "dao_execute",
+        "dao_ship",
         "dao_list",
         "dao_agents",
         "dao_plan",
@@ -118,7 +119,12 @@ describe("opencode-adapter", () => {
         "dao_dashboard",
         "dao_roundtable",
         "dao_audit",
+        "dao_rate",
+        "dao_update_proposal",
         "dao_propose_amendment",
+        "dao_config_github",
+        "dao_github_create_branch",
+        "dao_github_open_pr",
       ];
 
       for (const toolName of expectedTools) {
@@ -210,7 +216,7 @@ describe("opencode-adapter", () => {
       expect(result).not.toContain("not found");
       expect(result).toContain("#1");
       expect(result).toContain("Add dark mode");
-      expect(result).toContain("product-feature");
+      expect(result).toContain("Product Feature");
       // Should contain risk zone info (orange for product-feature)
       expect(result).toMatch(/orange|green|red/i);
     });
@@ -255,7 +261,7 @@ describe("opencode-adapter", () => {
 
       expect(result).not.toContain("not found");
       expect(result).toContain("With extras");
-      expect(result).toContain("technical-change");
+      expect(result).toContain("Technical Change");
     });
 
     it("returns error when DAO not initialized", async () => {

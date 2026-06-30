@@ -1,0 +1,27 @@
+{
+  "name": "@guyghost/swarm-dao-claude-code-adapter",
+  "version": "0.1.0",
+  "description": "Swarm DAO plugin for Claude Code — MCP wiring and Agent dispatch guidance",
+  "type": "module",
+  "private": true,
+  "files": [
+    ".claude-plugin",
+    "hooks",
+    ".mcp.json",
+    "README.md"
+  ],
+  "keywords": [
+    "swarm-dao",
+    "claude-code",
+    "plugin",
+    "mcp",
+    "dao"
+  ],
+  "author": "guyghost",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/guyghost/swarm-dao.git",
+    "directory": "packages/claude-code-adapter"
+  }
+}

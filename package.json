@@ -12,8 +12,9 @@
     "lint": "bun run --filter '*' lint",
     "lint:fix": "biome check --write --unsafe .",
     "typecheck": "bun run --filter '*' typecheck",
-    "ci": "bun run setup-stubs && bun run lint && bun run typecheck && bun test && bun run build && bun run pack:pi",
+    "ci": "bun run setup-stubs && bun run lint && bun run typecheck && bun test && bun run build && bun run pack:pi && bun run pack:mcp",
     "pack:pi": "bun run --cwd packages/pi-adapter build && npm pack --workspace @guyghost/swarm-dao-pi-adapter --dry-run",
+    "pack:mcp": "bun run --cwd packages/mcp-server build && npm pack --workspace @guyghost/swarm-dao-mcp --dry-run",
     "prepare": "husky && bun run setup-stubs && bun run build",
     "setup-stubs": "bash scripts/setup-stubs.sh",
     "changeset": "changeset",
@@ -38,7 +39,10 @@
     "swarm",
     "agents",
     "pi",
-    "opencode"
+    "opencode",
+    "mcp",
+    "cursor",
+    "cline"
   ],
   "author": "guyghost",
   "license": "MIT",

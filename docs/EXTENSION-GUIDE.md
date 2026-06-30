@@ -2,6 +2,38 @@
 
 > How to add a new host (coding agent) to Swarm DAO.
 
+## MCP-first (recommended)
+
+For hosts that support MCP (Cursor, Cline, Claude Code, Continue, Windsurf), use the existing [`@guyghost/swarm-dao-mcp`](../packages/mcp-server) server — no new adapter code required. Add a config snippet pointing at `bunx @guyghost/swarm-dao-mcp` with `DAO_ROOT` set to the project directory.
+
+See [USAGE.md](./USAGE.md#installation-via-mcp-cursor-cline-claude-code-continue) for per-host setup.
+
+## Shared tool handlers
+
+Host-specific adapters should delegate to shared handlers in `@guyghost/swarm-dao-core/host-tools`:
+
+```typescript
+import {
+  handleDaoSetup,
+  handleDaoPropose,
+  type DaoToolContext,
+} from "@guyghost/swarm-dao-core";
+
+const ctx: DaoToolContext = {
+  adapter: myHostAdapter,
+  workDir: process.cwd(),
+  deliberationMode: "manual", // or "auto" if spawnAgent works
+  controlToolName: "dao_control",
+};
+
+await handleDaoSetup(ctx);
+await handleDaoPropose({ title, type, description });
+```
+
+## Native adapter (when MCP is not enough)
+
+Build a native adapter when the host needs automatic agent spawning (like Pi) or deep lifecycle hooks (like Claude Code plugins).
+
 ## Prerequisites
 
 - Understand the 4-layer architecture: Governance → Intelligence → Control → Delivery
@@ -124,5 +156,7 @@ bun test
 ## Examples
 
 See existing adapters:
+- `packages/mcp-server/src/server.ts` — MCP (universal)
 - `packages/pi-adapter/src/index.ts` — Pi Extension
 - `packages/opencode-adapter/src/index.ts` — OpenCode Plugin
+- `packages/claude-code-adapter/` — Claude Code plugin (MCP + hooks)

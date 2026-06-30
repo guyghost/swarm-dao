@@ -14,6 +14,8 @@ export * from "./delivery/index.js";
 export * from "./governance/index.js";
 // Health Score
 export * from "./health-score.js";
+// Host tool handlers (shared across adapters)
+export * from "./host-tools/index.js";
 // Integrations
 export * from "./integrations/index.js";
 // Intelligence (L2)

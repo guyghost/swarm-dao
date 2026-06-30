@@ -87,6 +87,9 @@ const EXPECTED_TOOLS = [
   "dao_rollback",
   "dao_roundtable",
   "dao_update_proposal",
+  "dao_config_github",
+  "dao_github_create_branch",
+  "dao_github_open_pr",
 ];
 
 const DAO_ROOT = path.join(process.cwd(), ".dao");

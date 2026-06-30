@@ -36,6 +36,10 @@
     "./persistence": {
       "types": "./dist/persistence.d.ts",
       "import": "./dist/persistence.js"
+    },
+    "./host-tools": {
+      "types": "./dist/host-tools/index.d.ts",
+      "import": "./dist/host-tools/index.js"
     }
   },
   "scripts": {

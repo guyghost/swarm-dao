@@ -44,7 +44,7 @@ Inside Pi:
 ┌─────────────────────────────────────────────────────────────┐
 │  Hosts                                                      │
 │  ┌─────────┐  ┌─────────────┐  ┌──────────┐  ┌──────────┐  │
-│  │   Pi    │  │  OpenCode   │  │   CLI    │  │ Future…  │  │
+│  │   Pi    │  │  OpenCode   │  │   CLI    │  │ MCP hosts│  │
 │  └────┬────┘  └──────┬──────┘  └────┬─────┘  └────┬─────┘  │
 │       │              │              │             │         │
 │  ┌────┴──────────────┴──────────────┴─────────────┴─────┐   │
@@ -73,6 +73,7 @@ Inside Pi:
 | `@guyghost/swarm-dao-core` | Pure business logic (~3000 lines) |
 | `@guyghost/swarm-dao-pi-adapter` | Bridge to Pi coding agent |
 | `@guyghost/swarm-dao-opencode-adapter` | Bridge to OpenCode |
+| `@guyghost/swarm-dao-mcp` | Universal MCP server (Cursor, Cline, Claude Code, Continue) |
 | `@guyghost/swarm-dao-cli` | Standalone CLI (`swarm-dao`) |
 
 ## 4-Layer Governance
@@ -177,6 +178,26 @@ The Pi extension is auto-discovered from `.pi/extensions/` or `~/.pi/agent/exten
 # View audit
 > dao_audit proposalId=1
 ```
+
+## MCP Usage (Cursor, Cline, Claude Code, Continue)
+
+Add to `.cursor/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "swarm-dao": {
+      "command": "bunx",
+      "args": ["@guyghost/swarm-dao-mcp"],
+      "env": { "DAO_ROOT": "${workspaceFolder}" }
+    }
+  }
+}
+```
+
+Workflow: `dao_setup` → `dao_propose` → `dao_deliberate` → spawn sub-agents → `dao_record_outputs` → `dao_control` → `dao_execute`.
+
+See [docs/USAGE.md](docs/USAGE.md) for Cline, Claude Code, and Continue configs.
 
 ## OpenCode Usage
 
