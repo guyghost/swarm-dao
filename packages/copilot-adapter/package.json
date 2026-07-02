@@ -1,6 +1,6 @@
 {
   "name": "@guyghost/swarm-dao-copilot-adapter",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Swarm DAO governance adapter for GitHub Copilot — MCP server, native config, and custom instructions",
   "type": "module",
   "main": "./dist/index.js",
@@ -29,8 +29,8 @@
     "prepublishOnly": "bun run build"
   },
   "dependencies": {
-    "@guyghost/swarm-dao-core": "^0.2.0",
-    "@guyghost/swarm-dao-mcp": "^0.1.0"
+    "@guyghost/swarm-dao-core": "^0.3.0",
+    "@guyghost/swarm-dao-mcp": "^0.2.0"
   },
   "devDependencies": {
     "@types/bun": "latest"
