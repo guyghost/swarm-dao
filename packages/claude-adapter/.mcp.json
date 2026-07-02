@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "swarm-dao": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@guyghost/swarm-dao-claude-adapter"],
+      "env": {
+        "DAO_ROOT": "."
+      }
+    }
+  }
+}

@@ -1,0 +1,9 @@
+# Swarm DAO — Codex MCP server config
+#
+# Add this block to your Codex CLI config (~/.codex/config.toml or the
+# project-local codex config) to register the Swarm DAO MCP server.
+
+[mcp_servers.swarm_dao]
+command = "npx"
+args = ["-y", "@guyghost/swarm-dao-codex-adapter"]
+env = { DAO_ROOT = "." }

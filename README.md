@@ -70,7 +70,11 @@ Inside Pi:
 
 | Package | Description |
 |---------|-------------|
-| `@guyghost/swarm-dao-core` | Pure business logic (~3000 lines) |
+| `@guyghost/swarm-dao-core` | Pure business logic + shared `host-tools` handlers |
+| `@guyghost/swarm-dao-mcp` | Swarm DAO as a stdio MCP server (23 tools) |
+| `@guyghost/swarm-dao-copilot-adapter` | GitHub Copilot plugin (MCP + instructions) |
+| `@guyghost/swarm-dao-claude-adapter` | Claude Code plugin (MCP + slash commands) |
+| `@guyghost/swarm-dao-codex-adapter` | OpenAI Codex plugin (MCP + AGENTS.md) |
 | `@guyghost/swarm-dao-pi-adapter` | Bridge to Pi coding agent |
 | `@guyghost/swarm-dao-opencode-adapter` | Bridge to OpenCode |
 | `@guyghost/swarm-dao-cli` | Standalone CLI (`swarm-dao`) |
