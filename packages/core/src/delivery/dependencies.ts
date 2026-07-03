@@ -7,12 +7,11 @@ import type { Proposal } from "../types/index.js";
 export type DependencyResolution = { order: number[]; error?: undefined } | { order?: undefined; error: string };
 
 /**
- * Resolve the execution order for a proposal and all its transitive dependencies.
- * Returns a topologically sorted list of proposal IDs (leaves first, target last).
- * Errors on cycles or missing dependency references.
+ * Core DFS that resolves the execution order for a proposal and all its transitive
+ * dependencies given a pre-built proposal map. Shared by both public functions so the
+ * proposal map is built exactly once per call.
  */
-export function resolveDependencyOrder(targetId: number, proposals: Proposal[]): DependencyResolution {
-  const proposalMap = new Map<number, Proposal>(proposals.map((p) => [p.id, p]));
+function resolveOrderWithMap(targetId: number, proposalMap: Map<number, Proposal>): DependencyResolution {
   const order: number[] = [];
   const visited = new Set<number>();
   const visiting = new Set<number>(); // in-progress nodes for cycle detection
@@ -45,14 +44,24 @@ export function resolveDependencyOrder(targetId: number, proposals: Proposal[]):
 }
 
 /**
+ * Resolve the execution order for a proposal and all its transitive dependencies.
+ * Returns a topologically sorted list of proposal IDs (leaves first, target last).
+ * Errors on cycles or missing dependency references.
+ */
+export function resolveDependencyOrder(targetId: number, proposals: Proposal[]): DependencyResolution {
+  const proposalMap = new Map<number, Proposal>(proposals.map((p) => [p.id, p]));
+  return resolveOrderWithMap(targetId, proposalMap);
+}
+
+/**
  * Return only the unexecuted dependencies (excluding the target itself)
  * in the order they must be shipped.
  */
 export function getUnexecutedDependencies(targetId: number, proposals: Proposal[]): DependencyResolution {
-  const resolution = resolveDependencyOrder(targetId, proposals);
+  const proposalMap = new Map<number, Proposal>(proposals.map((p) => [p.id, p]));
+  const resolution = resolveOrderWithMap(targetId, proposalMap);
   if (resolution.error) return resolution;
 
-  const proposalMap = new Map<number, Proposal>(proposals.map((p) => [p.id, p]));
   const allOrder = resolution.order ?? [];
   const unexecuted = allOrder
     .filter((id) => id !== targetId)
