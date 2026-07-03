@@ -259,10 +259,11 @@ Auto-generated for every approved proposal:
 ## Persistence
 
 DAO state stored in `.dao/`:
-- `state.json` — monolithic state snapshot
-- `proposals/NNN.json` — per-proposal sidecar files
+- `state.json` — monolithic state snapshot (single source of truth, including all proposals)
 - `decisions/NNN.json` — compact decision summaries
 - `config.json` — per-project configuration
+
+Previously each proposal was also mirrored in `.dao/proposals/NNN.json` "sidecar" files; that redundant copy has been removed. On the first load after upgrading, any existing sidecars are imported into `state.json` and the `proposals/` directory is removed.
 
 ## Adding a New Host
 

@@ -30,9 +30,14 @@ import { redactSensitiveFields, SENSITIVE_KEYS } from "./utils/security.js";
 let state: DAOState | null = null;
 
 const STATE_FILE = "state.json";
-const PROPOSALS_DIR = "proposals";
 const DECISIONS_DIR = "decisions";
 const CONFIG_FILE = "config.json";
+
+/**
+ * Name of the now-removed per-proposal sidecar directory. Kept only for the
+ * one-time import in `importLegacyProposalSidecars`; never written.
+ */
+const LEGACY_PROPOSALS_DIR = "proposals";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -104,10 +109,10 @@ async function writeJsonFile(filePath: string, value: unknown): Promise<void> {
  *
  * `saveState()` is invoked on essentially every mutation (add a vote, store an
  * agent output, record audit, store a score/synthesis/plan, ...). Each call
- * rewrites `state.json`, EVERY proposal sidecar, and EVERY decision file. On
- * the deliberation hot path this happens ~6 times back-to-back, and only a tiny
- * fraction of that data actually changes between calls — so most of those
- * writes re-serialize byte-identical content.
+ * rewrites `state.json` and every decision file. On the deliberation hot path
+ * this happens ~6 times back-to-back, and only a tiny fraction of that data
+ * actually changes between calls — so most of those writes re-serialize
+ * byte-identical content.
  *
  * `writeJsonFileIfChanged` skips the disk write when the serialized content
  * matches the last write for that path. This is purely an I/O optimization:
@@ -155,20 +160,12 @@ export function getDaoRoot(cwd: string): string {
   return path.join(cwd, ".dao");
 }
 
-export function getProposalsDir(daoRoot: string): string {
-  return path.join(daoRoot, PROPOSALS_DIR);
-}
-
 export function getDecisionsDir(daoRoot: string): string {
   return path.join(daoRoot, DECISIONS_DIR);
 }
 
 export function padId(id: number): string {
   return id.toString().padStart(3, "0");
-}
-
-export function getProposalPath(daoRoot: string, id: number): string {
-  return path.join(getProposalsDir(daoRoot), `${padId(id)}.json`);
 }
 
 function resolveSafeLegacyDirectory(cwd: string, directory: string): string | null {
@@ -229,28 +226,6 @@ async function copyLegacyFiles(legacyRoot: string, newRoot: string): Promise<voi
   );
 }
 
-async function migrateProposalIdPaddings(newRoot: string): Promise<void> {
-  try {
-    const proposalsDir = getProposalsDir(newRoot);
-    const files = await fs.readdir(proposalsDir);
-    await Promise.all(
-      files.map(async (file) => {
-        if (!file.endsWith(".json")) return;
-        const match = file.match(/^(\d+)\.json$/) ?? null;
-        if (!match) return;
-        const id = parseInt(match[1] ?? "0", 10);
-        const paddedName = `${padId(id)}.json`;
-        if (file !== paddedName) {
-          await fs.rename(path.join(proposalsDir, file), path.join(proposalsDir, paddedName));
-          logger.info(`  ✓ Renamed ${file} → ${paddedName}`);
-        }
-      }),
-    );
-  } catch {
-    /* no proposals yet */
-  }
-}
-
 export async function migrateFromLegacy(cwd: string, legacyDirectories: string[] = []): Promise<boolean> {
   const newRoot = getDaoRoot(cwd);
 
@@ -280,8 +255,6 @@ export async function migrateFromLegacy(cwd: string, legacyDirectories: string[]
   } catch {
     /* no old state */
   }
-
-  await migrateProposalIdPaddings(newRoot);
 
   logger.info("  ✓ Migration complete");
   try {
@@ -347,22 +320,14 @@ export async function loadState(cwd: string, options?: { legacyDirectories?: str
   if (!isPositiveInteger(loaded.nextAuditId)) loaded.nextAuditId = 1;
   if (!loaded.config) loaded.config = createInitialState(daoRoot).config;
 
-  // Reconcile with sidecars
-  try {
-    const persistedProposals = loaded.proposals.filter((proposal): proposal is Proposal =>
-      isPositiveInteger((proposal as { id?: unknown })?.id),
-    );
-    loaded.proposals = persistedProposals;
-    const sidecars = await loadProposalsFromDisk(daoRoot);
-    if (sidecars.length) {
-      const byId = new Map<number, Proposal>();
-      for (const p of persistedProposals) byId.set(p.id, p);
-      for (const sc of sidecars) byId.set(sc.id, sc);
-      loaded.proposals = Array.from(byId.values()).sort((a, b) => a.id - b.id);
-    }
-  } catch (error) {
-    logger.warn(`⚠ Failed to reconcile proposal sidecars: ${getErrorMessage(error)}`);
-  }
+  // Drop any entries without a positive-integer id (defensive shape check).
+  loaded.proposals = loaded.proposals.filter((proposal): proposal is Proposal =>
+    isPositiveInteger((proposal as { id?: unknown })?.id),
+  );
+  // One-time import of any legacy per-proposal sidecars, then remove the now-
+  // dead proposals/ directory. After this, state.json is the single source of
+  // truth for proposals.
+  await importLegacyProposalSidecars(daoRoot, loaded);
 
   const highestProposalId = loaded.proposals.reduce((max, proposal) => Math.max(max, proposal.id), 0);
   if (loaded.nextProposalId <= highestProposalId) loaded.nextProposalId = highestProposalId + 1;
@@ -379,40 +344,46 @@ export async function loadState(cwd: string, options?: { legacyDirectories?: str
   return state;
 }
 
-export async function loadProposalsFromDisk(daoRoot: string): Promise<Proposal[]> {
-  const dir = getProposalsDir(daoRoot);
+/**
+ * One-time migration: import any legacy `.dao/proposals/NNN.json` sidecars that
+ * are missing from state.json, then remove the now-dead proposals/ directory.
+ *
+ * Sidecars were a redundant per-proposal copy of data already held in state.json
+ * and have been removed. After this runs (a no-op when no proposals/ dir exists),
+ * no sidecar code path remains and state.json is the single source of truth.
+ */
+async function importLegacyProposalSidecars(daoRoot: string, loaded: DAOState): Promise<void> {
+  const dir = path.join(daoRoot, LEGACY_PROPOSALS_DIR);
   let entries: string[];
   try {
     entries = await fs.readdir(dir);
   } catch {
-    return [];
+    return; // no legacy sidecar directory
   }
-  const proposals = await Promise.all(
-    entries
-      .filter((file) => file.endsWith(".json"))
-      .map(async (file) => {
-        const filePath = path.join(dir, file);
-        try {
-          const proposal = await readJsonFile<Proposal>(filePath);
-          return isPositiveInteger(proposal?.id) ? proposal : null;
-        } catch (error) {
-          logger.warn(`⚠ Skipping malformed proposal sidecar ${filePath}: ${getErrorMessage(error)}`);
-          return null;
-        }
-      }),
-  );
-  return proposals.filter((proposal): proposal is Proposal => proposal !== null);
-}
-
-export async function saveProposal(proposalId: number): Promise<string | null> {
-  if (!state) return null;
-  const proposal = state.proposals.find((p) => p.id === proposalId);
-  if (!proposal) return null;
-  const dir = getProposalsDir(state.daoRoot);
-  await fs.mkdir(dir, { recursive: true });
-  const filePath = getProposalPath(state.daoRoot, proposalId);
-  await writeJsonFileIfChanged(filePath, proposal);
-  return filePath;
+  const existingIds = new Set(loaded.proposals.map((p) => p.id));
+  let imported = 0;
+  for (const file of entries) {
+    if (!file.endsWith(".json")) continue;
+    const filePath = path.join(dir, file);
+    try {
+      const proposal = await readJsonFile<Proposal>(filePath);
+      if (isPositiveInteger(proposal?.id) && !existingIds.has(proposal.id)) {
+        loaded.proposals.push(proposal);
+        imported++;
+      }
+    } catch (error) {
+      logger.warn(`⚠ Skipping malformed legacy proposal sidecar ${filePath}: ${getErrorMessage(error)}`);
+    }
+  }
+  if (imported > 0) {
+    logger.info(`🔄 Imported ${imported} proposal(s) from legacy sidecars into state.json`);
+    loaded.proposals.sort((a, b) => a.id - b.id);
+  }
+  try {
+    await fs.rm(dir, { recursive: true, force: true });
+  } catch (error) {
+    logger.warn(`⚠ Could not remove legacy proposals directory: ${getErrorMessage(error)}`);
+  }
 }
 
 export async function saveState(): Promise<void> {
@@ -425,36 +396,7 @@ export async function saveState(): Promise<void> {
   await fs.mkdir(daoRoot, { recursive: true });
   await writeJsonFileIfChanged(statePath, state);
 
-  // Sidecars
-  const dir = getProposalsDir(daoRoot);
-  await fs.mkdir(dir, { recursive: true });
-  await Promise.all(
-    state.proposals.map((proposal) => writeJsonFileIfChanged(getProposalPath(daoRoot, proposal.id), proposal)),
-  );
-
   await saveDecisions();
-
-  // Cleanup orphans
-  try {
-    const entries = await fs.readdir(dir);
-    const currentIds = new Set(state.proposals.map((p) => `${padId(p.id)}.json`));
-    const orphans = entries.filter((e) => e.endsWith(".json") && !currentIds.has(e));
-    await Promise.all(
-      orphans.map(async (orphan) => {
-        const orphanPath = path.join(dir, orphan);
-        try {
-          await fs.unlink(orphanPath);
-          writeCache.delete(orphanPath);
-        } catch (error) {
-          if (hasErrorCode(error, "ENOENT")) return;
-          logger.warn(`⚠ Failed to remove orphan proposal sidecar ${orphanPath}: ${getErrorMessage(error)}`);
-        }
-      }),
-    );
-  } catch (error) {
-    if (hasErrorCode(error, "ENOENT")) return;
-    throw error;
-  }
 }
 
 export async function saveDecisions(): Promise<void> {
