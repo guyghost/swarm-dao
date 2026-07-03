@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "bun:test";
+import { beforeEach, describe, expect, it, spyOn } from "bun:test";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import {
@@ -209,6 +209,54 @@ describe("persistence", () => {
       const statePath = path.join(daoRoot, "state.json");
       const content = await fs.readFile(statePath, "utf-8");
       expect(content.endsWith("\n")).toBe(true);
+    } finally {
+      setState(null);
+      await fs.rm(cwd, { recursive: true, force: true }).catch(() => {});
+    }
+  });
+
+  /**
+   * Optimization guard: saveState() must not rewrite proposal sidecars or
+   * decision files whose serialized content has not changed since the last save.
+   *
+   * GIVEN a DAO with resolved proposals (so sidecars + decision files exist)
+   * WHEN saveState() is called without any prior mutation
+   * THEN zero files are written (every JSON file is byte-identical to its cache)
+   *   AND a subsequent mutation that only touches auditLog (state.json) writes
+   *   exactly one file, not one-per-sidecar + one-per-decision.
+   */
+  it("saveState skips rewriting unchanged sidecars and decisions", async () => {
+    const cwd = `/tmp/dao-writecache-test-${Date.now()}`;
+    const daoRoot = getDaoRoot(cwd);
+
+    try {
+      await initStorage(cwd);
+      const state = createInitialState(cwd);
+      state.initialized = true;
+      state.daoRoot = daoRoot;
+      setState(state);
+
+      // Seed proposals and resolve one so sidecars + decision files exist and
+      // the write cache is populated with their current on-disk content.
+      const p1 = await createProposal("P1", "product-feature", "d", "user");
+      await createProposal("P2", "product-feature", "d", "user");
+      await updateProposalStatus(p1.id, "executed");
+
+      const writeSpy = spyOn(fs, "writeFile");
+
+      // 1) No-op save: nothing changed since the previous save -> no writes.
+      writeSpy.mockClear();
+      await saveState();
+      expect(writeSpy.mock.calls.length).toBe(0);
+
+      // 2) Mutating save via recordAudit: only auditLog changes, which lives in
+      //    state.json. Without dedup this rewrites state.json + every sidecar +
+      //    every decision file; with dedup it writes just state.json.
+      writeSpy.mockClear();
+      await recordAudit(p1.id, "governance", "perf_probe", "user", "noop");
+      expect(writeSpy.mock.calls.length).toBe(1);
+
+      writeSpy.mockRestore();
     } finally {
       setState(null);
       await fs.rm(cwd, { recursive: true, force: true }).catch(() => {});

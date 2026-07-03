@@ -99,6 +99,40 @@ async function writeJsonFile(filePath: string, value: unknown): Promise<void> {
   await fs.writeFile(filePath, formatJson(value), "utf-8");
 }
 
+/**
+ * In-memory cache of the last serialized content written per file path.
+ *
+ * `saveState()` is invoked on essentially every mutation (add a vote, store an
+ * agent output, record audit, store a score/synthesis/plan, ...). Each call
+ * rewrites `state.json`, EVERY proposal sidecar, and EVERY decision file. On
+ * the deliberation hot path this happens ~6 times back-to-back, and only a tiny
+ * fraction of that data actually changes between calls — so most of those
+ * writes re-serialize byte-identical content.
+ *
+ * `writeJsonFileIfChanged` skips the disk write when the serialized content
+ * matches the last write for that path. This is purely an I/O optimization:
+ * the bytes that do reach disk are identical to before.
+ *
+ * Correctness: the cache is cleared whenever the in-memory state is swapped
+ * (`setState`) or reloaded from disk (`loadState`), so the first save after a
+ * swap always performs a full, correct write. The only writers of these files
+ * are the save functions themselves, so a cached "unchanged" decision always
+ * reflects what is actually on disk within a session.
+ */
+const writeCache = new Map<string, string>();
+
+function resetWriteCache(): void {
+  writeCache.clear();
+}
+
+async function writeJsonFileIfChanged(filePath: string, value: unknown): Promise<boolean> {
+  const serialized = formatJson(value);
+  if (writeCache.get(filePath) === serialized) return false;
+  await fs.writeFile(filePath, serialized, "utf-8");
+  writeCache.set(filePath, serialized);
+  return true;
+}
+
 function normalizeStorageSettings(value: unknown, daoRoot: string): StorageSettings {
   const settings = isRecord(value) ? value : {};
   const mode = settings.mode;
@@ -271,6 +305,9 @@ export function getState(): DAOState {
 
 export function setState(newState: DAOState | null): void {
   state = newState;
+  // The in-memory state identity changed (or was reset); the write cache no
+  // longer reflects what is on disk, so force the next save to be a full write.
+  resetWriteCache();
 }
 
 export function getOrCreateState(cwd: string): DAOState {
@@ -336,6 +373,9 @@ export async function loadState(cwd: string, options?: { legacyDirectories?: str
   if (loaded.nextAuditId <= highestAuditId) loaded.nextAuditId = highestAuditId + 1;
 
   state = loaded;
+  // Disk is now the source of truth for the freshly loaded state; reset the
+  // cache so the first subsequent save reflects the real on-disk content.
+  resetWriteCache();
   return state;
 }
 
@@ -371,7 +411,7 @@ export async function saveProposal(proposalId: number): Promise<string | null> {
   const dir = getProposalsDir(state.daoRoot);
   await fs.mkdir(dir, { recursive: true });
   const filePath = getProposalPath(state.daoRoot, proposalId);
-  await writeJsonFile(filePath, proposal);
+  await writeJsonFileIfChanged(filePath, proposal);
   return filePath;
 }
 
@@ -383,12 +423,14 @@ export async function saveState(): Promise<void> {
   const statePath = path.join(daoRoot, STATE_FILE);
 
   await fs.mkdir(daoRoot, { recursive: true });
-  await writeJsonFile(statePath, state);
+  await writeJsonFileIfChanged(statePath, state);
 
   // Sidecars
   const dir = getProposalsDir(daoRoot);
   await fs.mkdir(dir, { recursive: true });
-  await Promise.all(state.proposals.map((proposal) => writeJsonFile(getProposalPath(daoRoot, proposal.id), proposal)));
+  await Promise.all(
+    state.proposals.map((proposal) => writeJsonFileIfChanged(getProposalPath(daoRoot, proposal.id), proposal)),
+  );
 
   await saveDecisions();
 
@@ -402,6 +444,7 @@ export async function saveState(): Promise<void> {
         const orphanPath = path.join(dir, orphan);
         try {
           await fs.unlink(orphanPath);
+          writeCache.delete(orphanPath);
         } catch (error) {
           if (hasErrorCode(error, "ENOENT")) return;
           logger.warn(`⚠ Failed to remove orphan proposal sidecar ${orphanPath}: ${getErrorMessage(error)}`);
@@ -434,9 +477,11 @@ export async function saveDecisions(): Promise<void> {
     )
     .sort((a, b) => a.id - b.id);
 
-  await writeJsonFile(path.join(decisionsDir, "index.json"), decisions);
+  await writeJsonFileIfChanged(path.join(decisionsDir, "index.json"), decisions);
   await Promise.all(
-    decisions.map((decision) => writeJsonFile(path.join(decisionsDir, `${padId(decision.id)}.json`), decision)),
+    decisions.map((decision) =>
+      writeJsonFileIfChanged(path.join(decisionsDir, `${padId(decision.id)}.json`), decision),
+    ),
   );
 }
 
