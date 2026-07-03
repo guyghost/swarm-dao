@@ -109,7 +109,6 @@ export async function handleDaoPropose(args: DaoProposeArgs): Promise<string> {
   proposal.riskZone = classifyRiskZone(proposal);
   await saveState();
   await recordAudit(proposal.id, "governance", "proposal_created", "user", `Proposal "${args.title}" created`);
-  await saveState();
   const typeLabel = PROPOSAL_TYPE_LABELS[args.type] ?? args.type;
   return `# 📋 Proposal Created — #${proposal.id}\n\n**Title:** ${args.title}\n**Type:** ${typeLabel}\n**Zone:** ${proposal.riskZone}\n\nRun \`dao_deliberate proposalId=${proposal.id}\``;
 }
@@ -149,16 +148,13 @@ export async function handleDaoDeliberate(ctx: DaoToolContext, proposalId: numbe
   );
   const votes = [];
   const persistedOutputs = [];
+  const agentById = new Map(agents.map((a) => [a.id, a]));
   for (const output of outputs) {
     if (output.content) {
-      const vote = parseVoteFromOutput(
-        output.agentId,
-        output.agentName,
-        agents.find((a) => a.id === output.agentId)?.weight ?? 1,
-        output.content,
-      );
+      const weight = agentById.get(output.agentId)?.weight ?? 1;
+      const vote = parseVoteFromOutput(output.agentId, output.agentName, weight, output.content);
       if (vote) {
-        vote.weight = agents.find((a) => a.id === output.agentId)?.weight ?? 1;
+        vote.weight = weight;
         votes.push(vote);
       }
     }
@@ -296,7 +292,6 @@ export async function handleDaoExecute(proposalId: number): Promise<string> {
   const result = await executeProposal(proposal);
   await saveState();
   await recordAudit(proposal.id, "delivery", "proposal_executed", "user", `Executed #${proposal.id}`);
-  await saveState();
   return result.result;
 }
 
@@ -468,13 +463,15 @@ export async function handleDaoRoundtable(ctx: DaoToolContext): Promise<string> 
       proposal.riskZone = classifyRiskZone(proposal);
       suggestion.proposalId = proposal.id;
       proposalIds.set(suggestion.agentId, proposal.id);
-      await recordAudit(
-        proposal.id,
-        "intelligence",
-        "roundtable_proposal_created",
-        suggestion.agentId,
-        "Auto-created from round table",
-      );
+      state.auditLog.push({
+        id: state.nextAuditId++,
+        timestamp: new Date().toISOString(),
+        proposalId: proposal.id,
+        layer: "intelligence",
+        action: "roundtable_proposal_created",
+        actor: suggestion.agentId,
+        details: "Auto-created from round table",
+      });
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -596,7 +593,6 @@ export async function handleDaoProposeAmendment(args: DaoAmendmentArgs): Promise
   proposal.riskZone = classifyRiskZone(proposal);
   await saveState();
   await recordAudit(proposal.id, "governance", "amendment_proposed", "user", `Amendment: ${payload.type}`);
-  await saveState();
   return `# 📜 Amendment Proposed — #${proposal.id}\n\nType: ${payload.type}\n\nRun \`dao_deliberate proposalId=${proposal.id}\``;
 }
 

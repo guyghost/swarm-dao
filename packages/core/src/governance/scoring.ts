@@ -8,20 +8,27 @@ import { RISK_ZONE_LABELS, SCORING_WEIGHTS } from "../types/index.js";
 // ── Composite Score ──────────────────────────────────────────
 
 const _SCORE_PATTERN = /##\s*Composite Score Inputs \(0-10\)\s*\n([\s\S]*?)(?=\n##|$)/i;
-const AXIS_PATTERNS: Record<keyof AxisScore, RegExp> = {
-  userImpact: /userImpact[:\s]+(\d+(?:\.\d+)?)/i,
-  businessImpact: /businessImpact[:\s]+(\d+(?:\.\d+)?)/i,
-  effort: /effort[:\s]+(\d+(?:\.\d+)?)/i,
-  securityRisk: /securityRisk[:\s]+(\d+(?:\.\d+)?)/i,
-  confidence: /confidence[:\s]+(\d+(?:\.\d+)?)/i,
+// Single combined alternation scanned once via matchAll, replacing the former
+// per-axis loop (5 full regex scans of the content). The separator `[:\s]+` is
+// preserved verbatim so `key: n`, `key:n`, and `key n` keep matching exactly.
+const SCORE_TOKEN_RE = /(userImpact|businessImpact|effort|securityRisk|confidence)[:\s]+(\d+(?:\.\d+)?)/gi;
+const AXIS_KEY_BY_LOWER: Readonly<Record<string, keyof AxisScore>> = {
+  userimpact: "userImpact",
+  businessimpact: "businessImpact",
+  effort: "effort",
+  securityrisk: "securityRisk",
+  confidence: "confidence",
 };
 
 export function parseScoresFromOutput(content: string): Partial<AxisScore> {
   const scores: Partial<AxisScore> = {};
-  for (const [axis, pattern] of Object.entries(AXIS_PATTERNS) as [keyof AxisScore, RegExp][]) {
-    const match = content?.match(pattern);
-    if (match) {
-      scores[axis] = Math.min(10, Math.max(0, parseFloat(match[1] ?? "0")));
+  if (!content) return scores;
+  for (const match of content.matchAll(SCORE_TOKEN_RE)) {
+    const axis = AXIS_KEY_BY_LOWER[(match[1] ?? "").toLowerCase()];
+    // First occurrence wins, mirroring the previous non-global per-axis `.match`,
+    // which returned only the first match per axis.
+    if (axis !== undefined && !(axis in scores)) {
+      scores[axis] = Math.min(10, Math.max(0, parseFloat(match[2] ?? "0")));
     }
   }
   return scores;
@@ -50,15 +57,29 @@ export function calculateCompositeScore(outputs: AgentOutput[]): CompositeScore 
     };
   }
 
-  const avg = (key: keyof AxisScore): number =>
-    validScores.reduce((sum, s) => sum + (s[key] || 0), 0) / validScores.length;
+  // Single reduce accumulating per-axis sums, then one division each —
+  // replaces the former five separate `reduce` passes over validScores.
+  // Addition order is identical, so floating-point results are bit-for-bit
+  // unchanged.
+  const sums = validScores.reduce<AxisScore>(
+    (acc, s) => {
+      acc.userImpact += s.userImpact || 0;
+      acc.businessImpact += s.businessImpact || 0;
+      acc.effort += s.effort || 0;
+      acc.securityRisk += s.securityRisk || 0;
+      acc.confidence += s.confidence || 0;
+      return acc;
+    },
+    { userImpact: 0, businessImpact: 0, effort: 0, securityRisk: 0, confidence: 0 },
+  );
+  const n = validScores.length;
 
   const axes: AxisScore = {
-    userImpact: avg("userImpact"),
-    businessImpact: avg("businessImpact"),
-    effort: avg("effort"),
-    securityRisk: avg("securityRisk"),
-    confidence: avg("confidence"),
+    userImpact: sums.userImpact / n,
+    businessImpact: sums.businessImpact / n,
+    effort: sums.effort / n,
+    securityRisk: sums.securityRisk / n,
+    confidence: sums.confidence / n,
   };
 
   // Invert effort and securityRisk (lower is better)
