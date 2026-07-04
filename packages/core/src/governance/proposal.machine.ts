@@ -1,448 +1,223 @@
-import { assign, setup } from "xstate";
-import type { PipelineStage, Proposal, ProposalStatus, RiskZone } from "../types/index.js";
+// ============================================================
+// Swarm DAO Core — Proposal Lifecycle State Machine
+// ------------------------------------------------------------
+// Single source of truth for proposal status transitions.
+//
+// Discipline: "Le modèle décide." The LLM (council/votes) produces
+// signals (a TallyResult, a ControlCheckResult). Those signals are
+// carried as event payloads and evaluated by guards. No call site
+// chooses a target status — it only emits the event that matches
+// what happened in the world. The machine owns every edge.
+//
+// The 7 machine states map 1:1 to `ProposalStatus`. There is no
+// hidden `executing`/`postmortem` pipeline: the runtime is
+// synchronous (deliberation is one tool call, execution is one
+// tool call), so those intermediate states had no observer and
+// were removed during distill.
+// ============================================================
 
-// ============================================================
-// Machine types
-// ============================================================
+import { assign, setup } from "xstate";
+import type { ControlCheckResult, Proposal, ProposalStatus, TallyResult } from "../types/index.js";
+
+// ── Context & Events ─────────────────────────────────────────
 
 export interface ProposalContext {
   proposal: Proposal;
-  stage: PipelineStage;
-  status: ProposalStatus;
-  riskZone?: RiskZone;
-  deliberationCount: number;
-  retryCount: number;
   errorMessage?: string;
   lastTransitionTime: string;
 }
 
 export interface ProposalMachineInput {
   proposal: Proposal;
-  stage?: PipelineStage;
-  status?: ProposalStatus;
-  riskZone?: RiskZone;
-  deliberationCount?: number;
-  retryCount?: number;
-  errorMessage?: string;
   lastTransitionTime?: string;
 }
 
 export type ProposalEvent =
-  | { type: "SUBMIT" }
-  | { type: "QUALIFY" }
-  | { type: "ANALYZE" }
-  | { type: "CRITIQUE" }
-  | { type: "SCORE" }
-  | { type: "SEND_TO_COUNCIL" }
-  | { type: "VOTE" }
-  | { type: "APPROVE" }
+  | { type: "DELIBERATE" }
+  | { type: "APPROVE"; tally: TallyResult }
   | { type: "REJECT" }
-  | { type: "REQUEST_SPEC" }
-  | { type: "REVIEW_SPEC" }
-  | { type: "APPROVE_SPEC" }
-  | { type: "EXECUTION_GATE_PASS" }
-  | { type: "EXECUTION_GATE_FAIL" }
-  | { type: "EXECUTE" }
-  | { type: "EXECUTION_SUCCESS" }
-  | { type: "EXECUTION_FAILED" }
-  | { type: "POSTMORTEM" }
-  | { type: "RETRY" }
+  | { type: "CONTROL_PASS"; result: ControlCheckResult }
+  | { type: "CONTROL_FAIL" }
+  | { type: "EXECUTE_SUCCESS" }
+  | { type: "FAIL" }
   | { type: "DISCARD" }
   | { type: "ERROR"; message: string };
 
-// ============================================================
-// XState Machine Definition
-// ============================================================
+// ── Terminal statuses ────────────────────────────────────────
 
-export const proposalMachine = setup({
+export const PROPOSAL_FINAL_STATUSES: ReadonlySet<ProposalStatus> = new Set(["executed", "failed", "rejected"]);
+
+export function isProposalFinal(status: ProposalStatus): boolean {
+  return PROPOSAL_FINAL_STATUSES.has(status);
+}
+
+// ── Machine ──────────────────────────────────────────────────
+//
+// Guards are the two real permission boundaries of the DAO:
+//   • tallyApproved  — the council's vote authorized approval.
+//   • gatesPassed    — quality control cleared the proposal for execution.
+//
+// Risk-zone / mandatory-dry-run is enforced upstream by the
+// `mandatory-dry-run` control gate (control/gates.ts), which makes
+// `ControlCheckResult.allGatesPassed` false for red-zone proposals
+// without a dry-run. Duplicating that check here would be unearned
+// complexity — the invariant already lives at the control boundary.
+
+const proposalSetup = setup({
   types: {
     context: {} as ProposalContext,
     input: {} as ProposalMachineInput,
     events: {} as ProposalEvent,
   },
-}).createMachine({
-  id: "proposalLifecycle",
-  initial: "draft",
-  context: ({ input }) =>
-    ({
-      proposal: input.proposal,
-      stage: input.stage ?? "intake",
-      status: input.status ?? "open",
-      riskZone: input.riskZone,
-      deliberationCount: input.deliberationCount ?? 0,
-      retryCount: input.retryCount ?? 0,
-      errorMessage: input.errorMessage,
-      lastTransitionTime: input.lastTransitionTime ?? new Date().toISOString(),
-    }) as ProposalContext,
-  on: {
-    DISCARD: {
-      target: ".rejected",
-      actions: assign({
-        status: "rejected",
-        lastTransitionTime: () => new Date().toISOString(),
-      }),
-    },
-    ERROR: {
-      target: ".executionError",
-      actions: assign({
-        status: "failed",
-        errorMessage: ({ event }) => event.message,
-        lastTransitionTime: () => new Date().toISOString(),
-      }),
-    },
-  },
-
-  states: {
-    // ───────────────────────────────────────────────────────
-    // INTAKE PHASE
-    // ───────────────────────────────────────────────────────
-    draft: {
-      on: {
-        SUBMIT: {
-          target: "intake",
-          actions: assign({
-            status: "open",
-            stage: "intake",
-            lastTransitionTime: () => new Date().toISOString(),
-          }),
-        },
-      },
-    },
-
-    intake: {
-      on: {
-        QUALIFY: {
-          target: "qualification",
-          actions: assign({
-            status: "open",
-            stage: "qualification",
-            lastTransitionTime: () => new Date().toISOString(),
-          }),
-        },
-        REJECT: {
-          target: "rejected",
-          actions: assign({
-            status: "rejected",
-            stage: "council",
-            lastTransitionTime: () => new Date().toISOString(),
-          }),
-        },
-      },
-    },
-
-    // ───────────────────────────────────────────────────────
-    // QUALIFICATION PHASE
-    // ───────────────────────────────────────────────────────
-    qualification: {
-      on: {
-        ANALYZE: {
-          target: "analysis",
-          actions: assign({
-            status: "open",
-            stage: "analysis",
-            lastTransitionTime: () => new Date().toISOString(),
-          }),
-        },
-        REJECT: {
-          target: "rejected",
-          actions: assign({
-            status: "rejected",
-            stage: "council",
-            lastTransitionTime: () => new Date().toISOString(),
-          }),
-        },
-      },
-    },
-
-    // ───────────────────────────────────────────────────────
-    // ANALYSIS PHASE
-    // ───────────────────────────────────────────────────────
-    analysis: {
-      on: {
-        CRITIQUE: {
-          target: "critique",
-          actions: assign({
-            status: "deliberating",
-            stage: "critique",
-            deliberationCount: ({ context }) => context.deliberationCount + 1,
-            lastTransitionTime: () => new Date().toISOString(),
-          }),
-        },
-        REJECT: {
-          target: "rejected",
-          actions: assign({
-            status: "rejected",
-            stage: "council",
-            lastTransitionTime: () => new Date().toISOString(),
-          }),
-        },
-      },
-    },
-
-    // ───────────────────────────────────────────────────────
-    // CRITIQUE PHASE
-    // ───────────────────────────────────────────────────────
-    critique: {
-      on: {
-        SCORE: {
-          target: "scoring",
-          actions: assign({
-            status: "deliberating",
-            stage: "scoring",
-            deliberationCount: ({ context }) => context.deliberationCount + 1,
-            lastTransitionTime: () => new Date().toISOString(),
-          }),
-        },
-        REJECT: {
-          target: "rejected",
-          actions: assign({
-            status: "rejected",
-            stage: "council",
-            lastTransitionTime: () => new Date().toISOString(),
-          }),
-        },
-      },
-    },
-
-    // ───────────────────────────────────────────────────────
-    // SCORING PHASE
-    // ───────────────────────────────────────────────────────
-    scoring: {
-      on: {
-        SEND_TO_COUNCIL: {
-          target: "council",
-          actions: assign({
-            status: "deliberating",
-            stage: "council",
-            deliberationCount: ({ context }) => context.deliberationCount + 1,
-            lastTransitionTime: () => new Date().toISOString(),
-          }),
-        },
-        REJECT: {
-          target: "rejected",
-          actions: assign({
-            status: "rejected",
-            stage: "council",
-            lastTransitionTime: () => new Date().toISOString(),
-          }),
-        },
-      },
-    },
-
-    // ───────────────────────────────────────────────────────
-    // COUNCIL PHASE
-    // ───────────────────────────────────────────────────────
-    council: {
-      on: {
-        VOTE: {
-          target: "voting",
-          actions: assign({
-            status: "deliberating",
-            stage: "vote",
-            lastTransitionTime: () => new Date().toISOString(),
-          }),
-        },
-        REJECT: {
-          target: "rejected",
-          actions: assign({
-            status: "rejected",
-            stage: "council",
-            lastTransitionTime: () => new Date().toISOString(),
-          }),
-        },
-      },
-    },
-
-    // ───────────────────────────────────────────────────────
-    // VOTING PHASE
-    // ───────────────────────────────────────────────────────
-    voting: {
-      on: {
-        APPROVE: {
-          target: "specDraft",
-          actions: assign({
-            status: "approved",
-            stage: "spec",
-            retryCount: 0,
-            lastTransitionTime: () => new Date().toISOString(),
-          }),
-        },
-        REJECT: {
-          target: "rejected",
-          actions: assign({
-            status: "rejected",
-            stage: "council",
-            lastTransitionTime: () => new Date().toISOString(),
-          }),
-        },
-      },
-    },
-
-    // ───────────────────────────────────────────────────────
-    // SPECIFICATION PHASE
-    // ───────────────────────────────────────────────────────
-    specDraft: {
-      on: {
-        REQUEST_SPEC: {
-          target: "specReview",
-          actions: assign({
-            status: "approved",
-            stage: "spec",
-            lastTransitionTime: () => new Date().toISOString(),
-          }),
-        },
-        REVIEW_SPEC: {
-          target: "specReview",
-          actions: assign({
-            status: "approved",
-            stage: "spec",
-            lastTransitionTime: () => new Date().toISOString(),
-          }),
-        },
-        REJECT: {
-          target: "rejected",
-          actions: assign({
-            status: "rejected",
-            stage: "council",
-            lastTransitionTime: () => new Date().toISOString(),
-          }),
-        },
-      },
-    },
-
-    specReview: {
-      on: {
-        APPROVE_SPEC: {
-          target: "executionGate",
-          actions: assign({
-            status: "approved",
-            stage: "spec",
-            lastTransitionTime: () => new Date().toISOString(),
-          }),
-        },
-        REQUEST_SPEC: {
-          target: "specDraft",
-          actions: assign({
-            status: "approved",
-            stage: "spec",
-            lastTransitionTime: () => new Date().toISOString(),
-          }),
-        },
-        REJECT: {
-          target: "rejected",
-          actions: assign({
-            status: "rejected",
-            stage: "council",
-            lastTransitionTime: () => new Date().toISOString(),
-          }),
-        },
-      },
-    },
-
-    // ───────────────────────────────────────────────────────
-    // EXECUTION GATE PHASE
-    // ───────────────────────────────────────────────────────
-    executionGate: {
-      on: {
-        EXECUTION_GATE_PASS: {
-          target: "executing",
-          actions: assign({
-            status: "controlled",
-            stage: "execution-gate",
-            lastTransitionTime: () => new Date().toISOString(),
-          }),
-        },
-        EXECUTE: {
-          target: "executing",
-          actions: assign({
-            status: "controlled",
-            stage: "execution-gate",
-            lastTransitionTime: () => new Date().toISOString(),
-          }),
-        },
-        EXECUTION_GATE_FAIL: {
-          target: "rejected",
-          actions: assign({
-            status: "rejected",
-            stage: "execution-gate",
-            lastTransitionTime: () => new Date().toISOString(),
-          }),
-        },
-      },
-    },
-
-    // ───────────────────────────────────────────────────────
-    // EXECUTION PHASE
-    // ───────────────────────────────────────────────────────
-    executing: {
-      on: {
-        EXECUTION_SUCCESS: {
-          target: "postmortem",
-          actions: assign({
-            status: "executed",
-            stage: "postmortem",
-            retryCount: 0,
-            lastTransitionTime: () => new Date().toISOString(),
-          }),
-        },
-        EXECUTION_FAILED: {
-          target: "executionError",
-          actions: assign({
-            errorMessage: "Execution failed",
-            lastTransitionTime: () => new Date().toISOString(),
-          }),
-        },
-      },
-    },
-
-    executionError: {
-      on: {
-        RETRY: [
-          {
-            target: "executing",
-            guard: ({ context }) => context.retryCount < 3,
-            actions: assign({
-              retryCount: ({ context }) => context.retryCount + 1,
-              lastTransitionTime: () => new Date().toISOString(),
-            }),
-          },
-        ],
-        EXECUTION_FAILED: {
-          target: "postmortem",
-          actions: assign({
-            status: "failed",
-            stage: "postmortem",
-            lastTransitionTime: () => new Date().toISOString(),
-          }),
-        },
-      },
-    },
-
-    // ───────────────────────────────────────────────────────
-    // POSTMORTEM PHASE
-    // ───────────────────────────────────────────────────────
-    postmortem: {
-      on: {
-        POSTMORTEM: {
-          target: "completed",
-          actions: assign({
-            lastTransitionTime: () => new Date().toISOString(),
-          }),
-        },
-      },
-    },
-
-    // ───────────────────────────────────────────────────────
-    // TERMINAL STATES
-    // ───────────────────────────────────────────────────────
-    rejected: {
-      type: "final",
-    },
-
-    completed: {
-      type: "final",
-    },
+  guards: {
+    tallyApproved: ({ event }) => event.type === "APPROVE" && event.tally.approved === true,
+    gatesPassed: ({ event }) =>
+      event.type === "CONTROL_PASS" && event.result.allGatesPassed === true && event.result.blockerCount === 0,
   },
 });
 
-export type ProposalMachine = typeof proposalMachine;
+function buildProposalMachine(initial: ProposalStatus) {
+  return proposalSetup.createMachine({
+    id: "proposalLifecycle",
+    initial,
+    context: ({ input }) => ({
+      proposal: input.proposal,
+      lastTransitionTime: input.lastTransitionTime ?? new Date().toISOString(),
+    }),
+
+    // Note on the escape hatches (DISCARD / ERROR): they are inlined
+    // into every non-terminal state rather than declared at the root
+    // `on:`. XState v5 does not resolve root-level `on:` targets that
+    // reference top-level child states — it reads them as relative to
+    // the root's (non-existent) parent and rejects the machine. Final
+    // states (`executed`, `failed`, `rejected`) are `type: "final"`
+    // and ignore events once the machine is done, so the hatches are
+    // intentionally absent there.
+    states: {
+      open: {
+        on: {
+          DELIBERATE: {
+            target: "deliberating",
+            actions: assign({ lastTransitionTime: () => new Date().toISOString() }),
+          },
+          DISCARD: {
+            target: "rejected",
+            actions: assign({ lastTransitionTime: () => new Date().toISOString() }),
+          },
+          ERROR: {
+            target: "failed",
+            actions: assign({
+              lastTransitionTime: () => new Date().toISOString(),
+              errorMessage: ({ event }) => (event.type === "ERROR" ? event.message : ""),
+            }),
+          },
+        },
+      },
+
+      deliberating: {
+        on: {
+          APPROVE: {
+            target: "approved",
+            guard: "tallyApproved",
+            actions: assign({ lastTransitionTime: () => new Date().toISOString() }),
+          },
+          REJECT: {
+            target: "rejected",
+            actions: assign({ lastTransitionTime: () => new Date().toISOString() }),
+          },
+          DISCARD: {
+            target: "rejected",
+            actions: assign({ lastTransitionTime: () => new Date().toISOString() }),
+          },
+          ERROR: {
+            target: "failed",
+            actions: assign({
+              lastTransitionTime: () => new Date().toISOString(),
+              errorMessage: ({ event }) => (event.type === "ERROR" ? event.message : ""),
+            }),
+          },
+        },
+      },
+
+      approved: {
+        on: {
+          CONTROL_PASS: {
+            target: "controlled",
+            guard: "gatesPassed",
+            actions: assign({ lastTransitionTime: () => new Date().toISOString() }),
+          },
+          CONTROL_FAIL: {
+            target: "failed",
+            actions: assign({ lastTransitionTime: () => new Date().toISOString() }),
+          },
+          REJECT: {
+            target: "rejected",
+            actions: assign({ lastTransitionTime: () => new Date().toISOString() }),
+          },
+          FAIL: {
+            target: "failed",
+            actions: assign({ lastTransitionTime: () => new Date().toISOString() }),
+          },
+          DISCARD: {
+            target: "rejected",
+            actions: assign({ lastTransitionTime: () => new Date().toISOString() }),
+          },
+          ERROR: {
+            target: "failed",
+            actions: assign({
+              lastTransitionTime: () => new Date().toISOString(),
+              errorMessage: ({ event }) => (event.type === "ERROR" ? event.message : ""),
+            }),
+          },
+        },
+      },
+
+      controlled: {
+        on: {
+          EXECUTE_SUCCESS: {
+            target: "executed",
+            actions: assign({ lastTransitionTime: () => new Date().toISOString() }),
+          },
+          FAIL: {
+            target: "failed",
+            actions: assign({ lastTransitionTime: () => new Date().toISOString() }),
+          },
+          DISCARD: {
+            target: "rejected",
+            actions: assign({ lastTransitionTime: () => new Date().toISOString() }),
+          },
+          ERROR: {
+            target: "failed",
+            actions: assign({
+              lastTransitionTime: () => new Date().toISOString(),
+              errorMessage: ({ event }) => (event.type === "ERROR" ? event.message : ""),
+            }),
+          },
+        },
+      },
+
+      executed: { type: "final" },
+      failed: { type: "final" },
+      rejected: { type: "final" },
+    },
+  });
+}
+
+// ── Factory (with memoization) ───────────────────────────────
+//
+// A machine is created per starting status so an actor can be
+// rehydrated at the persisted status of a proposal. The machine
+// definition is identical; only `initial` differs.
+
+const machineCache = new Map<ProposalStatus, ReturnType<typeof buildProposalMachine>>();
+
+export function createProposalMachine(initial: ProposalStatus) {
+  let machine = machineCache.get(initial);
+  if (!machine) {
+    machine = buildProposalMachine(initial);
+    machineCache.set(initial, machine);
+  }
+  return machine;
+}
+
+export type ProposalMachine = ReturnType<typeof buildProposalMachine>;

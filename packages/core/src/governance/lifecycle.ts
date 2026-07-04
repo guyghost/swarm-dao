@@ -1,49 +1,15 @@
 // ============================================================
-// Swarm DAO Core — Proposal Lifecycle & State Machine
+// Swarm DAO Core — Proposal Lifecycle Helpers
+// ------------------------------------------------------------
+// Status transitions live in `proposal.machine.ts` (XState) and
+// are applied via `dispatchProposalEvent` (proposal.utils.ts).
+// This module keeps the pure, side-effect-free helpers that the
+// machine guards and the UI consume: risk classification, human
+// approval thresholds, security-review requirements, and labels.
 // ============================================================
 
 import type { Proposal, ProposalStatus, RiskZone } from "../types/index.js";
 import { PROPOSAL_COUNCIL, PROPOSAL_TYPE, RISK_ZONE_DEFINITIONS } from "../types/index.js";
-
-// ── Transitions ──────────────────────────────────────────────
-
-const VALID_TRANSITIONS: Record<ProposalStatus, ProposalStatus[]> = {
-  open: ["deliberating"],
-  deliberating: ["approved", "rejected"],
-  approved: ["controlled", "rejected", "failed"],
-  controlled: ["executed", "failed"],
-  rejected: [],
-  executed: [],
-  failed: [],
-};
-
-export function canTransition(from: ProposalStatus, to: ProposalStatus): boolean {
-  return VALID_TRANSITIONS[from]?.includes(to) ?? false;
-}
-
-export function transitionProposal(
-  proposal: Proposal,
-  action: "deliberate" | "approve" | "reject" | "control" | "execute" | "fail",
-): { success: boolean; newStatus?: ProposalStatus; error?: string } {
-  const transitions: Record<string, Record<string, ProposalStatus>> = {
-    open: { deliberate: "deliberating" },
-    deliberating: { approve: "approved", reject: "rejected" },
-    approved: { control: "controlled", reject: "rejected", fail: "failed" },
-    controlled: { execute: "executed", fail: "failed" },
-  };
-
-  const newStatus = transitions[proposal.status]?.[action];
-  if (!newStatus) {
-    return { success: false, error: `Cannot ${action} from ${proposal.status}` };
-  }
-
-  proposal.status = newStatus;
-  if (["rejected", "executed", "failed"].includes(newStatus)) {
-    proposal.resolvedAt = new Date().toISOString();
-  }
-
-  return { success: true, newStatus };
-}
 
 // ── Risk Zone Classification ─────────────────────────────────
 

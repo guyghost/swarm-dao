@@ -8,7 +8,8 @@ import { executeProposal } from "../delivery/execution.js";
 import { formatPlan, generateDeliveryPlan, getPlan } from "../delivery/plans.js";
 import { formatAgentsTable, initializeAgents, loadAgentDefinitions } from "../governance/agents.js";
 import { validateAmendmentPayload } from "../governance/amendments.js";
-import { classifyRiskZone, transitionProposal } from "../governance/lifecycle.js";
+import { classifyRiskZone } from "../governance/lifecycle.js";
+import { dispatchProposalEvent } from "../governance/proposal.utils.js";
 import { calculateCompositeScore, formatCompositeScore } from "../governance/scoring.js";
 import { formatTallyResult, parseVoteFromOutput, tallyVotes } from "../governance/voting.js";
 import { computeHealthScore, formatHealthScore, generateDashboard } from "../health-score.js";
@@ -120,8 +121,8 @@ export async function handleDaoDeliberate(ctx: DaoToolContext, proposalId: numbe
   const proposal = getProposal(proposalId);
   if (!proposal) return `Proposal #${proposalId} not found.`;
   if (proposal.status !== "open") return `Proposal #${proposal.id} is ${proposal.status}, must be open.`;
-  const transition = transitionProposal(proposal, "deliberate");
-  if (!transition.success) return `Cannot deliberate: ${transition.error}`;
+  const deliberation = dispatchProposalEvent(proposal, { type: "DELIBERATE" });
+  if (!deliberation.ok) return `Cannot deliberate: ${deliberation.error}`;
   await recordAudit(proposal.id, "governance", "deliberation_started", "system", `Deliberation on #${proposal.id}`);
   await saveState();
   const projectConfig = await loadConfig(state.daoRoot);
@@ -172,7 +173,7 @@ export async function handleDaoDeliberate(ctx: DaoToolContext, proposalId: numbe
   proposal.synthesis = synthesisText;
   await storeSynthesis(proposal.id, synthesisText);
   if (tally.approved) {
-    transitionProposal(proposal, "approve");
+    dispatchProposalEvent(proposal, { type: "APPROVE", tally });
     await recordAudit(
       proposal.id,
       "intelligence",
@@ -181,7 +182,7 @@ export async function handleDaoDeliberate(ctx: DaoToolContext, proposalId: numbe
       `Approved: ${tally.approvalScore}%`,
     );
   } else {
-    transitionProposal(proposal, "reject");
+    dispatchProposalEvent(proposal, { type: "REJECT" });
     await recordAudit(
       proposal.id,
       "intelligence",
@@ -236,7 +237,7 @@ export async function handleDaoRecordOutputs(
   await storeSynthesis(proposal.id, synthesisText);
   const tally = tallyVotes(proposal, state.config);
   if (tally.approved) {
-    transitionProposal(proposal, "approve");
+    dispatchProposalEvent(proposal, { type: "APPROVE", tally });
     await recordAudit(
       proposal.id,
       "intelligence",
@@ -245,7 +246,7 @@ export async function handleDaoRecordOutputs(
       `Approved: ${tally.approvalScore}%`,
     );
   } else {
-    transitionProposal(proposal, "reject");
+    dispatchProposalEvent(proposal, { type: "REJECT" });
     await recordAudit(
       proposal.id,
       "intelligence",
@@ -267,7 +268,7 @@ export async function handleDaoControl(ctx: DaoToolContext, proposalId: number):
   if (proposal.status !== "approved") return `Must be approved (current: ${proposal.status})`;
   const result = runGates(proposal, state.config);
   if (result.allGatesPassed) {
-    transitionProposal(proposal, "control");
+    dispatchProposalEvent(proposal, { type: "CONTROL_PASS", result });
     await recordAudit(proposal.id, "control", "gates_passed", "system", "All gates passed");
     if (!state.deliveryPlans[proposal.id]) {
       const plan = generateDeliveryPlan(proposal);
@@ -275,7 +276,7 @@ export async function handleDaoControl(ctx: DaoToolContext, proposalId: number):
     }
   } else {
     if (ctx.failOnGateFailure) {
-      transitionProposal(proposal, "fail");
+      dispatchProposalEvent(proposal, { type: "CONTROL_FAIL" });
     }
     await recordAudit(proposal.id, "control", "gates_failed", "system", `${result.blockerCount} blockers`);
   }

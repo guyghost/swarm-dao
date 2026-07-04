@@ -13,6 +13,7 @@ import {
   createDispatchModelContext,
   createProposal,
   createProposalsBatch,
+  dispatchProposalEvent,
   execCommand,
   executeProposal,
   formatAllArtefacts,
@@ -55,7 +56,6 @@ import {
   storeSynthesis,
   synthesize,
   tallyVotes,
-  transitionProposal,
   validateAmendmentPayload,
   writeFileContained,
 } from "@guyghost/swarm-dao-core";
@@ -333,8 +333,8 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
             return `Proposal #${proposal.id} is ${proposal.status}, must be open.`;
           }
 
-          const transition = transitionProposal(proposal, "deliberate");
-          if (!transition.success) return `Cannot deliberate: ${transition.error}`;
+          const transition = dispatchProposalEvent(proposal, { type: "DELIBERATE" });
+          if (!transition.ok) return `Cannot deliberate: ${transition.error}`;
 
           await recordAudit(
             proposal.id,
@@ -432,7 +432,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
           const tally = tallyVotes(proposal, state.config);
 
           if (tally.approved) {
-            transitionProposal(proposal, "approve");
+            dispatchProposalEvent(proposal, { type: "APPROVE", tally });
             await recordAudit(
               proposal.id,
               "intelligence",
@@ -441,7 +441,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
               `Approved: ${tally.approvalScore}%`,
             );
           } else {
-            transitionProposal(proposal, "reject");
+            dispatchProposalEvent(proposal, { type: "REJECT" });
             await recordAudit(
               proposal.id,
               "intelligence",
@@ -473,7 +473,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
           const result = runGates(proposal, state.config);
 
           if (result.allGatesPassed) {
-            transitionProposal(proposal, "control");
+            dispatchProposalEvent(proposal, { type: "CONTROL_PASS", result });
             await recordAudit(proposal.id, "control", "gates_passed", "system", "All gates passed");
             // Generate delivery plan after gates pass, making it available before execution
             if (!state.deliveryPlans[proposal.id]) {

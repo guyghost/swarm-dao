@@ -714,13 +714,13 @@ describe("swarmDaoExtension", () => {
     });
 
     it("rejects when proposal is not open", async () => {
-      const { getProposal, transitionProposal } = await import("@guyghost/swarm-dao-core");
+      const { getProposal, dispatchProposalEvent } = await import("@guyghost/swarm-dao-core");
       const pi = await createOpenProposal();
 
       // Move proposal out of open status
       const proposal = getProposal(1);
       // biome-ignore lint/style/noNonNullAssertion: proposal was just created
-      transitionProposal(proposal!, "deliberate");
+      dispatchProposalEvent(proposal!, { type: "DELIBERATE" });
 
       // biome-ignore lint/style/noNonNullAssertion: test expects tool to be registered
       const updateTool = pi.tools.find((t) => t.name === "dao_update_proposal")!;
@@ -762,7 +762,7 @@ describe("swarmDaoExtension", () => {
 
     describe("dao_ship tool", () => {
       it("ships a controlled proposal", async () => {
-        const { initStorage, setState, getOrCreateState, initializeAgents, getProposal, transitionProposal } =
+        const { initStorage, setState, getOrCreateState, initializeAgents, getProposal, dispatchProposalEvent } =
           await import("@guyghost/swarm-dao-core");
         await initStorage(process.cwd());
         const state = getOrCreateState(process.cwd());
@@ -785,11 +785,37 @@ describe("swarmDaoExtension", () => {
         const proposal = getProposal(1);
         expect(proposal).toBeDefined();
         // biome-ignore lint/style/noNonNullAssertion: created in previous step
-        transitionProposal(proposal!, "deliberate");
+        dispatchProposalEvent(proposal!, { type: "DELIBERATE" });
         // biome-ignore lint/style/noNonNullAssertion: proposal status transition
-        transitionProposal(proposal!, "approve");
+        dispatchProposalEvent(proposal!, {
+          type: "APPROVE",
+          tally: {
+            proposalId: 1,
+            approved: true,
+            quorumMet: true,
+            totalAgents: 5,
+            votingAgents: 5,
+            quorumPercent: 100,
+            weightedFor: 10,
+            weightedAgainst: 0,
+            totalVotingWeight: 10,
+            approvalScore: 100,
+            votes: [],
+          },
+        });
         // biome-ignore lint/style/noNonNullAssertion: proposal status transition
-        transitionProposal(proposal!, "control");
+        dispatchProposalEvent(proposal!, {
+          type: "CONTROL_PASS",
+          result: {
+            proposalId: 1,
+            timestamp: new Date().toISOString(),
+            allGatesPassed: true,
+            blockerCount: 0,
+            warningCount: 0,
+            gates: [],
+            checklist: [],
+          },
+        });
 
         // biome-ignore lint/style/noNonNullAssertion: test expects tool to be registered
         const shipTool = pi.tools.find((t) => t.name === "dao_ship")!;

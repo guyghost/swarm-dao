@@ -186,12 +186,38 @@ describe("CLI E2E", () => {
         setState(s);
       }
 
-      const { createProposal, transitionProposal } = await import("@guyghost/swarm-dao-core");
+      const { createProposal, dispatchProposalEvent } = await import("@guyghost/swarm-dao-core");
       const p = await createProposal(title, "product-feature", "desc", "test");
       if (dependsOn) p.dependsOn = dependsOn;
-      transitionProposal(p, "deliberate");
-      transitionProposal(p, "approve");
-      transitionProposal(p, "control");
+      dispatchProposalEvent(p, { type: "DELIBERATE" });
+      dispatchProposalEvent(p, {
+        type: "APPROVE",
+        tally: {
+          proposalId: p.id,
+          approved: true,
+          quorumMet: true,
+          totalAgents: 5,
+          votingAgents: 5,
+          quorumPercent: 100,
+          weightedFor: 10,
+          weightedAgainst: 0,
+          totalVotingWeight: 10,
+          approvalScore: 100,
+          votes: [],
+        },
+      });
+      dispatchProposalEvent(p, {
+        type: "CONTROL_PASS",
+        result: {
+          proposalId: p.id,
+          timestamp: new Date().toISOString(),
+          allGatesPassed: true,
+          blockerCount: 0,
+          warningCount: 0,
+          gates: [],
+          checklist: [],
+        },
+      });
       await saveState();
       return p.id;
     }

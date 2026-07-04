@@ -5,7 +5,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { logger } from "./observability/logging.js";
-import { recordProposalExecuted, recordVoteCast } from "./observability/metrics.js";
+import { recordVoteCast } from "./observability/metrics.js";
 import type {
   AgentOutput,
   AuditEntry,
@@ -20,7 +20,6 @@ import type {
   ExecutionVerification,
   Proposal,
   ProposalOutcome,
-  ProposalStatus,
   StorageSettings,
   Vote,
 } from "./types/index.js";
@@ -573,21 +572,6 @@ export function getProposal(proposalId: number): Proposal | undefined {
 
 export function listProposals(): Proposal[] {
   return getState().proposals;
-}
-
-export async function updateProposalStatus(proposalId: number, status: ProposalStatus): Promise<boolean> {
-  const s = getState();
-  const proposal = s.proposals.find((p) => p.id === proposalId);
-  if (!proposal) return false;
-  proposal.status = status;
-  if (status === "executed" || status === "rejected" || status === "failed") {
-    proposal.resolvedAt = new Date().toISOString();
-  }
-  if (status === "executed") {
-    recordProposalExecuted(proposal.id, proposal.type);
-  }
-  await saveState();
-  return true;
 }
 
 export async function addVote(proposalId: number, vote: Vote): Promise<boolean> {

@@ -1,232 +1,220 @@
 import { beforeEach, describe, expect, it } from "bun:test";
-import {
-  canSendProposalEvent,
-  createProposalActor,
-  getAvailableProposalEvents,
-  getProposalContext,
-  getProposalState,
-  onProposalStateChange,
-  progressProposal,
-  rejectProposal,
-  sendProposalEvent,
-} from "@guyghost/swarm-dao-core/governance";
-import type { Proposal } from "@guyghost/swarm-dao-core/types";
+import type { ControlCheckResult, Proposal, TallyResult } from "@guyghost/swarm-dao-core";
+import { dispatchProposalEvent, isProposalFinal, PROPOSAL_FINAL_STATUSES } from "@guyghost/swarm-dao-core";
 
-describe("Proposal State Machine", () => {
-  let mockProposal: Proposal;
+// ── Test fixtures ────────────────────────────────────────────
+
+function makeProposal(status: Proposal["status"] = "open"): Proposal {
+  return {
+    id: 1,
+    title: "Test Proposal",
+    type: "product-feature",
+    description: "A test proposal",
+    proposedBy: "agent-1",
+    status,
+    votes: [],
+    agentOutputs: [],
+    createdAt: new Date().toISOString(),
+  };
+}
+
+function makeTally(approved: boolean): TallyResult {
+  return {
+    proposalId: 1,
+    approved,
+    quorumMet: true,
+    totalAgents: 5,
+    votingAgents: 5,
+    quorumPercent: 100,
+    weightedFor: approved ? 10 : 2,
+    weightedAgainst: approved ? 2 : 10,
+    totalVotingWeight: 12,
+    approvalScore: approved ? 83 : 17,
+    votes: [],
+  };
+}
+
+function makeControl(passed: boolean, blockers = 0): ControlCheckResult {
+  return {
+    proposalId: 1,
+    timestamp: new Date().toISOString(),
+    allGatesPassed: passed,
+    blockerCount: blockers,
+    warningCount: 0,
+    gates: [],
+    checklist: [],
+  };
+}
+
+// ── Tests ────────────────────────────────────────────────────
+
+describe("proposal state machine — invariants", () => {
+  it("final statuses are exactly executed, failed, rejected", () => {
+    expect(PROPOSAL_FINAL_STATUSES.size).toBe(3);
+    expect([...PROPOSAL_FINAL_STATUSES].sort()).toEqual(["executed", "failed", "rejected"]);
+  });
+
+  it("isProposalFinal identifies terminal statuses", () => {
+    expect(isProposalFinal("executed")).toBe(true);
+    expect(isProposalFinal("failed")).toBe(true);
+    expect(isProposalFinal("rejected")).toBe(true);
+    expect(isProposalFinal("open")).toBe(false);
+    expect(isProposalFinal("deliberating")).toBe(false);
+    expect(isProposalFinal("approved")).toBe(false);
+    expect(isProposalFinal("controlled")).toBe(false);
+  });
+});
+
+describe("proposal state machine — nominal transitions", () => {
+  let proposal: Proposal;
 
   beforeEach(() => {
-    mockProposal = {
-      id: 1,
-      title: "Test Proposal",
-      type: "product-feature",
-      description: "A test proposal",
-      proposedBy: "agent-1",
-      status: "open",
-      votes: [],
-      agentOutputs: [],
-      createdAt: new Date().toISOString(),
-    };
+    proposal = makeProposal();
   });
 
-  it("should create a proposal actor in draft state", () => {
-    const actor = createProposalActor(mockProposal);
-    const state = getProposalState(actor);
-    expect(state).toBe("draft");
-    expect(getProposalContext(actor).proposal).toEqual(mockProposal);
-  });
+  it("walks the full happy path open → executed", () => {
+    expect(dispatchProposalEvent(proposal, { type: "DELIBERATE" })).toMatchObject({ ok: true, status: "deliberating" });
+    expect(proposal.status).toBe("deliberating");
 
-  it("should transition from draft to intake on SUBMIT", () => {
-    const actor = createProposalActor(mockProposal);
-    sendProposalEvent(actor, { type: "SUBMIT" });
-    const state = getProposalState(actor);
-    expect(state).toBe("intake");
-  });
-
-  it("should track deliberation count during analysis phases", () => {
-    const actor = createProposalActor(mockProposal);
-    sendProposalEvent(actor, { type: "SUBMIT" });
-    sendProposalEvent(actor, { type: "QUALIFY" });
-    sendProposalEvent(actor, { type: "ANALYZE" });
-    sendProposalEvent(actor, { type: "CRITIQUE" });
-
-    const context = getProposalContext(actor);
-    expect(context.deliberationCount).toBeGreaterThan(0);
-  });
-
-  it("should update status appropriately on transitions", () => {
-    const actor = createProposalActor(mockProposal);
-    sendProposalEvent(actor, { type: "SUBMIT" });
-
-    let context = getProposalContext(actor);
-    expect(context.status).toBe("open");
-
-    sendProposalEvent(actor, { type: "QUALIFY" });
-    sendProposalEvent(actor, { type: "ANALYZE" });
-    sendProposalEvent(actor, { type: "CRITIQUE" });
-    context = getProposalContext(actor);
-    expect(context.status).toBe("deliberating");
-  });
-
-  it("should verify available events", () => {
-    const actor = createProposalActor(mockProposal);
-    expect(canSendProposalEvent(actor, "SUBMIT")).toBe(true);
-    expect(canSendProposalEvent(actor, "QUALIFY")).toBe(false);
-  });
-
-  it("should return list of available events", () => {
-    const actor = createProposalActor(mockProposal);
-    const events = getAvailableProposalEvents(actor);
-    expect(events).toContain("SUBMIT");
-    expect(events.length).toBeGreaterThan(0);
-  });
-
-  it("should auto-progress proposal through pipeline", () => {
-    const actor = createProposalActor(mockProposal);
-
-    let nextEvent = progressProposal(actor);
-    expect(nextEvent).toBe("SUBMIT");
-    expect(getProposalState(actor)).toBe("intake");
-
-    nextEvent = progressProposal(actor);
-    expect(nextEvent).toBe("QUALIFY");
-    expect(getProposalState(actor)).toBe("qualification");
-
-    nextEvent = progressProposal(actor);
-    expect(nextEvent).toBe("ANALYZE");
-    expect(getProposalState(actor)).toBe("analysis");
-  });
-
-  it("should allow rejection from any deliberation state", () => {
-    const actor = createProposalActor(mockProposal);
-    sendProposalEvent(actor, { type: "SUBMIT" });
-    sendProposalEvent(actor, { type: "QUALIFY" });
-    sendProposalEvent(actor, { type: "ANALYZE" });
-
-    const state = rejectProposal(actor);
-    expect(state).toBe("rejected");
-  });
-
-  it("should track lastTransitionTime on state changes", () => {
-    const actor = createProposalActor(mockProposal);
-    const initialTime = new Date(getProposalContext(actor).lastTransitionTime);
-
-    sendProposalEvent(actor, { type: "SUBMIT" });
-    const newTime = new Date(getProposalContext(actor).lastTransitionTime);
-
-    expect(newTime.getTime()).toBeGreaterThanOrEqual(initialTime.getTime());
-  });
-
-  it("should handle state change listeners", () => {
-    const actor = createProposalActor(mockProposal);
-    const states: string[] = [];
-
-    // Subscribe after actor is started
-    const unsubscribe = onProposalStateChange(actor, (state) => {
-      states.push(state);
+    expect(dispatchProposalEvent(proposal, { type: "APPROVE", tally: makeTally(true) })).toMatchObject({
+      ok: true,
+      status: "approved",
     });
+    expect(proposal.status).toBe("approved");
 
-    sendProposalEvent(actor, { type: "SUBMIT" });
-    sendProposalEvent(actor, { type: "QUALIFY" });
+    expect(dispatchProposalEvent(proposal, { type: "CONTROL_PASS", result: makeControl(true) })).toMatchObject({
+      ok: true,
+      status: "controlled",
+    });
+    expect(proposal.status).toBe("controlled");
 
-    unsubscribe();
-
-    // Should capture state changes after subscription
-    expect(states.length).toBeGreaterThan(0);
+    expect(dispatchProposalEvent(proposal, { type: "EXECUTE_SUCCESS" })).toMatchObject({
+      ok: true,
+      status: "executed",
+    });
+    expect(proposal.status).toBe("executed");
+    expect(proposal.resolvedAt).toBeDefined();
   });
 
-  it("should transition through full approval workflow", () => {
-    const actor = createProposalActor(mockProposal);
+  it("rejects from deliberating", () => {
+    dispatchProposalEvent(proposal, { type: "DELIBERATE" });
+    expect(dispatchProposalEvent(proposal, { type: "REJECT" }).ok).toBe(true);
+    expect(proposal.status).toBe("rejected");
+    expect(proposal.resolvedAt).toBeDefined();
+  });
 
-    const transitions = [
-      { event: { type: "SUBMIT" as const }, expectedState: "intake" },
-      { event: { type: "QUALIFY" as const }, expectedState: "qualification" },
-      { event: { type: "ANALYZE" as const }, expectedState: "analysis" },
-      { event: { type: "CRITIQUE" as const }, expectedState: "critique" },
-      { event: { type: "SCORE" as const }, expectedState: "scoring" },
-      { event: { type: "SEND_TO_COUNCIL" as const }, expectedState: "council" },
-      { event: { type: "VOTE" as const }, expectedState: "voting" },
-      { event: { type: "APPROVE" as const }, expectedState: "specDraft" },
-    ];
+  it("fails on control failure from approved", () => {
+    dispatchProposalEvent(proposal, { type: "DELIBERATE" });
+    dispatchProposalEvent(proposal, { type: "APPROVE", tally: makeTally(true) });
+    expect(dispatchProposalEvent(proposal, { type: "CONTROL_FAIL" }).ok).toBe(true);
+    expect(proposal.status).toBe("failed");
+  });
 
-    for (const { event, expectedState } of transitions) {
-      sendProposalEvent(actor, event);
-      expect(getProposalState(actor)).toBe(expectedState);
+  it("fails on execution failure from controlled", () => {
+    proposal.status = "approved";
+    dispatchProposalEvent(proposal, { type: "CONTROL_PASS", result: makeControl(true) });
+    expect(dispatchProposalEvent(proposal, { type: "FAIL" }).ok).toBe(true);
+    expect(proposal.status).toBe("failed");
+  });
+});
+
+describe("proposal state machine — guards (permissions)", () => {
+  let proposal: Proposal;
+
+  beforeEach(() => {
+    proposal = makeProposal();
+    dispatchProposalEvent(proposal, { type: "DELIBERATE" });
+  });
+
+  it("blocks APPROVE when the tally is not approved", () => {
+    const result = dispatchProposalEvent(proposal, { type: "APPROVE", tally: makeTally(false) });
+    expect(result.ok).toBe(false);
+    expect(proposal.status).toBe("deliberating");
+  });
+
+  it("blocks CONTROL_PASS when gates did not all pass", () => {
+    dispatchProposalEvent(proposal, { type: "APPROVE", tally: makeTally(true) });
+    const result = dispatchProposalEvent(proposal, { type: "CONTROL_PASS", result: makeControl(false) });
+    expect(result.ok).toBe(false);
+    expect(proposal.status).toBe("approved");
+  });
+
+  it("blocks CONTROL_PASS when there are blockers", () => {
+    dispatchProposalEvent(proposal, { type: "APPROVE", tally: makeTally(true) });
+    const result = dispatchProposalEvent(proposal, {
+      type: "CONTROL_PASS",
+      result: makeControl(true, 1),
+    });
+    expect(result.ok).toBe(false);
+    expect(proposal.status).toBe("approved");
+  });
+});
+
+describe("proposal state machine — forbidden transitions", () => {
+  it("blocks EXECUTE_SUCCESS from open", () => {
+    const proposal = makeProposal("open");
+    expect(dispatchProposalEvent(proposal, { type: "EXECUTE_SUCCESS" }).ok).toBe(false);
+    expect(proposal.status).toBe("open");
+  });
+
+  it("blocks DELIBERATE from approved", () => {
+    const proposal = makeProposal("approved");
+    expect(dispatchProposalEvent(proposal, { type: "DELIBERATE" }).ok).toBe(false);
+    expect(proposal.status).toBe("approved");
+  });
+
+  it("blocks APPROVE from open (must deliberate first)", () => {
+    const proposal = makeProposal("open");
+    expect(dispatchProposalEvent(proposal, { type: "APPROVE", tally: makeTally(true) }).ok).toBe(false);
+    expect(proposal.status).toBe("open");
+  });
+
+  it("blocks CONTROL_PASS from deliberating (must be approved)", () => {
+    const proposal = makeProposal("deliberating");
+    expect(dispatchProposalEvent(proposal, { type: "CONTROL_PASS", result: makeControl(true) }).ok).toBe(false);
+    expect(proposal.status).toBe("deliberating");
+  });
+});
+
+describe("proposal state machine — global escape hatches", () => {
+  it("DISCARD reaches rejected from any non-terminal state", () => {
+    for (const status of ["open", "deliberating", "approved", "controlled"] as const) {
+      const proposal = makeProposal(status);
+      const result = dispatchProposalEvent(proposal, { type: "DISCARD" });
+      expect(result.ok).toBe(true);
+      expect(proposal.status).toBe("rejected");
     }
-
-    const context = getProposalContext(actor);
-    expect(context.status).toBe("approved");
   });
 
-  it("should handle execution flow", () => {
-    const actor = createProposalActor(mockProposal);
-
-    // Fast-track to execution gate
-    sendProposalEvent(actor, { type: "SUBMIT" });
-    sendProposalEvent(actor, { type: "QUALIFY" });
-    sendProposalEvent(actor, { type: "ANALYZE" });
-    sendProposalEvent(actor, { type: "CRITIQUE" });
-    sendProposalEvent(actor, { type: "SCORE" });
-    sendProposalEvent(actor, { type: "SEND_TO_COUNCIL" });
-    sendProposalEvent(actor, { type: "VOTE" });
-    sendProposalEvent(actor, { type: "APPROVE" });
-    sendProposalEvent(actor, { type: "REQUEST_SPEC" });
-    sendProposalEvent(actor, { type: "APPROVE_SPEC" });
-    sendProposalEvent(actor, { type: "EXECUTION_GATE_PASS" });
-
-    expect(getProposalState(actor)).toBe("executing");
-
-    sendProposalEvent(actor, { type: "EXECUTION_SUCCESS" });
-    expect(getProposalState(actor)).toBe("postmortem");
-
-    const context = getProposalContext(actor);
-    expect(context.status).toBe("executed");
+  it("ERROR reaches failed from any non-terminal state", () => {
+    for (const status of ["open", "deliberating", "approved", "controlled"] as const) {
+      const proposal = makeProposal(status);
+      const result = dispatchProposalEvent(proposal, { type: "ERROR", message: "boom" });
+      expect(result.ok).toBe(true);
+      expect(proposal.status).toBe("failed");
+    }
   });
+});
 
-  it("should reset retry count on approval", () => {
-    const actor = createProposalActor(mockProposal);
-
-    sendProposalEvent(actor, { type: "SUBMIT" });
-    sendProposalEvent(actor, { type: "QUALIFY" });
-    sendProposalEvent(actor, { type: "ANALYZE" });
-    sendProposalEvent(actor, { type: "CRITIQUE" });
-    sendProposalEvent(actor, { type: "SCORE" });
-    sendProposalEvent(actor, { type: "SEND_TO_COUNCIL" });
-    sendProposalEvent(actor, { type: "VOTE" });
-    sendProposalEvent(actor, { type: "APPROVE" });
-
-    const context = getProposalContext(actor);
-    // After APPROVE event, retryCount should be reset to 0
-    expect(context.retryCount).toBe(0);
-    expect(context.stage).toBe("spec");
-  });
-
-  it("should handle REVIEW_SPEC and EXECUTE events", () => {
-    const actor = createProposalActor(mockProposal);
-
-    sendProposalEvent(actor, { type: "SUBMIT" });
-    sendProposalEvent(actor, { type: "QUALIFY" });
-    sendProposalEvent(actor, { type: "ANALYZE" });
-    sendProposalEvent(actor, { type: "CRITIQUE" });
-    sendProposalEvent(actor, { type: "SCORE" });
-    sendProposalEvent(actor, { type: "SEND_TO_COUNCIL" });
-    sendProposalEvent(actor, { type: "VOTE" });
-    sendProposalEvent(actor, { type: "APPROVE" });
-    sendProposalEvent(actor, { type: "REVIEW_SPEC" });
-    sendProposalEvent(actor, { type: "APPROVE_SPEC" });
-    sendProposalEvent(actor, { type: "EXECUTE" });
-
-    expect(getProposalState(actor)).toBe("executing");
-  });
-
-  it("should handle DISCARD and ERROR events", () => {
-    const discardedActor = createProposalActor(mockProposal);
-    sendProposalEvent(discardedActor, { type: "DISCARD" });
-    expect(getProposalState(discardedActor)).toBe("rejected");
-
-    const erroredActor = createProposalActor(mockProposal);
-    sendProposalEvent(erroredActor, { type: "ERROR", message: "Unexpected error" });
-    expect(getProposalState(erroredActor)).toBe("executionError");
-    expect(getProposalContext(erroredActor).errorMessage).toBe("Unexpected error");
+describe("proposal state machine — terminal states are immutable", () => {
+  it("ignores every event once terminal", () => {
+    for (const terminal of ["executed", "failed", "rejected"] as const) {
+      const proposal = makeProposal(terminal);
+      const events: Parameters<typeof dispatchProposalEvent>[1][] = [
+        { type: "DELIBERATE" },
+        { type: "APPROVE", tally: makeTally(true) },
+        { type: "REJECT" },
+        { type: "CONTROL_PASS", result: makeControl(true) },
+        { type: "CONTROL_FAIL" },
+        { type: "EXECUTE_SUCCESS" },
+        { type: "FAIL" },
+        { type: "DISCARD" },
+        { type: "ERROR", message: "late" },
+      ];
+      for (const event of events) {
+        expect(dispatchProposalEvent(proposal, event).ok).toBe(false);
+        expect(proposal.status).toBe(terminal);
+      }
+    }
   });
 });

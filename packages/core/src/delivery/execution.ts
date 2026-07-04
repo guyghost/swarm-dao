@@ -2,7 +2,8 @@
 // Swarm DAO Core — Proposal Execution
 // ============================================================
 
-import { canTransition, transitionProposal } from "../governance/lifecycle.js";
+import { dispatchProposalEvent } from "../governance/proposal.utils.js";
+import { recordProposalExecuted } from "../observability/metrics.js";
 import { captureSnapshot, getState, storeVerification } from "../persistence.js";
 import type { ExecutionSnapshot, ExecutionVerification, Proposal, VerificationStatus } from "../types/index.js";
 import { generateDeliveryPlan } from "./plans.js";
@@ -44,7 +45,7 @@ export async function executeProposal(proposal: Proposal): Promise<ExecutionResu
     state.deliveryPlans[proposal.id] = plan;
   }
 
-  if (!canTransition(proposal.status, "executed")) {
+  if (proposal.status !== "controlled") {
     return { success: false, result: `Cannot execute proposal from status "${proposal.status}"` };
   }
 
@@ -63,10 +64,11 @@ export async function executeProposal(proposal: Proposal): Promise<ExecutionResu
   await captureSnapshot(proposal.id, snapshot);
 
   // Advance state machine: controlled → executed
-  const transition = transitionProposal(proposal, "execute");
-  if (!transition.success) {
-    return { success: false, result: transition.error ?? `Cannot execute proposal from status "${proposal.status}"` };
+  const transition = dispatchProposalEvent(proposal, { type: "EXECUTE_SUCCESS" });
+  if (!transition.ok) {
+    return { success: false, result: transition.error };
   }
+  recordProposalExecuted(proposal.id, proposal.type);
   proposal.executionResult = `Executed with delivery plan: ${plan.branchStrategy}`;
 
   return {

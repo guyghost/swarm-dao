@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, it, spyOn } from "bun:test";
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import type { Proposal } from "@guyghost/swarm-dao-core";
 import {
   addVote,
   createInitialState,
   createProposal,
+  dispatchProposalEvent,
   getAuditLog,
   getDaoRoot,
   getProposal,
@@ -18,9 +20,43 @@ import {
   recordAudit,
   saveState,
   setState,
-  updateProposalStatus,
   updateStorageSettings,
 } from "@guyghost/swarm-dao-core";
+
+// Drive a proposal through the sanctioned dispatch path to "executed".
+// Replaces the deleted updateProposalStatus() backdoor in fixtures.
+function resolveToExecuted(proposal: Proposal) {
+  dispatchProposalEvent(proposal, { type: "DELIBERATE" });
+  dispatchProposalEvent(proposal, {
+    type: "APPROVE",
+    tally: {
+      proposalId: proposal.id,
+      approved: true,
+      quorumMet: true,
+      totalAgents: 5,
+      votingAgents: 5,
+      quorumPercent: 100,
+      weightedFor: 10,
+      weightedAgainst: 0,
+      totalVotingWeight: 10,
+      approvalScore: 100,
+      votes: [],
+    },
+  });
+  dispatchProposalEvent(proposal, {
+    type: "CONTROL_PASS",
+    result: {
+      proposalId: proposal.id,
+      timestamp: new Date().toISOString(),
+      allGatesPassed: true,
+      blockerCount: 0,
+      warningCount: 0,
+      gates: [],
+      checklist: [],
+    },
+  });
+  dispatchProposalEvent(proposal, { type: "EXECUTE_SUCCESS" });
+}
 
 describe("persistence", () => {
   beforeEach(() => {
@@ -46,9 +82,9 @@ describe("persistence", () => {
     expect(getProposal(p.id)?.votes.length).toBe(1);
   });
 
-  it("updates proposal status", async () => {
+  it("advances proposal status through the sanctioned dispatch path", async () => {
     const p = await createProposal("Status test", "product-feature", "Test", "user");
-    await updateProposalStatus(p.id, "executed");
+    resolveToExecuted(p);
     expect(getProposal(p.id)?.status).toBe("executed");
     expect(getProposal(p.id)?.resolvedAt).toBeDefined();
   });
@@ -240,7 +276,8 @@ describe("persistence", () => {
       // the write cache is populated with their current on-disk content.
       const p1 = await createProposal("P1", "product-feature", "d", "user");
       await createProposal("P2", "product-feature", "d", "user");
-      await updateProposalStatus(p1.id, "executed");
+      resolveToExecuted(p1);
+      await saveState();
 
       const writeSpy = spyOn(fs, "writeFile");
 

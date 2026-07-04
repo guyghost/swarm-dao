@@ -1,147 +1,70 @@
+// ============================================================
+// Swarm DAO Core — Proposal Dispatch Service
+// ------------------------------------------------------------
+// The only sanctioned way to mutate `proposal.status`. Every
+// runtime path (host-tools, execution, pi/opencode adapters) goes
+// through `dispatchProposalEvent`: it rehydrates an actor at the
+// proposal's persisted status, asks the machine whether the event
+// is permitted (guards included), and only then writes the new
+// status back to the proposal. There is no other status writer.
+// ============================================================
+
 import { createActor } from "xstate";
-import type { PipelineStage, Proposal } from "../types/index.js";
+import type { Proposal, ProposalStatus } from "../types/index.js";
 import {
-  type ProposalContext,
+  createProposalMachine,
+  isProposalFinal,
   type ProposalEvent,
   type ProposalMachineInput,
-  proposalMachine,
 } from "./proposal.machine.js";
 
-/**
- * Creates an XState actor for a proposal
- */
-export function createProposalActor(proposal: Proposal, initialStage?: PipelineStage) {
-  const initialContext: ProposalMachineInput = {
-    proposal,
-    deliberationCount: 0,
-    retryCount: 0,
-    lastTransitionTime: new Date().toISOString(),
-    stage: initialStage ?? "intake",
-    status: proposal.status,
-  };
+export type DispatchResult = { ok: true; status: ProposalStatus } | { ok: false; error: string };
 
-  const actor = createActor(proposalMachine, {
-    input: initialContext,
+/**
+ * Apply a lifecycle event to a proposal. Enforces the machine's
+ * topology AND its guards. On success, `proposal.status` (and
+ * `proposal.resolvedAt` for terminal states) is updated in place.
+ *
+ * Returns `{ ok: false, error }` when the event is not permitted
+ * from the current status — the caller must surface that error and
+ * MUST NOT mutate the status itself.
+ */
+export function dispatchProposalEvent(proposal: Proposal, event: ProposalEvent): DispatchResult {
+  // Terminal states are final: no event may leave them. This guard
+  // makes the invariant explicit rather than relying on the actor's
+  // "done" status, so the model stays correct regardless of how the
+  // XState runtime treats root-level global transitions once done.
+  if (isProposalFinal(proposal.status)) {
+    return {
+      ok: false,
+      error: `Proposal is in terminal status "${proposal.status}"; no transitions are permitted.`,
+    };
+  }
+
+  const machine = createProposalMachine(proposal.status);
+  const actor = createActor(machine, {
+    input: {
+      proposal,
+      lastTransitionTime: new Date().toISOString(),
+    } satisfies ProposalMachineInput,
   });
   actor.start();
-  return actor;
-}
 
-/**
- * Moves a proposal through its states sequentially
- */
-export function sendProposalEvent(actor: ReturnType<typeof createProposalActor>, event: ProposalEvent) {
+  const before = actor.getSnapshot();
+  if (!before.can(event)) {
+    return {
+      ok: false,
+      error: `Event "${event.type}" is not permitted from status "${proposal.status}".`,
+    };
+  }
+
   actor.send(event);
-  return actor.getSnapshot();
-}
+  const status = actor.getSnapshot().value as ProposalStatus;
 
-/**
- * Returns the machine's current context
- */
-export function getProposalContext(actor: ReturnType<typeof createProposalActor>) {
-  return actor.getSnapshot().context;
-}
-
-/**
- * Returns the machine's current state
- */
-export function getProposalState(actor: ReturnType<typeof createProposalActor>) {
-  return actor.getSnapshot().value;
-}
-
-/**
- * Checks whether the proposal can take a given transition
- */
-export function canSendProposalEvent(actor: ReturnType<typeof createProposalActor>, eventType: string): boolean {
-  try {
-    if (eventType === "ERROR") {
-      return false;
-    }
-
-    const state = actor.getSnapshot();
-    return state.can({ type: eventType } as ProposalEvent);
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Returns all possible transitions from the current state
- */
-export function getAvailableProposalEvents(actor: ReturnType<typeof createProposalActor>): string[] {
-  const eventTypes: Array<ProposalEvent["type"]> = [
-    "SUBMIT",
-    "QUALIFY",
-    "ANALYZE",
-    "CRITIQUE",
-    "SCORE",
-    "SEND_TO_COUNCIL",
-    "VOTE",
-    "APPROVE",
-    "REJECT",
-    "REQUEST_SPEC",
-    "REVIEW_SPEC",
-    "APPROVE_SPEC",
-    "EXECUTION_GATE_PASS",
-    "EXECUTION_GATE_FAIL",
-    "EXECUTE",
-    "EXECUTION_SUCCESS",
-    "EXECUTION_FAILED",
-    "POSTMORTEM",
-    "RETRY",
-    "DISCARD",
-  ];
-
-  return eventTypes.filter((eventType) => canSendProposalEvent(actor, eventType));
-}
-
-/**
- * Helper for auto-progressing a proposal through the pipeline
- * Uses linear progression events
- */
-export function progressProposal(actor: ReturnType<typeof createProposalActor>): string | null {
-  const current = actor.getSnapshot().value;
-  const progressMap: Record<string, ProposalEvent["type"]> = {
-    draft: "SUBMIT",
-    intake: "QUALIFY",
-    qualification: "ANALYZE",
-    analysis: "CRITIQUE",
-    critique: "SCORE",
-    scoring: "SEND_TO_COUNCIL",
-    council: "VOTE",
-    voting: "APPROVE",
-    specDraft: "REQUEST_SPEC",
-    specReview: "APPROVE_SPEC",
-    executionGate: "EXECUTION_GATE_PASS",
-  };
-
-  const nextEventType = progressMap[String(current)];
-  if (nextEventType && canSendProposalEvent(actor, nextEventType)) {
-    const event = { type: nextEventType } as ProposalEvent;
-    sendProposalEvent(actor, event);
-    return nextEventType;
+  proposal.status = status;
+  if (isProposalFinal(status) && !proposal.resolvedAt) {
+    proposal.resolvedAt = new Date().toISOString();
   }
 
-  return null;
-}
-
-/**
- * Creates a helper to trigger rejection events easily
- */
-export function rejectProposal(actor: ReturnType<typeof createProposalActor>) {
-  sendProposalEvent(actor, { type: "REJECT" });
-  return getProposalState(actor);
-}
-
-/**
- * Listener for observing state changes
- */
-export function onProposalStateChange(
-  actor: ReturnType<typeof createProposalActor>,
-  callback: (state: string, context: ProposalContext) => void,
-) {
-  const subscription = actor.subscribe((snapshot) => {
-    callback(String(snapshot.value), snapshot.context);
-  });
-  return () => subscription.unsubscribe();
+  return { ok: true, status };
 }

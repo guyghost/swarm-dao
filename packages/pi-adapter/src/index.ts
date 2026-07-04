@@ -16,6 +16,7 @@ import {
   createDispatchModelContext,
   createProposal,
   createProposalsBatch,
+  dispatchProposalEvent,
   dispatchSwarm,
   // Delivery
   execCommand,
@@ -67,7 +68,6 @@ import {
   storeSynthesis,
   synthesize,
   tallyVotes,
-  transitionProposal,
   writeFileContained,
 } from "@guyghost/swarm-dao-core";
 import { Type } from "typebox";
@@ -598,8 +598,8 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
         return toolResult(`Proposal #${proposal.id} is ${proposal.status}, must be open.`);
 
       // Transition
-      const transition = transitionProposal(proposal, "deliberate");
-      if (!transition.success) return toolResult(`Cannot deliberate: ${transition.error}`);
+      const transition = dispatchProposalEvent(proposal, { type: "DELIBERATE" });
+      if (!transition.ok) return toolResult(`Cannot deliberate: ${transition.error}`);
 
       await recordAudit(proposal.id, "governance", "deliberation_started", "system", `Deliberation on #${proposal.id}`);
       await saveState();
@@ -666,7 +666,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
 
       // Final transition
       if (tally.approved) {
-        transitionProposal(proposal, "approve");
+        dispatchProposalEvent(proposal, { type: "APPROVE", tally });
         await recordAudit(
           proposal.id,
           "intelligence",
@@ -675,7 +675,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
           `Approved: ${tally.approvalScore}%`,
         );
       } else {
-        transitionProposal(proposal, "reject");
+        dispatchProposalEvent(proposal, { type: "REJECT" });
         await recordAudit(
           proposal.id,
           "intelligence",
@@ -711,7 +711,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
       const result = runGates(proposal, state.config);
 
       if (result.allGatesPassed) {
-        transitionProposal(proposal, "control");
+        dispatchProposalEvent(proposal, { type: "CONTROL_PASS", result });
         await recordAudit(proposal.id, "control", "gates_passed", "system", "All gates passed");
         // Generate delivery plan after gates pass, making it available before execution
         if (!state.deliveryPlans[proposal.id]) {
@@ -719,7 +719,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
           await storeDeliveryPlan(proposal.id, plan);
         }
       } else {
-        transitionProposal(proposal, "fail");
+        dispatchProposalEvent(proposal, { type: "CONTROL_FAIL" });
         await recordAudit(proposal.id, "control", "gates_failed", "system", `${result.blockerCount} blockers`);
       }
 

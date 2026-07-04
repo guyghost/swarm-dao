@@ -5,6 +5,7 @@ import {
   classifyRiskZone,
   createInitialState,
   DEFAULT_CONFIG,
+  dispatchProposalEvent,
   executeAmendment,
   formatAgentsTable,
   getState,
@@ -13,7 +14,6 @@ import {
   setState,
   statusLabel,
   tallyVotes,
-  transitionProposal,
   validateAmendmentPayload,
 } from "@guyghost/swarm-dao-core";
 
@@ -212,12 +212,27 @@ describe("governance/lifecycle", () => {
       createdAt: new Date().toISOString(),
     };
 
-    const r1 = transitionProposal(proposal, "deliberate");
-    expect(r1.success).toBe(true);
+    const r1 = dispatchProposalEvent(proposal, { type: "DELIBERATE" });
+    expect(r1.ok).toBe(true);
     expect(proposal.status).toBe("deliberating");
 
-    const r2 = transitionProposal(proposal, "approve");
-    expect(r2.success).toBe(true);
+    const r2 = dispatchProposalEvent(proposal, {
+      type: "APPROVE",
+      tally: {
+        proposalId: 1,
+        approved: true,
+        quorumMet: true,
+        totalAgents: 5,
+        votingAgents: 5,
+        quorumPercent: 100,
+        weightedFor: 10,
+        weightedAgainst: 0,
+        totalVotingWeight: 10,
+        approvalScore: 100,
+        votes: [],
+      },
+    });
+    expect(r2.ok).toBe(true);
     expect(proposal.status).toBe("approved");
   });
 
