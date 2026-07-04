@@ -43,6 +43,10 @@ function isRetryableStatus(status: number): boolean {
   return status === 429 || (status >= 500 && status <= 599);
 }
 
+function isIdempotentMethod(method: string): boolean {
+  return method === "GET" || method === "HEAD" || method === "OPTIONS" || method === "PUT" || method === "DELETE";
+}
+
 function parseRetryAfter(value: string | null): number | null {
   if (!value) return null;
   const trimmed = value.trim();
@@ -154,10 +158,12 @@ async function performAttempt(
 
 export async function requestJson<T>(
   url: string,
-  { timeoutMs = 15_000, allowStatuses = [], maxAttempts = 3, _fetch, ...options }: JsonRequestOptions = {},
+  { timeoutMs = 15_000, allowStatuses = [], maxAttempts, _fetch, ...options }: JsonRequestOptions = {},
 ): Promise<{ status: number; data: T | null }> {
   const fetchImpl: FetchImplementation = _fetch ?? globalThis.fetch;
-  const attempts = Math.max(1, Math.trunc(maxAttempts));
+  const method = options.method?.toUpperCase() ?? "GET";
+  const defaultAttempts = isIdempotentMethod(method) ? 3 : 1;
+  const attempts = Math.max(1, Math.trunc(maxAttempts ?? defaultAttempts));
   for (let attempt = 1; attempt <= attempts; attempt++) {
     const isLastAttempt = attempt === attempts;
     const outcome = await performAttempt(url, options, allowStatuses, timeoutMs, fetchImpl);

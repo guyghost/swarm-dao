@@ -90,4 +90,20 @@ weight: 3
       readFileSpy.mockRestore();
     }
   });
+
+  it("does not reuse cached markdown merge across different base agents", async () => {
+    const agentsDir = path.join(tmpdir(), `swarm-agents-base-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    await fs.mkdir(agentsDir, { recursive: true });
+
+    const baseAgentsA = initializeAgents();
+    const baseAgentsB = baseAgentsA.map((agent) =>
+      agent.id === "architect" ? { ...agent, name: "Architect Override From Base B" } : agent,
+    );
+
+    const fromBaseA = await loadAgentDefinitionsFromMarkdown(agentsDir, baseAgentsA);
+    const fromBaseB = await loadAgentDefinitionsFromMarkdown(agentsDir, baseAgentsB);
+
+    expect(fromBaseA.find((agent) => agent.id === "architect")?.name).toBe("Solution Architect");
+    expect(fromBaseB.find((agent) => agent.id === "architect")?.name).toBe("Architect Override From Base B");
+  });
 });

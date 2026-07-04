@@ -342,18 +342,21 @@ function parseAgentFrontmatter(content: string): Partial<DAOAgent> & { id?: stri
 // dao-*.md entry names plus their mtimeMs and size). On a signature hit the
 // cached merged result is returned WITHOUT re-reading any files.
 //
-// Correctness: loadAgentDefinitionsFromMarkdown is only called internally by
-// loadAgentDefinitions, where the baseAgents passed for a given candidate dir
-// are deterministic for a given set of file signatures, so dir-level caching
-// composes correctly across candidate dirs. Callers of the returned agents only
-// READ agent fields (never mutate the array or its elements), so the cached
-// array is returned directly. Do not mutate the returned array.
+// Correctness: cache entries include a stable fingerprint of `baseAgents`, so
+// callers with different base arrays for the same directory/signature do not
+// cross-hit each other's cached merge result. Callers of the returned agents
+// only READ agent fields (never mutate the array or its elements), so the
+// cached array is returned directly. Do not mutate the returned array.
 interface AgentDefinitionCacheEntry {
   signature: string;
   result: DAOAgent[];
 }
 
 const agentDefinitionCache = new Map<string, AgentDefinitionCacheEntry>();
+
+function baseAgentsFingerprint(baseAgents: DAOAgent[]): string {
+  return JSON.stringify(baseAgents.map((agent) => ({ ...agent, model: agent.model ?? DEFAULT_AGENT_MODEL })));
+}
 
 /** Clear the module-level agent definition cache. Intended for use in tests. */
 export function __resetAgentDefinitionCache(): void {
@@ -393,6 +396,7 @@ export async function loadAgentDefinitionsFromMarkdown(
   baseAgents: DAOAgent[] = DEFAULT_AGENTS,
 ): Promise<DAOAgent[]> {
   const absDir = path.resolve(agentsDir);
+  const cacheKey = `${absDir}:${baseAgentsFingerprint(baseAgents)}`;
 
   let entries: string[];
   try {
@@ -420,14 +424,14 @@ export async function loadAgentDefinitionsFromMarkdown(
     return withDefaultModel(baseAgents);
   }
 
-  const cached = agentDefinitionCache.get(absDir);
+  const cached = agentDefinitionCache.get(cacheKey);
   if (cached && cached.signature === signature) {
     // Cache hit: return the merged result without re-reading files.
     return cached.result;
   }
 
   const result = await readAndMergeMarkdownAgents(absDir, daoEntries, baseAgents);
-  agentDefinitionCache.set(absDir, { signature, result });
+  agentDefinitionCache.set(cacheKey, { signature, result });
   return result;
 }
 

@@ -61,9 +61,9 @@ function escapeRegExp(value: string): string {
  *
  * Each regex carries the `g` flag, so a single `String.prototype.replace`
  * call replaces every occurrence of that key in the message — identical to the
- * previous per-call behavior. `String.prototype.replace` always matches from
- * the start of the string (it neither reads nor mutates `lastIndex`), so the
- * compiled global regexes are safe to reuse across calls.
+ * previous per-call behavior. For global regexes, `String.prototype.replace`
+ * resets `lastIndex` to 0 before returning, so the compiled global regexes are
+ * safe to reuse across calls.
  */
 const SENSITIVE_REDACT_PATTERNS: ReadonlyArray<RegExp> = Array.from(SENSITIVE_KEYS).map((key) => {
   const escapedKey = escapeRegExp(key);

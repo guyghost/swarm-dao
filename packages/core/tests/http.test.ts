@@ -93,4 +93,18 @@ describe("integrations/http.ts — retry with backoff", () => {
     expect((error as HttpRequestError).url).toBe("https://example.com/e");
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
+
+  it("(f) does NOT retry non-idempotent POST requests by default", async () => {
+    const fetchMock = mock((_url: string) => Promise.resolve(fakeResponse({ ok: false, status: 503, body: "down" })))
+      .mockResolvedValueOnce(fakeResponse({ ok: false, status: 503, body: "down" }))
+      .mockResolvedValueOnce(fakeResponse({ ok: true, status: 200, body: JSON.stringify({ ok: true }) }));
+
+    const error = await requestJson("https://example.com/f", { _fetch: fetchMock, method: "POST" }).catch(
+      (e: unknown) => e,
+    );
+
+    expect(error).toBeInstanceOf(HttpRequestError);
+    expect((error as HttpRequestError).status).toBe(503);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });
