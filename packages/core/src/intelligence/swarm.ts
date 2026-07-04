@@ -117,13 +117,14 @@ export async function dispatchSwarm(
 ): Promise<AgentOutput[]> {
   const instructions = buildDispatchInstructions(proposal, agents, modelContext);
   const outputs: AgentOutput[] = [];
+  const agentById = new Map(agents.map((a) => [a.id, a]));
 
   // Process in batches based on maxConcurrent
   for (let i = 0; i < instructions.length; i += maxConcurrent) {
     const batch = instructions.slice(i, i + maxConcurrent);
 
     const batchPromises = batch.map(async (inst) => {
-      const agent = agents.find((a) => a.id === inst.agentId);
+      const agent = agentById.get(inst.agentId);
       if (!agent) throw new Error(`Agent ${inst.agentId} not found`);
 
       onUpdate?.({

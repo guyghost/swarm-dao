@@ -51,15 +51,32 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function sanitizeErrorMessage(message: string): string {
+/**
+ * Precompiled redaction patterns, one per key in `SENSITIVE_KEYS`.
+ *
+ * The previous implementation rebuilt up to five `RegExp` objects (one per
+ * sensitive key) on *every* `sanitizeErrorMessage` call, even though the
+ * pattern string for a given key is constant. We now compile each combined
+ * regex exactly once at module load and reuse it.
+ *
+ * Each regex carries the `g` flag, so a single `String.prototype.replace`
+ * call replaces every occurrence of that key in the message — identical to the
+ * previous per-call behavior. For global regexes, `String.prototype.replace`
+ * resets `lastIndex` to 0 before returning, so the compiled global regexes are
+ * safe to reuse across calls.
+ */
+const SENSITIVE_REDACT_PATTERNS: ReadonlyArray<RegExp> = Array.from(SENSITIVE_KEYS).map((key) => {
+  const escapedKey = escapeRegExp(key);
+  const keyPattern = `(?:"|')?\\b${escapedKey}\\b(?:"|')?`;
+  const separatorPattern = "\\s*(?:=|:)\\s*";
+  const quotedValuePattern = `"(?:\\\\.|[^"\\\\])*"|'(?:\\\\.|[^'\\\\])*'`;
+  const bareValuePattern = "[^\\s,}\\];)\\]]+";
+  return new RegExp(`(${keyPattern}${separatorPattern})(${quotedValuePattern}|${bareValuePattern})`, "gi");
+});
+
+export function sanitizeErrorMessage(message: string): string {
   let sanitized = message;
-  for (const key of SENSITIVE_KEYS) {
-    const escapedKey = escapeRegExp(key);
-    const keyPattern = `(?:"|')?\\b${escapedKey}\\b(?:"|')?`;
-    const separatorPattern = "\\s*(?:=|:)\\s*";
-    const quotedValuePattern = `"(?:\\\\.|[^"\\\\])*"|'(?:\\\\.|[^'\\\\])*'`;
-    const bareValuePattern = "[^\\s,}\\];)\\]]+";
-    const regex = new RegExp(`(${keyPattern}${separatorPattern})(${quotedValuePattern}|${bareValuePattern})`, "gi");
+  for (const regex of SENSITIVE_REDACT_PATTERNS) {
     sanitized = sanitized.replace(regex, (_match, prefix: string, value: string) => {
       const quote = value.startsWith('"') ? '"' : value.startsWith("'") ? "'" : "";
       return quote ? `${prefix}${quote}[REDACTED]${quote}` : `${prefix}[REDACTED]`;
