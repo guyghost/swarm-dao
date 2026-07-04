@@ -6,6 +6,8 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { AgentOutput, DAOAgent, HostAdapter, Vote } from "@guyghost/swarm-dao-core";
 import {
+  // Commands registry (source of truth for the /dao surface)
+  buildDaoHelpMessage,
   buildDispatchInstructions,
   calculateCompositeScore,
   classifyRiskZone,
@@ -75,24 +77,11 @@ const OPENCODE_ONBOARDING_MESSAGE = [
 const sessionModels = new Map<string, string>();
 const hostDefaultModels = new Map<string, string | undefined>();
 
-const OPENCODE_HELP_MESSAGE = [
-  "# DAO Help",
-  "",
-  "Recommended flow:",
-  "1. `dao_setup`",
-  '2. `dao_propose title="..." type="product-feature" description="..."`',
-  "3. `dao_deliberate proposalId=1`",
-  "4. Spawn sub-agents via `task` using the resolved models from the dispatch plan",
-  "5. `dao_record_outputs proposalId=1 outputs='[...]'`",
-  "6. `dao_control proposalId=1`",
-  "7. `dao_execute proposalId=1`",
-  "",
-  "Discovery tools:",
-  "- `dao_list` — proposals overview",
-  "- `dao_agents` — configured agents",
-  "- `dao_dashboard` — governance health summary",
-  "- `dao_audit` — audit trail",
-].join("\n");
+const OPENCODE_HELP_MESSAGE = buildDaoHelpMessage({
+  host: "opencode",
+  manualDeliberation: true,
+  controlTool: "dao_control",
+});
 
 const FORBIDDEN_JSON_KEYS = new Set(["__proto__", "prototype", "constructor"]);
 

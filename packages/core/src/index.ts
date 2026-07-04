@@ -4,6 +4,8 @@
 
 // Agents
 export * from "./agents/index.js";
+// Commands registry (`/dao` surface — source of truth for every adapter)
+export * from "./commands/index.js";
 // Configuration
 export * from "./config.js";
 // Control (L4)

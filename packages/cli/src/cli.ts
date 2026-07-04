@@ -14,6 +14,7 @@ import {
   executeProposal,
   getAllAuditLog,
   getAuditLog,
+  getDaoCommandsByPhase,
   getDaoRoot,
   getOrCreateState,
   getProposal,
@@ -29,8 +30,10 @@ import {
   loadState,
   PROPOSAL_TYPES,
   recordAudit,
+  resolveDaoCommand,
   saveState,
   setState,
+  suggestDaoCommand,
 } from "@guyghost/swarm-dao-core";
 
 // ── Helpers ─────────────────────────────────────────────────
@@ -77,40 +80,81 @@ async function ensureLoaded(cwd: string): Promise<void> {
 
 // ── Commands ────────────────────────────────────────────────
 
-const HELP = `swarm-dao — DAO governance CLI
+/**
+ * Commands the CLI actually implements, in the order they should appear in
+ * `swarm-dao help`. The registry is the source of truth for each command's
+ * summary and argument signature; this list only declares coverage so we never
+ * advertise a command the CLI cannot run.
+ */
+const CLI_IMPLEMENTED = [
+  "init",
+  "setup",
+  "propose",
+  "list",
+  "show",
+  "vote",
+  "ship",
+  "github-config",
+  "github-branch",
+  "github-pr",
+  "config",
+  "audit",
+  "status",
+  "help",
+] as const;
 
-Usage:
-  swarm-dao <command> [options]
+/**
+ * Rich, CLI-specific usage detail that the registry's one-line summary cannot
+ * capture (flags, multi-line examples). Keyed by command id.
+ */
+const CLI_USAGE_DETAILS: Record<string, string> = {
+  propose: "  propose --title <t> --type <T> --description <d> [--by <name>]\n        [--depends-on <id1,id2,...>]",
+  list: "  list [--status <s>] [--type <T>]",
+  show: "  show <id>",
+  vote: "  vote <id> --position <for|against|abstain> --reasoning <text>\n        [--weight <n>] [--agent <name>]",
+  ship: "  ship <id> [--cascade] [--force]",
+  "github-config": "  github-config --token <t> --owner <o> --repo <r>",
+  "github-branch": "  github-branch <proposal-id>",
+  "github-pr": "  github-pr <proposal-id> --head-branch <b>",
+  config: "  config",
+  audit: "  audit [--proposal <id>]",
+};
 
-Commands:
-  init                          Initialize .dao/ in current directory
-  setup                         Initialize DAO with default agents
-  propose --title <t> --type <T> --description <d> [--by <name>]
-          [--depends-on <id1,id2,...>]
-                                Create a new proposal
-  list [--status <s>] [--type <T>]
-                                List proposals
-  show <id>                     Show full proposal details
-  vote <id> --position <for|against|abstain> --reasoning <text>
-        [--weight <n>] [--agent <name>]
-                                Cast a deterministic vote
-  ship <id> [--cascade] [--force]
-                                Ship (execute) a proposal.
-                                --cascade  Automatically ship unexecuted
-                                           dependencies first (in order).
-                                --force    Skip dependency checks.
-  github-config --token <t> --owner <o> --repo <r>
-                                Configure GitHub integration
-  github-branch <proposal-id>   Create a branch for a proposal
-  github-pr <proposal-id> --head-branch <b>
-                                Open a pull request for a proposal
-  config                        Print DAO configuration
-  audit [--proposal <id>]       Print audit log
-  status                        Print DAO status summary
-  help                          Print this help
+/** All commands in the registry, grouped by phase, for lookup by id. */
+const CLI_BY_PHASE = getDaoCommandsByPhase("cli");
+const CLI_REGISTRY_INDEX = new Map(
+  Object.values(CLI_BY_PHASE)
+    .flat()
+    .map((c) => [c.id, c]),
+);
 
-Proposal types: ${PROPOSAL_TYPES.join(", ")}
-`;
+function buildCliHelp(): string {
+  const lines: string[] = [
+    "swarm-dao — DAO governance CLI",
+    "",
+    "Usage:",
+    "  swarm-dao <command> [options]",
+    "",
+    "Commands:",
+  ];
+  for (const id of CLI_IMPLEMENTED) {
+    const cmd = CLI_REGISTRY_INDEX.get(id);
+    const summary = cmd?.summary ?? "";
+    const detail = CLI_USAGE_DETAILS[id];
+    if (detail) {
+      lines.push(detail);
+      if (summary) lines.push(`        ${summary}`);
+    } else {
+      const arg = cmd?.args ? ` ${cmd.args}` : "";
+      lines.push(`  ${id}${arg}`);
+      if (summary) lines.push(`        ${summary}`);
+    }
+  }
+  lines.push(`\nProposal types: ${PROPOSAL_TYPES.join(", ")}`);
+  return `${lines.join("\n")}\n`;
+}
+
+const HELP = buildCliHelp();
 
 async function cmdInit(cwd: string): Promise<void> {
   const root = await initStorage(cwd);
@@ -538,9 +582,13 @@ export async function main(argv: string[], cwd: string = process.cwd()): Promise
       case "github-pr":
         await cmdGithubPr(cwd, positional, flags);
         return 0;
-      default:
-        process.stderr.write(`unknown command: ${cmd}\n\n${HELP}`);
+      default: {
+        const suggestion = resolveDaoCommand(String(cmd ?? ""), "cli")
+          ? ""
+          : `\n${suggestDaoCommand(String(cmd ?? ""), "cli")}\n`;
+        process.stderr.write(`unknown command: ${cmd}${suggestion}\n\n${HELP}`);
         return 1;
+      }
     }
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : String(e);

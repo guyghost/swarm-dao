@@ -242,7 +242,7 @@ describe("swarmDaoExtension", () => {
       expect(result).toContain(`Agents: ${state.agents.length}`);
     });
 
-    it("/dao help returns command usage", async () => {
+    it("/dao help returns the registry-driven command list", async () => {
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
       mod.default(pi);
@@ -251,7 +251,44 @@ describe("swarmDaoExtension", () => {
       const result = await daoCommand?.handler("help", {});
       expect(result).toContain("# /dao Help");
       expect(result).toContain("/dao setup");
-      expect(result).toContain("dao_propose");
+      expect(result).toContain("/dao propose");
+      expect(result).toContain("/dao deliberate");
+      expect(result).toContain("/dao ship");
+    });
+
+    it("/dao <known command> routes to its tool instead of rejecting", async () => {
+      const { initStorage, setState, getOrCreateState, initializeAgents } = await import("@guyghost/swarm-dao-core");
+      await initStorage(process.cwd());
+      const state = getOrCreateState(process.cwd());
+      state.initialized = true;
+      state.agents = initializeAgents();
+      setState(state);
+
+      const mod = await import("@guyghost/swarm-dao-pi-adapter");
+      const pi = createMockPi();
+      mod.default(pi);
+
+      const daoCommand = pi.commands.find((c) => c.name === "/dao");
+      const result = await daoCommand?.handler("deliberate 1", {});
+      expect(result).toContain("dao_deliberate");
+      expect(result).not.toContain("Unknown /dao subcommand");
+    });
+
+    it("/dao list renders the proposal list inline", async () => {
+      const { initStorage, setState, getOrCreateState, initializeAgents } = await import("@guyghost/swarm-dao-core");
+      await initStorage(process.cwd());
+      const state = getOrCreateState(process.cwd());
+      state.initialized = true;
+      state.agents = initializeAgents();
+      setState(state);
+
+      const mod = await import("@guyghost/swarm-dao-pi-adapter");
+      const pi = createMockPi();
+      mod.default(pi);
+
+      const daoCommand = pi.commands.find((c) => c.name === "/dao");
+      const result = await daoCommand?.handler("list", {});
+      expect(result).toContain("No proposals yet");
     });
 
     it("/dao setup initializes DAO when uninitialized", async () => {
