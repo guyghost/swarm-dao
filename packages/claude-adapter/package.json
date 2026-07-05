@@ -23,6 +23,8 @@
     }
   },
   "scripts": {
+    "generate-commands": "bun run scripts/generate-commands.ts",
+    "prebuild": "bun run generate-commands",
     "build": "tsc",
     "test": "bun test",
     "lint": "biome check .",

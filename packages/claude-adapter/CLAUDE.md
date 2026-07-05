@@ -28,13 +28,24 @@ gates, then executed and tracked.
 
 ## Slash commands
 
-This package ships ready-made slash commands under `commands/`:
+This package ships a full `/dao:*` namespace with native tab completion.
+Copy `commands/` into `.claude/commands/` to enable them. The colon-namespaced
+commands are auto-generated as flat files `commands/dao:<id>.md` (colons in
+filenames, not subdirectories).
 
-- `/dao-propose` — scaffold a proposal
-- `/dao-deliberate` — deliberate then record outputs
-- `/dao-ship` — control, execute, and ship a proposal
+### `/dao:*` namespace (generated from the registry)
 
-Copy the `commands/` directory into `.claude/commands/` to enable them.
+Every lifecycle, discovery, governance, and GitHub command is available as
+`/dao:<id>`:
+
+- `/dao:setup`, `/dao:propose`, `/dao:deliberate`, `/dao:record-outputs`,
+  `/dao:control`, `/dao:execute`, `/dao:ship`, `/dao:rollback`
+- `/dao:help`, `/dao:status`, `/dao:list`, `/dao:agents`, `/dao:plan`,
+  `/dao:artefacts`, `/dao:audit`, `/dao:dry-run`, `/dao:roundtable`
+- `/dao:rate`, `/dao:update-proposal`, `/dao:propose-amendment`
+- `/dao:github-config`, `/dao:github-branch`, `/dao:github-pr`
+
+Run `bun run generate-commands` to regenerate the namespace from the registry.
 
 ## Discovery
 

@@ -279,7 +279,7 @@ export function createSwarmDaoMcpServer(workDir = resolveDaoRoot()): Server {
         case "dao_help": {
           const state = getState();
           if (!state.initialized) return textResult(DAO_ONBOARDING_MESSAGE);
-          return textResult(buildDaoHelpMessage({ manualDeliberation: true, controlTool }));
+          return textResult(buildDaoHelpMessage({ host: "mcp", manualDeliberation: true, controlTool }));
         }
         case "dao_setup":
           return textResult(await handleDaoSetup(ctx, args.useDefaults !== false));

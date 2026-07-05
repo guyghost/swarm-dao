@@ -242,7 +242,7 @@ describe("swarmDaoExtension", () => {
       expect(result).toContain(`Agents: ${state.agents.length}`);
     });
 
-    it("/dao help returns command usage", async () => {
+    it("/dao help returns the registry-driven command list", async () => {
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
       mod.default(pi);
@@ -251,7 +251,164 @@ describe("swarmDaoExtension", () => {
       const result = await daoCommand?.handler("help", {});
       expect(result).toContain("# /dao Help");
       expect(result).toContain("/dao setup");
-      expect(result).toContain("dao_propose");
+      expect(result).toContain("/dao propose");
+      expect(result).toContain("/dao deliberate");
+      expect(result).toContain("/dao ship");
+    });
+
+    it("/dao <known command> routes to its tool instead of rejecting", async () => {
+      const { initStorage, setState, getOrCreateState, initializeAgents } = await import("@guyghost/swarm-dao-core");
+      await initStorage(process.cwd());
+      const state = getOrCreateState(process.cwd());
+      state.initialized = true;
+      state.agents = initializeAgents();
+      setState(state);
+
+      const mod = await import("@guyghost/swarm-dao-pi-adapter");
+      const pi = createMockPi();
+      mod.default(pi);
+
+      const daoCommand = pi.commands.find((c) => c.name === "/dao");
+      const result = await daoCommand?.handler("deliberate 1", {});
+      expect(result).toContain("dao_deliberate");
+      expect(result).not.toContain("Unknown /dao subcommand");
+    });
+
+    it("/dao list renders the proposal list inline", async () => {
+      const { initStorage, setState, getOrCreateState, initializeAgents } = await import("@guyghost/swarm-dao-core");
+      await initStorage(process.cwd());
+      const state = getOrCreateState(process.cwd());
+      state.initialized = true;
+      state.agents = initializeAgents();
+      setState(state);
+
+      const mod = await import("@guyghost/swarm-dao-pi-adapter");
+      const pi = createMockPi();
+      mod.default(pi);
+
+      const daoCommand = pi.commands.find((c) => c.name === "/dao");
+      const result = await daoCommand?.handler("list", {});
+      expect(result).toContain("No proposals yet");
+    });
+
+    it("/dao control routes to dao_check (Pi-specific override)", async () => {
+      const { initStorage, setState, getOrCreateState, initializeAgents } = await import("@guyghost/swarm-dao-core");
+      await initStorage(process.cwd());
+      const state = getOrCreateState(process.cwd());
+      state.initialized = true;
+      state.agents = initializeAgents();
+      setState(state);
+
+      const mod = await import("@guyghost/swarm-dao-pi-adapter");
+      const pi = createMockPi();
+      mod.default(pi);
+
+      const daoCommand = pi.commands.find((c) => c.name === "/dao");
+      const result = await daoCommand?.handler("control 1", {});
+      expect(result).toContain("dao_check");
+      expect(result).not.toContain("dao_control");
+    });
+
+    it("/dao check alias also routes to dao_check", async () => {
+      const { initStorage, setState, getOrCreateState, initializeAgents } = await import("@guyghost/swarm-dao-core");
+      await initStorage(process.cwd());
+      const state = getOrCreateState(process.cwd());
+      state.initialized = true;
+      state.agents = initializeAgents();
+      setState(state);
+
+      const mod = await import("@guyghost/swarm-dao-pi-adapter");
+      const pi = createMockPi();
+      mod.default(pi);
+
+      const daoCommand = pi.commands.find((c) => c.name === "/dao");
+      const result = await daoCommand?.handler("check 1", {});
+      expect(result).toContain("dao_check");
+    });
+
+    it("/dao audit <proposalId> scopes the audit trail", async () => {
+      const { initStorage, setState, getOrCreateState, initializeAgents } = await import("@guyghost/swarm-dao-core");
+      await initStorage(process.cwd());
+      const state = getOrCreateState(process.cwd());
+      state.initialized = true;
+      state.agents = initializeAgents();
+      state.auditLog = [
+        {
+          id: 1,
+          timestamp: "2025-01-01T00:00:00.000Z",
+          proposalId: 1,
+          layer: "governance",
+          action: "action_one",
+          actor: "tester",
+          details: "p1",
+        },
+        {
+          id: 2,
+          timestamp: "2025-01-01T00:00:00.000Z",
+          proposalId: 2,
+          layer: "governance",
+          action: "action_two",
+          actor: "tester",
+          details: "p2",
+        },
+      ];
+      setState(state);
+
+      const mod = await import("@guyghost/swarm-dao-pi-adapter");
+      const pi = createMockPi();
+      mod.default(pi);
+
+      const daoCommand = pi.commands.find((c) => c.name === "/dao");
+      const result = await daoCommand?.handler("audit 1", {});
+      expect(result).toContain("Proposal #1");
+      expect(result).toContain("action_one");
+      expect(result).not.toContain("action_two");
+    });
+
+    it("/dao audit without args shows the full audit log", async () => {
+      const { initStorage, setState, getOrCreateState, initializeAgents } = await import("@guyghost/swarm-dao-core");
+      await initStorage(process.cwd());
+      const state = getOrCreateState(process.cwd());
+      state.initialized = true;
+      state.agents = initializeAgents();
+      state.auditLog = [
+        {
+          id: 1,
+          timestamp: "2025-01-01T00:00:00.000Z",
+          proposalId: 1,
+          layer: "governance",
+          action: "action_one",
+          actor: "tester",
+          details: "p1",
+        },
+      ];
+      setState(state);
+
+      const mod = await import("@guyghost/swarm-dao-pi-adapter");
+      const pi = createMockPi();
+      mod.default(pi);
+
+      const daoCommand = pi.commands.find((c) => c.name === "/dao");
+      const result = await daoCommand?.handler("audit", {});
+      expect(result).toContain("# DAO Audit Trail");
+      expect(result).toContain("action_one");
+    });
+
+    it("/dao audit rejects a non-numeric proposal id", async () => {
+      const { initStorage, setState, getOrCreateState, initializeAgents } = await import("@guyghost/swarm-dao-core");
+      await initStorage(process.cwd());
+      const state = getOrCreateState(process.cwd());
+      state.initialized = true;
+      state.agents = initializeAgents();
+      setState(state);
+
+      const mod = await import("@guyghost/swarm-dao-pi-adapter");
+      const pi = createMockPi();
+      mod.default(pi);
+
+      const daoCommand = pi.commands.find((c) => c.name === "/dao");
+      const result = await daoCommand?.handler("audit notanumber", {});
+      expect(result).toContain("Invalid proposal ID");
     });
 
     it("/dao setup initializes DAO when uninitialized", async () => {
