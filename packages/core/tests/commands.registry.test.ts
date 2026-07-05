@@ -98,6 +98,58 @@ describe("getDaoCommands / getDaoCommandsByPhase", () => {
     expect(cli.some((c) => c.id === "vote")).toBe(true);
   });
 
+  it("filters MCP commands correctly (no CLI-only commands)", () => {
+    const mcp = getDaoCommands("mcp");
+    // CLI-only commands should be excluded
+    expect(mcp.some((c) => c.id === "vote")).toBe(false);
+    expect(mcp.some((c) => c.id === "init")).toBe(false);
+    expect(mcp.some((c) => c.id === "show")).toBe(false);
+    expect(mcp.some((c) => c.id === "config")).toBe(false);
+    // MCP server tools should be included
+    expect(mcp.some((c) => c.id === "help")).toBe(true);
+    expect(mcp.some((c) => c.id === "propose")).toBe(true);
+    expect(mcp.some((c) => c.id === "rate")).toBe(true);
+    expect(mcp.some((c) => c.id === "update-proposal")).toBe(true);
+    expect(mcp.some((c) => c.id === "github-config")).toBe(true);
+  });
+
+  it("filters OpenCode commands correctly (excludes rate, update-proposal, github-*, ship)", () => {
+    const opencode = getDaoCommands("opencode");
+    // OpenCode does NOT have these tools
+    expect(opencode.some((c) => c.id === "rate")).toBe(false);
+    expect(opencode.some((c) => c.id === "update-proposal")).toBe(false);
+    expect(opencode.some((c) => c.id === "ship")).toBe(false);
+    expect(opencode.some((c) => c.id === "github-config")).toBe(false);
+    expect(opencode.some((c) => c.id === "github-branch")).toBe(false);
+    expect(opencode.some((c) => c.id === "github-pr")).toBe(false);
+    // OpenCode DOES have these
+    expect(opencode.some((c) => c.id === "help")).toBe(true);
+    expect(opencode.some((c) => c.id === "propose")).toBe(true);
+    expect(opencode.some((c) => c.id === "record-outputs")).toBe(true);
+    expect(opencode.some((c) => c.id === "list")).toBe(true);
+    expect(opencode.some((c) => c.id === "agents")).toBe(true);
+  });
+
+  it("filters Pi commands correctly (excludes record-outputs, propose-amendment, github-*)", () => {
+    const pi = getDaoCommands("pi");
+    // Pi does NOT register these tools and does not handle them inline
+    expect(pi.some((c) => c.id === "record-outputs")).toBe(false);
+    expect(pi.some((c) => c.id === "propose-amendment")).toBe(false);
+    expect(pi.some((c) => c.id === "github-config")).toBe(false);
+    expect(pi.some((c) => c.id === "github-branch")).toBe(false);
+    expect(pi.some((c) => c.id === "github-pr")).toBe(false);
+    // Pi fulfils these inline via its /dao dispatcher (no dedicated tool needed)
+    expect(pi.some((c) => c.id === "help")).toBe(true);
+    expect(pi.some((c) => c.id === "list")).toBe(true);
+    expect(pi.some((c) => c.id === "agents")).toBe(true);
+    expect(pi.some((c) => c.id === "audit")).toBe(true);
+    // Pi DOES register these as tools
+    expect(pi.some((c) => c.id === "propose")).toBe(true);
+    expect(pi.some((c) => c.id === "rate")).toBe(true);
+    expect(pi.some((c) => c.id === "update-proposal")).toBe(true);
+    expect(pi.some((c) => c.id === "ship")).toBe(true);
+  });
+
   it("groups exclusively by declared phases", () => {
     const grouped = getDaoCommandsByPhase();
     for (const phase of Object.keys(grouped) as DaoCommandPhase[]) {

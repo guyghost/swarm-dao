@@ -1,16 +1,13 @@
 #!/usr/bin/env bun
 /**
  * Projects the canonical DaoCommandRegistry (from @guyghost/swarm-dao-core)
- * into Claude Code slash-command files under commands/dao/<id>.md.
+ * into Claude Code slash-command files as commands/dao:<id>.md.
  *
- * Claude Code maps a subdirectory to the colon namespace, so
- * `commands/dao/propose.md` becomes the `/dao:propose` command with native
+ * Claude Code derives the command name from the filename (not subdirectory),
+ * so `commands/dao:propose.md` becomes the `/dao:propose` command with native
  * tab completion. Regenerate after changing the registry:
  *
  *   bun run scripts/generate-commands.ts
- *
- * The 3 hand-authored flat files (dao-propose.md, dao-deliberate.md,
- * dao-ship.md) are preserved as guided multi-step aliases.
  */
 import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -19,10 +16,10 @@ import {
   DAO_COMMAND_PHASE_ORDER,
   type DaoCommand,
   getDaoCommands,
-} from "@guyghost/swarm-dao-core";
+} from "../../core/src/commands/index.ts";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
-const OUT = path.join(ROOT, "commands", "dao");
+const OUT = path.join(ROOT, "commands");
 const MCP_PREFIX = "mcp__swarm-dao__";
 
 function allowedTools(cmd: DaoCommand): string {
@@ -42,7 +39,7 @@ function body(cmd: DaoCommand): string {
   const toolLine = cmd.tool
     ? `Call the \`${MCP_PREFIX}${cmd.tool}\` MCP tool. Pass \`$ARGUMENTS\` through.`
     : `This is a read-only / host-native command; no MCP tool is required.`;
-  return [cmd.summary + ".", "", usage, "", toolLine].join("\n");
+  return [`${cmd.summary}.`, "", usage, "", toolLine].join("\n");
 }
 
 function render(cmd: DaoCommand): string {
@@ -55,7 +52,8 @@ function render(cmd: DaoCommand): string {
 }
 
 async function main(): Promise<void> {
-  await rm(OUT, { recursive: true, force: true });
+  // Clean up any old dao/ subdirectory
+  await rm(path.join(OUT, "dao"), { recursive: true, force: true });
   await mkdir(OUT, { recursive: true });
 
   const cmds = getDaoCommands("claude");
@@ -67,11 +65,11 @@ async function main(): Promise<void> {
   }
 
   const indexLines: string[] = [
-    "# `/dao` commands (generated)",
+    "# `/dao:*` commands (generated)",
     "",
     "> Auto-generated from `@guyghost/swarm-dao-core`'s `DaoCommandRegistry`.",
     "> Do not edit by hand — run `bun run scripts/generate-commands.ts`.",
-    "> Claude Code exposes each file as `/dao:<id>` (colon namespace, native completion).",
+    "> Claude Code derives command names from filenames (colon namespace in filename).",
     "",
   ];
 
@@ -80,23 +78,17 @@ async function main(): Promise<void> {
     if (!bucket || bucket.length === 0) continue;
     indexLines.push(`## ${DAO_COMMAND_PHASE_LABEL[phase]}`);
     for (const cmd of bucket) {
-      await writeFile(path.join(OUT, `${cmd.id}.md`), render(cmd), "utf-8");
+      await writeFile(path.join(OUT, `dao:${cmd.id}.md`), render(cmd), "utf-8");
       const arg = cmd.args ? ` \`${cmd.args}\`` : "";
-      indexLines.push(`- [\`/dao:${cmd.id}\`](${cmd.id}.md)${arg} — ${cmd.summary}`);
+      indexLines.push(`- [\`/dao:${cmd.id}\`](dao:${cmd.id}.md)${arg} — ${cmd.summary}`);
     }
     indexLines.push("");
   }
 
-  indexLines.push("## Guided aliases (hand-authored)");
-  indexLines.push("- `/dao-propose` — scaffold a proposal with prompts for every field.");
-  indexLines.push("- `/dao-deliberate` — deliberate, spawn sub-agents, record outputs, control.");
-  indexLines.push("- `/dao-ship` — control, execute, ship, and rate in one guided flow.");
-  indexLines.push("");
+  await writeFile(path.join(OUT, "dao-commands.README.md"), indexLines.join("\n"), "utf-8");
 
-  await writeFile(path.join(OUT, "README.md"), indexLines.join("\n"), "utf-8");
-
-  const files = (await readdir(OUT)).filter((f) => f.endsWith(".md") && f !== "README.md");
-  console.log(`✅ Generated ${files.length} commands in commands/dao/`);
+  const files = (await readdir(OUT)).filter((f) => f.startsWith("dao:") && f.endsWith(".md"));
+  console.log(`✅ Generated ${files.length} commands at commands/dao:*.md`);
 }
 
 await main();

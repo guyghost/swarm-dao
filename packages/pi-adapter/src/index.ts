@@ -1089,10 +1089,21 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
     return `# DAO Initialized\n\nAgents: ${agents.length}\nRun \`/dao status\` to view the dashboard.`;
   };
 
-  const renderProposalList = (state: ReturnType<typeof getState>): string => {
-    if (state.proposals.length === 0) return "No proposals yet. Run the `dao_propose` tool to create one.";
-    const rows = state.proposals.map((p) => `- #${p.id} [${p.status}] ${p.title}`).join("\n");
-    return `# Proposals (${state.proposals.length})\n\n${rows}`;
+  const renderProposalList = (
+    state: ReturnType<typeof getState>,
+    filters: { status?: string; type?: string } = {},
+  ): string => {
+    let proposals = state.proposals;
+    if (filters.status) proposals = proposals.filter((p) => p.status === filters.status);
+    if (filters.type) proposals = proposals.filter((p) => p.type === filters.type);
+    if (proposals.length === 0) {
+      const active = filters.status || filters.type;
+      return active
+        ? "No proposals match those filters."
+        : "No proposals yet. Run the `dao_propose` tool to create one.";
+    }
+    const rows = proposals.map((p) => `- #${p.id} [${p.status}] ${p.title} (${p.type})`).join("\n");
+    return `# Proposals (${proposals.length})\n\n${rows}`;
   };
 
   const renderAgentList = (state: ReturnType<typeof getState>): string => {
@@ -1101,11 +1112,37 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
     return `# DAO Agents (${state.agents.length})\n\n${rows}`;
   };
 
+  /** Parse `--status <s>` / `--type <T>` flags from the tokens after `/dao list`. */
+  const parseListFilters = (tokens: string[]): { status?: string; type?: string } => {
+    const filters: { status?: string; type?: string } = {};
+    for (let i = 0; i < tokens.length; i++) {
+      const t = tokens[i];
+      const next = tokens[i + 1];
+      if ((t === "--status" || t === "-s") && next !== undefined) {
+        filters.status = next;
+        i++;
+      } else if ((t === "--type" || t === "-t") && next !== undefined) {
+        filters.type = next;
+        i++;
+      }
+    }
+    return filters;
+  };
+
+  /** Parse a numeric proposal id; returns undefined for missing or non-numeric input. */
+  const parseProposalId = (token: string | undefined): number | undefined => {
+    if (token === undefined) return undefined;
+    const n = Number.parseInt(token, 10);
+    return Number.isNaN(n) ? undefined : n;
+  };
+
   pi.registerCommand("/dao", {
     description: "DAO dispatcher — `/dao help` lists every subcommand (propose, deliberate, control, execute, ship, …)",
     handler: async (args, _ctx) => {
       const raw = args.trim();
-      const subcommand = (raw.split(/\s+/)[0] ?? "").toLowerCase();
+      const tokens = raw.split(/\s+/).filter(Boolean);
+      const subcommand = (tokens[0] ?? "").toLowerCase();
+      const rest = tokens.slice(1);
 
       // `/dao help`
       if (subcommand === "help" || subcommand === "-h" || subcommand === "--help") {
@@ -1131,19 +1168,30 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
         return renderDashboard(state);
       }
 
-      // Read-only commands the slash command fulfils inline.
-      if (subcommand === "list") return renderProposalList(state);
+      // Read-only commands the slash command fulfils inline (arguments preserved).
+      if (subcommand === "list") return renderProposalList(state, parseListFilters(rest));
       if (subcommand === "agents") return renderAgentList(state);
-      if (subcommand === "audit") return formatAuditTrail(getAllAuditLog());
+      if (subcommand === "audit") {
+        const proposalId = parseProposalId(rest[0]);
+        if (rest[0] !== undefined && proposalId === undefined) {
+          return `Invalid proposal ID: \`${rest[0]}\`.\n\nUsage: \`/dao audit [proposalId]\``;
+        }
+        const entries =
+          proposalId !== undefined ? getAllAuditLog().filter((e) => e.proposalId === proposalId) : getAllAuditLog();
+        return formatAuditTrail(entries, proposalId);
+      }
 
       // Registry resolution for the rest.
       const cmd = resolveDaoCommand(subcommand, "pi");
       if (!cmd) return suggestDaoCommand(subcommand, "pi");
 
       // Known command → route to its Pi tool (slash commands can't call tools).
+      // Pi registers the quality-control tool as `dao_check`, so map the registry's
+      // canonical `dao_control` (and the `check` alias) onto it.
       if (cmd.tool) {
-        const argHint = cmd.args ? ` — e.g. \`${cmd.tool} ${cmd.args}\`` : "";
-        return `${cmd.summary}.\n\n→ Run the \`${cmd.tool}\` tool${argHint}.\n\n(\`/dao ${cmd.id}\` is the discovery alias; Pi executes it via the \`${cmd.tool}\` tool.)`;
+        const tool = cmd.tool === "dao_control" ? "dao_check" : cmd.tool;
+        const argHint = cmd.args ? ` — e.g. \`${tool} ${cmd.args}\`` : "";
+        return `${cmd.summary}.\n\n→ Run the \`${tool}\` tool${argHint}.\n\n(\`/dao ${cmd.id}\` is the discovery alias; Pi executes it via the \`${tool}\` tool.)`;
       }
       return suggestDaoCommand(subcommand, "pi");
     },

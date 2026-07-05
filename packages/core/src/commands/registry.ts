@@ -58,6 +58,7 @@ export const DAO_COMMANDS: readonly DaoCommand[] = [
     tool: "dao_setup",
     mutating: true,
     args: "[useDefaults=true]",
+    hosts: ["mcp", "claude", "copilot", "codex", "pi", "opencode"],
   },
   {
     id: "propose",
@@ -66,6 +67,7 @@ export const DAO_COMMANDS: readonly DaoCommand[] = [
     tool: "dao_propose",
     mutating: true,
     args: "title type description [acceptanceCriteria...] [affectedPaths...]",
+    hosts: ["mcp", "claude", "copilot", "codex", "pi", "opencode"],
   },
   {
     id: "deliberate",
@@ -74,6 +76,7 @@ export const DAO_COMMANDS: readonly DaoCommand[] = [
     tool: "dao_deliberate",
     mutating: true,
     args: "proposalId",
+    hosts: ["mcp", "claude", "copilot", "codex", "pi", "opencode"],
   },
   {
     id: "record-outputs",
@@ -93,6 +96,7 @@ export const DAO_COMMANDS: readonly DaoCommand[] = [
     tool: "dao_control",
     mutating: true,
     args: "proposalId",
+    hosts: ["mcp", "claude", "copilot", "codex", "pi", "opencode"],
   },
   {
     id: "execute",
@@ -101,6 +105,7 @@ export const DAO_COMMANDS: readonly DaoCommand[] = [
     tool: "dao_execute",
     mutating: true,
     args: "proposalId",
+    hosts: ["mcp", "claude", "copilot", "codex", "pi", "opencode"],
   },
   {
     id: "ship",
@@ -109,6 +114,7 @@ export const DAO_COMMANDS: readonly DaoCommand[] = [
     tool: "dao_ship",
     mutating: true,
     args: "proposalId [cascade] [force]",
+    hosts: ["mcp", "claude", "copilot", "codex", "pi"],
   },
   {
     id: "rollback",
@@ -117,26 +123,48 @@ export const DAO_COMMANDS: readonly DaoCommand[] = [
     tool: "dao_rollback",
     mutating: true,
     args: "proposalId",
+    hosts: ["mcp", "claude", "copilot", "codex", "pi", "opencode"],
   },
 
   // ── Discovery (read-only) ─────────────────────────────────────
-  { id: "help", phase: "discover", summary: "Show the DAO workflow and every available command", tool: "dao_help" },
+  {
+    id: "help",
+    phase: "discover",
+    summary: "Show the DAO workflow and every available command",
+    tool: "dao_help",
+    hosts: ["mcp", "claude", "copilot", "codex", "opencode", "pi"],
+  },
   {
     id: "status",
     aliases: ["dashboard"],
     phase: "discover",
     summary: "Show the governance health dashboard",
     tool: "dao_dashboard",
+    hosts: ["mcp", "claude", "copilot", "codex", "pi", "opencode"],
   },
-  { id: "list", phase: "discover", summary: "List all proposals", tool: "dao_list", args: "[--status] [--type]" },
+  {
+    id: "list",
+    phase: "discover",
+    summary: "List all proposals",
+    tool: "dao_list",
+    args: "[--status] [--type]",
+    hosts: ["mcp", "claude", "copilot", "codex", "opencode", "pi"],
+  },
   { id: "show", phase: "discover", summary: "Show full details for one proposal", args: "<id>", hosts: ["cli"] },
-  { id: "agents", phase: "discover", summary: "List the configured DAO agents", tool: "dao_agents" },
+  {
+    id: "agents",
+    phase: "discover",
+    summary: "List the configured DAO agents",
+    tool: "dao_agents",
+    hosts: ["mcp", "claude", "copilot", "codex", "opencode", "pi"],
+  },
   {
     id: "plan",
     phase: "discover",
     summary: "Show the delivery plan for a proposal",
     tool: "dao_plan",
     args: "proposalId",
+    hosts: ["mcp", "claude", "copilot", "codex", "pi", "opencode"],
   },
   {
     id: "artefacts",
@@ -144,20 +172,30 @@ export const DAO_COMMANDS: readonly DaoCommand[] = [
     summary: "View the auto-generated artefacts for a proposal",
     tool: "dao_artefacts",
     args: "proposalId",
+    hosts: ["mcp", "claude", "copilot", "codex", "pi", "opencode"],
   },
-  { id: "audit", phase: "discover", summary: "View the audit trail", tool: "dao_audit", args: "[proposalId]" },
+  {
+    id: "audit",
+    phase: "discover",
+    summary: "View the audit trail",
+    tool: "dao_audit",
+    args: "[proposalId]",
+    hosts: ["mcp", "claude", "copilot", "codex", "pi", "opencode"],
+  },
   {
     id: "dry-run",
     phase: "discover",
     summary: "Preview execution without applying changes",
     tool: "dao_dry_run",
     args: "proposalId",
+    hosts: ["mcp", "claude", "copilot", "codex", "pi", "opencode"],
   },
   {
     id: "roundtable",
     phase: "discover",
     summary: "Ask every agent to suggest a proposal idea",
     tool: "dao_roundtable",
+    hosts: ["mcp", "claude", "copilot", "codex", "pi", "opencode"],
   },
 
   // ── Governance / mutation ─────────────────────────────────────
@@ -176,6 +214,7 @@ export const DAO_COMMANDS: readonly DaoCommand[] = [
     tool: "dao_rate",
     mutating: true,
     args: "proposalId score comment",
+    hosts: ["mcp", "claude", "copilot", "codex", "pi"],
   },
   {
     id: "update-proposal",
@@ -184,6 +223,7 @@ export const DAO_COMMANDS: readonly DaoCommand[] = [
     tool: "dao_update_proposal",
     mutating: true,
     args: "proposalId [problemStatement] [acceptanceCriteria] [successMetrics] [rollbackConditions]",
+    hosts: ["mcp", "claude", "copilot", "codex", "pi"],
   },
   {
     id: "propose-amendment",
@@ -192,6 +232,7 @@ export const DAO_COMMANDS: readonly DaoCommand[] = [
     tool: "dao_propose_amendment",
     mutating: true,
     args: "title description amendmentType [agentId] [agentChanges] [configChanges] [addGates] [removeGates]",
+    hosts: ["mcp", "claude", "copilot", "codex", "opencode"],
   },
 
   // ── GitHub integration ────────────────────────────────────────
@@ -201,6 +242,7 @@ export const DAO_COMMANDS: readonly DaoCommand[] = [
     summary: "Configure the GitHub integration",
     tool: "dao_config_github",
     args: "--token <t> --owner <o> --repo <r>",
+    hosts: ["mcp", "claude", "copilot", "codex"],
   },
   {
     id: "github-branch",
@@ -208,6 +250,7 @@ export const DAO_COMMANDS: readonly DaoCommand[] = [
     summary: "Create a GitHub branch for a proposal",
     tool: "dao_github_create_branch",
     args: "proposalId",
+    hosts: ["mcp", "claude", "copilot", "codex"],
   },
   {
     id: "github-pr",
@@ -215,6 +258,7 @@ export const DAO_COMMANDS: readonly DaoCommand[] = [
     summary: "Open a GitHub pull request for a proposal",
     tool: "dao_github_open_pr",
     args: "proposalId --head-branch <b>",
+    hosts: ["mcp", "claude", "copilot", "codex"],
   },
 
   // ── Meta (CLI-native) ─────────────────────────────────────────

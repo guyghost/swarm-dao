@@ -30,10 +30,8 @@ import {
   loadState,
   PROPOSAL_TYPES,
   recordAudit,
-  resolveDaoCommand,
   saveState,
   setState,
-  suggestDaoCommand,
 } from "@guyghost/swarm-dao-core";
 
 // ── Helpers ─────────────────────────────────────────────────
@@ -529,6 +527,66 @@ async function cmdGithubPr(cwd: string, positional: string[], flags: Record<stri
   info(`✓ PR created: #${result.number} — ${result.url}`);
 }
 
+// ── CLI-local command suggestion ───────────────────────────
+
+/**
+ * Calculate Levenshtein distance between two strings.
+ */
+function editDistance(a: string, b: string): number {
+  const m = a.length;
+  const n = b.length;
+
+  // Previous and current row for space-optimized DP
+  let prev = Array(n + 1)
+    .fill(0)
+    .map((_, i) => i);
+  let curr = Array(n + 1).fill(0);
+
+  for (let i = 1; i <= m; i++) {
+    curr[0] = i;
+    for (let j = 1; j <= n; j++) {
+      if (a[i - 1] === b[j - 1]) {
+        curr[j] = prev[j - 1] ?? 0;
+      } else {
+        const deleteCost = (prev[j] ?? 0) + 1;
+        const insertCost = (curr[j - 1] ?? 0) + 1;
+        const replaceCost = (prev[j - 1] ?? 0) + 1;
+        curr[j] = Math.min(deleteCost, insertCost, replaceCost);
+      }
+    }
+    [prev, curr] = [curr, prev];
+  }
+  return prev[n] ?? 0;
+}
+
+/**
+ * Find the closest CLI-implemented command to the given unknown token.
+ * Returns a suggestion string or empty string if no good match exists.
+ */
+function suggestCliCommand(token: string): string {
+  const normalized = token.toLowerCase().trim();
+  const candidates: Array<{ id: string; distance: number }> = [];
+
+  for (const id of CLI_IMPLEMENTED) {
+    const dist = editDistance(normalized, id);
+    // Only consider suggestions with distance <= 2 to avoid bad matches
+    if (dist <= 2) {
+      candidates.push({ id, distance: dist });
+    }
+  }
+
+  if (candidates.length === 0) return "";
+
+  // Sort by distance (closest first)
+  candidates.sort((a, b) => a.distance - b.distance);
+  const best = candidates[0];
+  if (!best) return "";
+
+  const cmd = CLI_REGISTRY_INDEX.get(best.id);
+  const summary = cmd?.summary ?? "";
+  return `Did you mean '${best.id}'? ${summary}`;
+}
+
 // ── Entry Point ─────────────────────────────────────────────
 
 export async function main(argv: string[], cwd: string = process.cwd()): Promise<number> {
@@ -583,10 +641,9 @@ export async function main(argv: string[], cwd: string = process.cwd()): Promise
         await cmdGithubPr(cwd, positional, flags);
         return 0;
       default: {
-        const suggestion = resolveDaoCommand(String(cmd ?? ""), "cli")
-          ? ""
-          : `\n${suggestDaoCommand(String(cmd ?? ""), "cli")}\n`;
-        process.stderr.write(`unknown command: ${cmd}${suggestion}\n\n${HELP}`);
+        const suggestion = suggestCliCommand(String(cmd ?? ""));
+        const suggestionText = suggestion ? `\n${suggestion}\n` : "";
+        process.stderr.write(`unknown command: ${cmd}${suggestionText}\n\n${HELP}`);
         return 1;
       }
     }
