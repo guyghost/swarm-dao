@@ -1,0 +1,40 @@
+{
+  "name": "swarm-dao-marketplace",
+  "owner": {
+    "name": "guyghost",
+    "email": "guy.mandina@outlook.com",
+    "url": "https://github.com/guyghost"
+  },
+  "metadata": {
+    "description": "Swarm DAO — multi-agent governance plugins for Copilot (deliberation, quality gates, execution)",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "swarm-dao",
+      "description": "Multi-agent governance layer — 7 DAO agents deliberate proposals, quality gates validate, then execute and track.",
+      "version": "0.3.0",
+      "source": "packages/copilot-adapter",
+      "author": {
+        "name": "guyghost",
+        "url": "https://github.com/guyghost"
+      },
+      "homepage": "https://github.com/guyghost/swarm-dao#readme",
+      "repository": "https://github.com/guyghost/swarm-dao",
+      "license": "MIT",
+      "keywords": [
+        "swarm-dao",
+        "copilot",
+        "github-copilot",
+        "mcp",
+        "dao",
+        "governance",
+        "multi-agent",
+        "deliberation",
+        "quality-gates"
+      ],
+      "category": "governance",
+      "tags": ["agents", "mcp", "workflow", "dao"]
+    }
+  ]
+}

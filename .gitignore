@@ -44,3 +44,4 @@ temp/
 
 # OpenSpec tooling (local only)
 openspec/
+*.tgz

@@ -1,0 +1,28 @@
+{
+  "name": "swarm-dao",
+  "description": "Multi-agent governance layer for Copilot — proposals are deliberated by a swarm of 7 DAO agents, validated by quality-control gates, then executed and tracked. Provides dao_* MCP tools, custom agents, and slash commands.",
+  "version": "0.3.0",
+  "author": {
+    "name": "guyghost",
+    "url": "https://github.com/guyghost"
+  },
+  "homepage": "https://github.com/guyghost/swarm-dao#readme",
+  "repository": "https://github.com/guyghost/swarm-dao",
+  "license": "MIT",
+  "keywords": [
+    "swarm-dao",
+    "copilot",
+    "github-copilot",
+    "mcp",
+    "dao",
+    "governance",
+    "multi-agent",
+    "deliberation",
+    "quality-gates",
+    "council"
+  ],
+  "category": "governance",
+  "tags": ["agents", "mcp", "workflow", "dao"],
+  "agents": "agents/",
+  "mcpServers": ".mcp.json"
+}
