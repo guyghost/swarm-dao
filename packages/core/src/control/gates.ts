@@ -2,6 +2,7 @@
 // Swarm DAO Core — Quality Control Gates
 // ============================================================
 
+import { allCoordinatorsClosed } from "../governance/delegation.utils.js";
 import { getState } from "../persistence.js";
 import type { ChecklistItem, ControlCheckResult, DAOConfig, GateResult, Proposal } from "../types/index.js";
 import { PROPOSAL_TYPE, TYPE_QUORUM } from "../types/index.js";
@@ -188,6 +189,22 @@ const GATES: GateDefinition[] = [
       return {
         passed: true,
         message: `${proposal.type}: quorum=${typeQuorum.quorumPercent}%, approval=${typeQuorum.approvalPercent}%`,
+      };
+    },
+  },
+  {
+    // INV-8 (ordering): no APPROVE while a delegation is in flight. Opt-in via
+    // `config.requiredGates` (NOT in DEFAULT_CONFIG.requiredGates). The
+    // deliberation orchestrator registers live coordinator states for the
+    // proposal; this gate refuses to pass until every coordinator is closed.
+    id: "delegation-closed",
+    name: "Delegation Closed",
+    severity: "blocker",
+    check: (proposal, _config) => {
+      const closed = allCoordinatorsClosed(proposal.id);
+      return {
+        passed: closed,
+        message: closed ? "All delegation coordinators closed" : "Delegation in flight — tally must wait",
       };
     },
   },

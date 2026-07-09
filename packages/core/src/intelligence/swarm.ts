@@ -2,7 +2,9 @@
 // Swarm DAO Core — Swarm Dispatch
 // ============================================================
 
-import type { AgentOutput, DAOAgent, HostAdapter, Proposal } from "../types/index.js";
+import { clearProposalCoordinators, registerProposalCoordinators } from "../governance/delegation.utils.js";
+import type { AgentOutput, DAOAgent, DAOConfig, HostAdapter, Proposal } from "../types/index.js";
+import { drainDelegations, runDelegations } from "./delegation.js";
 import {
   buildModelResolutionContext,
   describeModelResolution,
@@ -106,6 +108,13 @@ export function createDispatchModelContext(
 /**
  * Dispatch swarm via a host adapter.
  * This is the host-agnostic version — adapters implement the actual spawning.
+ *
+ * Delegation (DFI) is opt-in: pass `delegation?.config` with
+ * `config.delegation.enabled === true` to activate. When active, after each
+ * parent agent produces an output, declared facets are investigated by child
+ * agents and folded into the parent's reasoning (INV-6: votes untouched). Live
+ * coordinators are registered for the `delegation-closed` gate (INV-8) and
+ * drained on completion.
  */
 export async function dispatchSwarm(
   proposal: Proposal,
@@ -114,10 +123,14 @@ export async function dispatchSwarm(
   maxConcurrent: number,
   modelContext: ModelResolutionContext,
   onUpdate?: (update: SwarmProgressUpdate) => void,
+  delegation?: { config: DAOConfig },
 ): Promise<AgentOutput[]> {
   const instructions = buildDispatchInstructions(proposal, agents, modelContext);
   const outputs: AgentOutput[] = [];
   const agentById = new Map(agents.map((a) => [a.id, a]));
+  const delegationEnabled = delegation?.config?.delegation?.enabled === true;
+  const allCoordinators: import("../governance/delegation.utils.js").DelegationCoordinatorState[] = [];
+  const allRequests: import("../governance/delegation.utils.js").DelegationRequestState[] = [];
 
   // Process in batches based on maxConcurrent
   for (let i = 0; i < instructions.length; i += maxConcurrent) {
@@ -141,6 +154,21 @@ export async function dispatchSwarm(
           model: inst.model,
           timeoutMs: inst.timeoutMs,
         });
+
+        // DFI hook: fold declared delegations into the parent reasoning.
+        if (delegationEnabled && delegation && !output.error) {
+          const result = await runDelegations({
+            parent: agent,
+            parentOutput: output,
+            proposal,
+            adapter,
+            config: delegation.config,
+            parentModelContext: modelContext,
+          });
+          allCoordinators.push(...result.coordinators);
+          allRequests.push(...result.requests);
+          if (result.delegated) output.content = result.foldedContent;
+        }
 
         outputs.push(output);
 
@@ -178,5 +206,15 @@ export async function dispatchSwarm(
     await Promise.all(batchPromises);
   }
 
+  if (delegationEnabled) {
+    registerProposalCoordinators(proposal.id, allCoordinators);
+    drainDelegations(allCoordinators, allRequests);
+  }
+
   return outputs;
+}
+
+/** Clear the coordinator registry for a proposal once deliberation is over. */
+export function resetDelegationRegistry(proposalId: number): void {
+  clearProposalCoordinators(proposalId);
 }

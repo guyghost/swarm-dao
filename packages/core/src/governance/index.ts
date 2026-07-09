@@ -1,6 +1,8 @@
 // Governance Layer (L1) — Proposals, Agents, Voting, Lifecycle, Amendments
 export * from "./agents.js";
 export * from "./amendments.js";
+export * from "./delegation.machine.js";
+export * from "./delegation.utils.js";
 export * from "./lifecycle.js";
 export * from "./proposal.machine.js";
 export * from "./proposal.utils.js";

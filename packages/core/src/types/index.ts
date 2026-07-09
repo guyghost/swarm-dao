@@ -256,6 +256,44 @@ export interface CouncilMembership {
   role: "lead" | "member" | "advisor";
 }
 
+// ── Delegation (DFI thin slice) ──────────────────────────────
+//
+// Delegated Facet Investigation. An agent may declare the facets it can
+// delegate to a dedicated sub-agent. The lifecycle of each delegation is
+// owned by the delegation state machines (`governance/delegation.machine.ts`)
+// — these types are the persisted shape, NOT the transition logic. The model
+// decides; an LLM only emits a `FACET_REQUESTED` signal.
+
+/**
+ * Open registry key for a delegation profile. Kept as a plain string so a DAO
+ * can extend the roster without editing the core union. Profiles live in
+ * `DAOConfig.delegationProfile`.
+ */
+export type DelegationArchetype = string;
+
+/**
+ * Facet token. Carried raw by the LLM signal, normalized (trim + lower-case)
+ * by the orchestrator before it reaches a machine. Matching is exact on the
+ * normalized token (INV-5).
+ */
+export type DelegationFacet = string;
+
+/**
+ * A declared delegation capability of an agent. Declares WHAT may be
+ * delegated and to which archetype — never HOW (no budget, no status). Budget
+ * lives exclusively in `DAOConfig.delegation`.
+ */
+export interface DelegationSpec {
+  facet: DelegationFacet;
+  archetype: DelegationArchetype;
+  /**
+   * `"inherit"` (or omitted) ⇒ the child resolves to the parent agent's
+   * resolved model. Any other non-empty string is an explicit override and is
+   * audited. See `intelligence/model.ts` for the full chain.
+   */
+  model?: "inherit" | string;
+}
+
 export interface DAOAgent {
   id: string;
   name: string;
@@ -275,6 +313,12 @@ export interface DAOAgent {
   kpis?: AgentKPI[];
   councils?: CouncilMembership[];
   enabled?: boolean;
+  /**
+   * Declared delegation capabilities. Presence of a non-empty array does NOT
+   * enable delegation on its own — `DAOConfig.delegation.enabled` must be true
+   * (the `parentEnabled` guard in `DelegationCoordinator`).
+   */
+  delegates?: DelegationSpec[];
 }
 
 // ── Configuration ────────────────────────────────────────────
@@ -297,6 +341,38 @@ export interface DAOConfig {
   quorumFloor: number;
   staleThresholdHours?: number;
   healthWeights?: HealthWeights;
+  /**
+   * Delegation budget and behaviour. Single source of truth for budget (INV-1,
+   * INV-7). Defaults to disabled to preserve back-compat for existing DAOs.
+   */
+  delegation?: DelegationConfig;
+  /**
+   * Per-archetype profile. `defaultModel` (if set) sits between the child
+   * override and the parent agent's resolved model in the inheritance chain.
+   */
+  delegationProfile?: Partial<Record<DelegationArchetype, DelegationProfileEntry>>;
+}
+
+/**
+ * Budget + behaviour for Delegated Facet Investigation. All four fields are
+ * authoritative; `agent.delegates` carries NO budget (B4 — single source).
+ */
+export interface DelegationConfig {
+  /** Master switch for the `parentEnabled` guard. Default `false`. */
+  enabled: boolean;
+  /** Depth cap. Thin slice is fixed at 1 — a child cannot become a coordinator. */
+  maxDepth: number;
+  /** Max in-flight children per parent. Enforced atomically by the coordinator actor. */
+  maxChildrenPerParent: number;
+  /** Hard ceiling on the fold step; on expiry the request → `failed`. */
+  foldTimeoutMs: number;
+}
+
+export interface DelegationProfileEntry {
+  /** Model used when a child does not override and the parent is not inherited. */
+  defaultModel?: string;
+  /** Prompt template id the child agent is spawned with. */
+  promptId: string;
 }
 
 export const DEFAULT_CONFIG: DAOConfig = {
@@ -319,6 +395,19 @@ export const DEFAULT_CONFIG: DAOConfig = {
   typeQuorum: TYPE_QUORUM,
   quorumFloor: 60,
   staleThresholdHours: 24,
+};
+
+/**
+ * Default delegation config: disabled by default (back-compat). When a DAO
+ * opts in, the thin slice caps depth at 1 and children-per-parent at 3.
+ * `delegation-closed` is an opt-in control gate — it is intentionally absent
+ * from `DEFAULT_CONFIG.requiredGates`.
+ */
+export const DEFAULT_DELEGATION_CONFIG: DelegationConfig = {
+  enabled: false,
+  maxDepth: 1,
+  maxChildrenPerParent: 3,
+  foldTimeoutMs: 30_000,
 };
 
 // ── Core Proposal ────────────────────────────────────────────
