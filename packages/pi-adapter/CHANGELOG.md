@@ -1,5 +1,14 @@
 # @guyghost/swarm-dao-pi-adapter
 
+## 0.2.2
+
+### Patch Changes
+
+- Updated dependencies [8b232e9]
+- Updated dependencies [ed98280]
+- Updated dependencies [7525259]
+  - @guyghost/swarm-dao-core@0.4.0
+
 ## 0.2.1
 
 ### Patch Changes
