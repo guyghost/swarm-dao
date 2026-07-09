@@ -132,6 +132,12 @@ export async function dispatchSwarm(
   const allCoordinators: import("../governance/delegation.utils.js").DelegationCoordinatorState[] = [];
   const allRequests: import("../governance/delegation.utils.js").DelegationRequestState[] = [];
 
+  // Register the mutable coordinators array up-front so the delegation-closed
+  // gate can observe in-flight coordinators as they are pushed during dispatch.
+  if (delegationEnabled) {
+    registerProposalCoordinators(proposal.id, allCoordinators);
+  }
+
   // Process in batches based on maxConcurrent
   for (let i = 0; i < instructions.length; i += maxConcurrent) {
     const batch = instructions.slice(i, i + maxConcurrent);
@@ -207,8 +213,8 @@ export async function dispatchSwarm(
   }
 
   if (delegationEnabled) {
-    registerProposalCoordinators(proposal.id, allCoordinators);
     drainDelegations(allCoordinators, allRequests);
+    clearProposalCoordinators(proposal.id);
   }
 
   return outputs;
