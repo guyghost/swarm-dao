@@ -138,83 +138,87 @@ export async function dispatchSwarm(
     registerProposalCoordinators(proposal.id, allCoordinators);
   }
 
-  // Process in batches based on maxConcurrent
-  for (let i = 0; i < instructions.length; i += maxConcurrent) {
-    const batch = instructions.slice(i, i + maxConcurrent);
+  try {
+    // Process in batches based on maxConcurrent
+    for (let i = 0; i < instructions.length; i += maxConcurrent) {
+      const batch = instructions.slice(i, i + maxConcurrent);
 
-    const batchPromises = batch.map(async (inst) => {
-      const agent = agentById.get(inst.agentId);
-      if (!agent) throw new Error(`Agent ${inst.agentId} not found`);
+      const batchPromises = batch.map(async (inst) => {
+        const agent = agentById.get(inst.agentId);
+        try {
+          if (!agent) throw new Error(`Agent ${inst.agentId} not found`);
 
-      onUpdate?.({
-        agentId: inst.agentId,
-        agentName: inst.agentName,
-        phase: "started",
+          onUpdate?.({
+            agentId: inst.agentId,
+            agentName: inst.agentName,
+            phase: "started",
+          });
+
+          const output = await adapter.spawnAgent({
+            agent,
+            proposal,
+            systemPrompt: inst.prompt,
+            model: inst.model,
+            timeoutMs: inst.timeoutMs,
+          });
+
+          // DFI hook: fold declared delegations into the parent reasoning.
+          if (delegationEnabled && delegation && !output.error) {
+            const result = await runDelegations({
+              parent: agent,
+              parentOutput: output,
+              proposal,
+              adapter,
+              config: delegation.config,
+              parentModelContext: modelContext,
+              onCoordinatorCreated: (coordinator) => {
+                allCoordinators.push(coordinator);
+              },
+            });
+            allRequests.push(...result.requests);
+            if (result.delegated) output.content = result.foldedContent;
+          }
+
+          outputs.push(output);
+
+          onUpdate?.({
+            agentId: inst.agentId,
+            agentName: inst.agentName,
+            phase: output.error ? "error" : "completed",
+            output,
+          });
+
+          return output;
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : "Unknown error";
+          const errorOutput: AgentOutput = {
+            agentId: inst.agentId,
+            agentName: inst.agentName,
+            role: agent?.role ?? "unknown",
+            content: "",
+            durationMs: 0,
+            error: message,
+          };
+          outputs.push(errorOutput);
+
+          onUpdate?.({
+            agentId: inst.agentId,
+            agentName: inst.agentName,
+            phase: "error",
+            output: errorOutput,
+          });
+
+          return errorOutput;
+        }
       });
 
-      try {
-        const output = await adapter.spawnAgent({
-          agent,
-          proposal,
-          systemPrompt: inst.prompt,
-          model: inst.model,
-          timeoutMs: inst.timeoutMs,
-        });
-
-        // DFI hook: fold declared delegations into the parent reasoning.
-        if (delegationEnabled && delegation && !output.error) {
-          const result = await runDelegations({
-            parent: agent,
-            parentOutput: output,
-            proposal,
-            adapter,
-            config: delegation.config,
-            parentModelContext: modelContext,
-          });
-          allCoordinators.push(...result.coordinators);
-          allRequests.push(...result.requests);
-          if (result.delegated) output.content = result.foldedContent;
-        }
-
-        outputs.push(output);
-
-        onUpdate?.({
-          agentId: inst.agentId,
-          agentName: inst.agentName,
-          phase: output.error ? "error" : "completed",
-          output,
-        });
-
-        return output;
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : "Unknown error";
-        const errorOutput: AgentOutput = {
-          agentId: inst.agentId,
-          agentName: inst.agentName,
-          role: agent.role,
-          content: "",
-          durationMs: 0,
-          error: message,
-        };
-        outputs.push(errorOutput);
-
-        onUpdate?.({
-          agentId: inst.agentId,
-          agentName: inst.agentName,
-          phase: "error",
-          output: errorOutput,
-        });
-
-        return errorOutput;
-      }
-    });
-
-    await Promise.all(batchPromises);
-  }
-
-  if (delegationEnabled) {
-    drainDelegations(allCoordinators, allRequests);
-    clearProposalCoordinators(proposal.id);
+      await Promise.all(batchPromises);
+    }
+  } finally {
+    if (delegationEnabled) {
+      drainDelegations(allCoordinators, allRequests);
+      clearProposalCoordinators(proposal.id);
+    }
   }
 
   return outputs;
