@@ -151,14 +151,14 @@ export function extractDelegationSignals(content: string | undefined): Delegatio
   if (!content) return [];
   const signals: DelegationSignal[] = [];
   const section = content.match(/##\s*Delegation Requests\s*\n([\s\S]*?)(?=\n##\s|$)/i);
-  if (!section || !section[1]) return [];
+  if (!section?.[1]) return [];
   for (const line of section[1].split("\n")) {
     const m = line.match(/^\s*[-*]\s*facet:\s*([^|]+?)\s*\|\s*archetype:\s*(.+?)\s*$/i);
-    if (!m || !m[1] || !m[2]) continue;
+    if (!m?.[1] || !m[2]) continue;
     const facet = m[1].trim();
     const archetype = m[2].trim();
     if (facet.length > 0 && archetype.length > 0) {
-      signals.push({ facet: normalizeFacet(facet), archetype });
+      signals.push({ facet: normalizeFacet(facet), archetype: normalizeFacet(archetype) });
     }
   }
   return signals;
@@ -239,6 +239,13 @@ function buildCoordinatorMachine(initial: DelegationCoordinatorStatus) {
             // context + the guard outcome (see delegation.utils.ts).
             { target: "open" },
           ],
+          REQUEST_RESOLVED: {
+            target: "open",
+            actions: assign({
+              activeRequests: ({ context }) => Math.max(0, context.activeRequests - 1),
+              lastTransitionTime: () => new Date().toISOString(),
+            }),
+          },
           DRAIN: {
             target: "draining",
             actions: assign({ lastTransitionTime: () => new Date().toISOString() }),

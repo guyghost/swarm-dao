@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import type { AgentOutput, DAOAgent, DAOConfig, HostAdapter, Proposal } from "@guyghost/swarm-dao-core";
 import {
   buildChildAgent,
@@ -10,7 +10,6 @@ import {
   type DelegationCoordinatorEvent,
   type DelegationCoordinatorInput,
   type DelegationCoordinatorState,
-  type DelegationRequestEvent,
   type DelegationRequestInput,
   type DelegationRequestState,
   type DelegationRequestStatus,
@@ -186,6 +185,19 @@ describe("delegation pure helpers", () => {
     ]);
   });
 
+  it("extractDelegationSignals normalizes both facet and archetype to lowercase", () => {
+    const content = [
+      "## Delegation Requests",
+      "- facet: Security | archetype: Auditor",
+      "- facet: PERFORMANCE | archetype: BENCHMARK",
+    ].join("\n");
+    const signals = extractDelegationSignals(content);
+    expect(signals).toEqual([
+      { facet: "security", archetype: "auditor" },
+      { facet: "performance", archetype: "benchmark" },
+    ]);
+  });
+
   it("extractDelegationSignals ignores malformed lines and empty sections (W2)", () => {
     expect(extractDelegationSignals(undefined)).toEqual([]);
     expect(extractDelegationSignals("no section here")).toEqual([]);
@@ -279,6 +291,31 @@ describe("DelegationCoordinator machine", () => {
     expect(actor.getSnapshot().context.activeRequests).toBe(1);
     actor.send({ type: "REQUEST_RESOLVED", requestId: "r2", terminalStatus: "cancelled" });
     expect(actor.getSnapshot().value).toBe("closed");
+  });
+
+  it("REQUEST_RESOLVED in open decrements activeRequests and releases the slot", () => {
+    const machine = createDelegationCoordinatorMachine("open");
+    const actor = createActor(machine, { input: coordinatorInput({ maxChildren: 2 }) });
+    actor.start();
+
+    actor.send({ type: "REQUEST_ARRIVED", requestId: "r1", facet: "security", archetype: "auditor" });
+    expect(actor.getSnapshot().context.activeRequests).toBe(1);
+
+    actor.send({ type: "REQUEST_ARRIVED", requestId: "r2", facet: "security", archetype: "auditor" });
+    expect(actor.getSnapshot().context.activeRequests).toBe(2);
+
+    // Budget full: third arrival falls back without consuming a slot.
+    actor.send({ type: "REQUEST_ARRIVED", requestId: "r3", facet: "security", archetype: "auditor" });
+    expect(actor.getSnapshot().context.activeRequests).toBe(2);
+
+    // Slot released while still open: 2 -> 1.
+    actor.send({ type: "REQUEST_RESOLVED", requestId: "r1", terminalStatus: "delegated" });
+    expect(actor.getSnapshot().value).toBe("open");
+    expect(actor.getSnapshot().context.activeRequests).toBe(1);
+
+    // Slot available again: 1 -> 2.
+    actor.send({ type: "REQUEST_ARRIVED", requestId: "r4", facet: "security", archetype: "auditor" });
+    expect(actor.getSnapshot().context.activeRequests).toBe(2);
   });
 
   it("ERROR → blocked_signal (terminal)", () => {
@@ -604,7 +641,7 @@ describe("runDelegations orchestrator", () => {
     expect(result.requests[0].status).toBe("failed");
   });
 
-  it("budget exhaustion (maxChildren=1) ⇒ second signal blocked, budget intact (INV-7)", async () => {
+  it("sequential delegations with maxChildren=1 both complete; slots release between requests", async () => {
     const parent = makeParent({
       delegates: [
         { facet: "Security", archetype: "auditor" },
@@ -625,10 +662,13 @@ describe("runDelegations orchestrator", () => {
       }),
       parentModelContext: buildModelResolutionContext("dao-default"),
     });
-    // One delegated, the second blocked at the coordinator (budget exhausted).
-    const statuses = result.requests.map((r) => r.status).sort();
-    expect(statuses).toContain("delegated");
-    expect(result.coordinators[0].activeRequests).toBeLessThanOrEqual(1);
+    // runDelegations awaits each child sequentially, so with the coordinator
+    // releasing slots on REQUEST_RESOLVED in `open`, both requests complete and
+    // the in-flight counter cycles back to zero instead of accumulating.
+    expect(result.requests).toHaveLength(2);
+    expect(result.requests.every((r) => r.status === "delegated")).toBe(true);
+    expect(result.coordinators[0].activeRequests).toBe(0);
+    expect(result.coordinators[0].status).toBe("open");
   });
 });
 
@@ -646,7 +686,7 @@ describe("foldChildIntoParent (INV-6)", () => {
 
 describe("drainDelegations cascade (B3)", () => {
   it("DRAINs coordinators and CANCELS non-terminal requests, idempotently", () => {
-    const config = makeConfig();
+    const _config = makeConfig();
     const parent = makeParent();
     // Hand-roll two in-flight requests on one coordinator.
     const coord: DelegationCoordinatorState = {

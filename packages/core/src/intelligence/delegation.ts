@@ -59,6 +59,7 @@ export async function runDelegations(params: {
   adapter: HostAdapter;
   config: DAOConfig;
   parentModelContext: ModelResolutionContext;
+  onCoordinatorCreated?: (coordinator: DelegationCoordinatorState) => void;
 }): Promise<DelegationResult> {
   const { parent, parentOutput, proposal, adapter, config, parentModelContext } = params;
   const content = parentOutput.content ?? "";
@@ -75,6 +76,7 @@ export async function runDelegations(params: {
 
   const coordinator = createCoordinatorState(parent, config);
   coordinators.push(coordinator);
+  params.onCoordinatorCreated?.(coordinator);
   const archetypes = registeredArchetypes(config);
   const parentResolvedModel = resolveAgentModel(parent, parentModelContext);
   let counter = 0;
