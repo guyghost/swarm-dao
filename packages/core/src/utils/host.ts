@@ -100,7 +100,10 @@ function assertSafeRelativePath(filePath: string): void {
 
 function isPathInsideRoot(root: string, candidate: string): boolean {
   const relativePath = path.relative(root, candidate);
-  return relativePath === "" || (!relativePath.startsWith("..") && !path.isAbsolute(relativePath));
+  return (
+    relativePath === "" ||
+    (relativePath !== ".." && !relativePath.startsWith(`..${path.sep}`) && !path.isAbsolute(relativePath))
+  );
 }
 
 async function resolveRealBase(baseDir: string): Promise<string> {
@@ -111,6 +114,39 @@ async function resolveRealBase(baseDir: string): Promise<string> {
   }
 }
 
+function getErrorCode(error: unknown): string {
+  return typeof error === "object" && error !== null && "code" in error ? (error as { code: string }).code : "";
+}
+
+async function assertNearestExistingParentContained(resolvedPath: string, resolvedBase: string): Promise<void> {
+  let parent = path.dirname(resolvedPath);
+  while (true) {
+    if (parent === resolvedPath) {
+      return;
+    }
+    try {
+      const realParent = await fs.realpath(parent);
+      if (!isPathInsideRoot(resolvedBase, realParent)) {
+        throw new Error(`Path traversal denied: parent path escapes base directory`);
+      }
+      return;
+    } catch (parentError) {
+      const parentCode = getErrorCode(parentError);
+      if (parentCode !== "ENOENT") {
+        throw parentError;
+      }
+      if (parent === resolvedBase) {
+        return;
+      }
+      const nextParent = path.dirname(parent);
+      if (nextParent === parent) {
+        return;
+      }
+      parent = nextParent;
+    }
+  }
+}
+
 async function assertRealPathContained(resolvedPath: string, resolvedBase: string): Promise<void> {
   try {
     const realPath = await fs.realpath(resolvedPath);
@@ -118,25 +154,9 @@ async function assertRealPathContained(resolvedPath: string, resolvedBase: strin
       throw new Error(`Path traversal denied: resolved path escapes base directory`);
     }
   } catch (error) {
-    const code = typeof error === "object" && error !== null && "code" in error ? (error as { code: string }).code : "";
+    const code = getErrorCode(error);
     if (code === "ENOENT") {
-      const parent = path.dirname(resolvedPath);
-      if (parent !== resolvedPath) {
-        try {
-          const realParent = await fs.realpath(parent);
-          if (!isPathInsideRoot(resolvedBase, realParent)) {
-            throw new Error(`Path traversal denied: parent path escapes base directory`);
-          }
-        } catch (parentError) {
-          const parentCode =
-            typeof parentError === "object" && parentError !== null && "code" in parentError
-              ? (parentError as { code: string }).code
-              : "";
-          if (parentCode !== "ENOENT") {
-            throw parentError;
-          }
-        }
-      }
+      await assertNearestExistingParentContained(resolvedPath, resolvedBase);
       return;
     }
     throw error;
