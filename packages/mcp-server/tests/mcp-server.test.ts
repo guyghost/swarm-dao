@@ -64,10 +64,8 @@ describe("mcp-server", () => {
   it("host adapter logs to stderr for stdio safety", async () => {
     const logSpy = mock(() => {});
     const errorSpy = mock(() => {});
-    // biome-ignore lint/suspicious/noExplicitAny: test stub
-    console.log = logSpy as any;
-    // biome-ignore lint/suspicious/noExplicitAny: test stub
-    console.error = errorSpy as any;
+    console.log = logSpy as typeof console.log;
+    console.error = errorSpy as typeof console.error;
     const adapter = createStdioHostAdapter("mcp", "/tmp/dao");
 
     await adapter.log({ level: "info", service: "test", message: "hello" });
