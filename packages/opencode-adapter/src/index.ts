@@ -128,7 +128,7 @@ async function loadOpenCodeHostDefaultModel(directory: string): Promise<string |
     candidates.map(async (configPath) => {
       try {
         const raw = await fs.readFile(configPath, "utf-8");
-        const parsed = JSON.parse(raw) as Record<string, unknown>;
+        const parsed = parseSafeJson<Record<string, unknown>>(raw, configPath);
         const model =
           typeof parsed.model === "string"
             ? parsed.model
@@ -136,7 +136,12 @@ async function loadOpenCodeHostDefaultModel(directory: string): Promise<string |
               ? parsed.defaultModel
               : undefined;
         return model ?? null;
-      } catch {
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException | undefined)?.code !== "ENOENT") {
+          logger.warn(
+            `Failed to load OpenCode config file "${configPath}": ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
         return null;
       }
     }),
