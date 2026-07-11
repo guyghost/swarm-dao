@@ -89,20 +89,75 @@ export function execCommand(
   });
 }
 
-function resolveContainedPath(filePath: string, baseDir: string): string {
-  const resolvedBase = path.resolve(baseDir);
+function assertSafeRelativePath(filePath: string): void {
+  if (filePath.includes("\0")) {
+    throw new Error("Path traversal denied: null bytes are not allowed");
+  }
+  if (path.isAbsolute(filePath)) {
+    throw new Error(`Path traversal denied: absolute paths are not allowed ("${filePath}")`);
+  }
+}
+
+function isPathInsideRoot(root: string, candidate: string): boolean {
+  const relativePath = path.relative(root, candidate);
+  return relativePath === "" || (!relativePath.startsWith("..") && !path.isAbsolute(relativePath));
+}
+
+async function resolveRealBase(baseDir: string): Promise<string> {
+  try {
+    return await fs.realpath(baseDir);
+  } catch {
+    return path.resolve(baseDir);
+  }
+}
+
+async function assertRealPathContained(resolvedPath: string, resolvedBase: string): Promise<void> {
+  try {
+    const realPath = await fs.realpath(resolvedPath);
+    if (!isPathInsideRoot(resolvedBase, realPath)) {
+      throw new Error(`Path traversal denied: resolved path escapes base directory`);
+    }
+  } catch (error) {
+    const code = typeof error === "object" && error !== null && "code" in error ? (error as { code: string }).code : "";
+    if (code === "ENOENT") {
+      const parent = path.dirname(resolvedPath);
+      if (parent !== resolvedPath) {
+        try {
+          const realParent = await fs.realpath(parent);
+          if (!isPathInsideRoot(resolvedBase, realParent)) {
+            throw new Error(`Path traversal denied: parent path escapes base directory`);
+          }
+        } catch (parentError) {
+          const parentCode =
+            typeof parentError === "object" && parentError !== null && "code" in parentError
+              ? (parentError as { code: string }).code
+              : "";
+          if (parentCode !== "ENOENT") {
+            throw parentError;
+          }
+        }
+      }
+      return;
+    }
+    throw error;
+  }
+}
+
+async function resolveContainedPath(filePath: string, baseDir: string): Promise<string> {
+  assertSafeRelativePath(filePath);
+  const resolvedBase = await resolveRealBase(baseDir);
   const resolvedPath = path.resolve(resolvedBase, filePath);
-  const relativePath = path.relative(resolvedBase, resolvedPath);
-  if (relativePath === ".." || relativePath.startsWith(`..${path.sep}`) || path.isAbsolute(relativePath)) {
+  if (!isPathInsideRoot(resolvedBase, resolvedPath)) {
     throw new Error(`Path traversal denied: "${filePath}" is outside "${baseDir}"`);
   }
+  await assertRealPathContained(resolvedPath, resolvedBase);
   return resolvedPath;
 }
 
 /** Read a file as UTF-8, with optional path containment enforcement. */
 export async function readFileContained(filePath: string, baseDir?: string): Promise<string> {
   if (baseDir) {
-    const resolved = resolveContainedPath(filePath, baseDir);
+    const resolved = await resolveContainedPath(filePath, baseDir);
     return fs.readFile(resolved, "utf-8");
   }
   return fs.readFile(filePath, "utf-8");
@@ -111,7 +166,8 @@ export async function readFileContained(filePath: string, baseDir?: string): Pro
 /** Write a file as UTF-8, with optional path containment enforcement. */
 export async function writeFileContained(filePath: string, content: string, baseDir?: string): Promise<void> {
   if (baseDir) {
-    const resolved = resolveContainedPath(filePath, baseDir);
+    const resolved = await resolveContainedPath(filePath, baseDir);
+    await fs.mkdir(path.dirname(resolved), { recursive: true });
     await fs.writeFile(resolved, content, "utf-8");
     return;
   }
