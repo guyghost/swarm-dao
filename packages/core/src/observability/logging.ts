@@ -39,7 +39,7 @@ function defaultLogHandler(level: LogLevel, message: string, ...args: unknown[])
 
 let currentHandler: LogHandler = defaultLogHandler;
 
-/** Set the minimum log level emitted by the default handler. */
+/** Set the minimum log level emitted by all log handlers. */
 export function setMinLogLevel(level: LogLevel): void {
   minLogLevel = level;
 }

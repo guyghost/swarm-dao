@@ -7,10 +7,21 @@ import {
   setMinLogLevel,
 } from "../src/observability/logging.js";
 
+const originalConsole = {
+  log: console.log,
+  warn: console.warn,
+  error: console.error,
+  debug: console.debug,
+};
+
 describe("observability/logging", () => {
   afterEach(() => {
     resetLogHandler();
     resetMinLogLevel();
+    console.log = originalConsole.log;
+    console.warn = originalConsole.warn;
+    console.error = originalConsole.error;
+    console.debug = originalConsole.debug;
     mock.restore();
   });
 

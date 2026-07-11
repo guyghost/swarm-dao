@@ -2,13 +2,14 @@ import { afterEach, describe, expect, it, mock } from "bun:test";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { resetLogHandler, setLogHandler } from "@guyghost/swarm-dao-core";
+import { resetLogHandler, resetMinLogLevel, setLogHandler } from "@guyghost/swarm-dao-core";
 import { createMcpHostAdapter, createStdioHostAdapter, resolveDaoRoot } from "../src/host-adapter.js";
 import { createSwarmDaoMcpServer, ensureDaoStorage } from "../src/server.js";
 
 describe("mcp-server", () => {
   afterEach(() => {
     resetLogHandler();
+    resetMinLogLevel();
     mock.restore();
   });
 
