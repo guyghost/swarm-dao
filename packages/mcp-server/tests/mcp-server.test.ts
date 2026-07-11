@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, mock } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -6,17 +6,20 @@ import { resetLogHandler, resetMinLogLevel } from "@guyghost/swarm-dao-core";
 import { createMcpHostAdapter, createStdioHostAdapter, resolveDaoRoot } from "../src/host-adapter.js";
 import { createSwarmDaoMcpServer, ensureDaoStorage } from "../src/server.js";
 
-const originalConsole = {
-  log: console.log,
-  error: console.error,
-};
+let originalConsoleLog: typeof console.log;
+let originalConsoleError: typeof console.error;
 
 describe("mcp-server", () => {
+  beforeEach(() => {
+    originalConsoleLog = console.log;
+    originalConsoleError = console.error;
+  });
+
   afterEach(() => {
     resetLogHandler();
     resetMinLogLevel();
-    console.log = originalConsole.log;
-    console.error = originalConsole.error;
+    console.log = originalConsoleLog;
+    console.error = originalConsoleError;
     mock.restore();
   });
 
