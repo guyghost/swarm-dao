@@ -122,13 +122,13 @@ const SAFE_PI_MODEL = /^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$/;
 
 export function assertSafePiModel(model: string): void {
   if (!SAFE_PI_MODEL.test(model)) {
-    throw new Error(`Invalid pi model identifier: ${model}`);
+    throw new Error("Invalid pi model identifier");
   }
 }
 
 export function assertSafePiPrompt(prompt: string): void {
   if (prompt.includes("\0")) {
-    throw new Error("Invalid pi prompt: null bytes are not allowed");
+    throw new Error("Invalid pi prompt");
   }
 }
 
