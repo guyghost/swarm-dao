@@ -373,9 +373,13 @@ async function readAndMergeMarkdownAgents(
   baseAgents: DAOAgent[],
 ): Promise<DAOAgent[]> {
   const markdownAgents = new Map<string, Partial<DAOAgent>>();
-  for (const entry of daoEntries) {
-    const content = await fs.readFile(path.join(absDir, entry), "utf-8");
-    const frontmatter = parseAgentFrontmatter(content);
+  const parsedEntries = await Promise.all(
+    daoEntries.map(async (entry) => {
+      const content = await fs.readFile(path.join(absDir, entry), "utf-8");
+      return parseAgentFrontmatter(content);
+    }),
+  );
+  for (const frontmatter of parsedEntries) {
     if (frontmatter.id) {
       markdownAgents.set(frontmatter.id, frontmatter);
     }
