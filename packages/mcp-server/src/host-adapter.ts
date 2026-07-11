@@ -1,5 +1,5 @@
 import type { HostAdapter } from "@guyghost/swarm-dao-core";
-import { execCommand, logger, readFileContained, writeFileContained } from "@guyghost/swarm-dao-core";
+import { execCommand, readFileContained, writeFileContained } from "@guyghost/swarm-dao-core";
 
 export function resolveDaoRoot(): string {
   return process.env.DAO_ROOT?.trim() || process.cwd();
@@ -28,13 +28,7 @@ export function createStdioHostAdapter(hostId: string, workDir = resolveDaoRoot(
     },
     async log(params) {
       const message = `[${params.service}] ${params.message}`;
-      if (params.level === "error") {
-        logger.error(message);
-      } else if (params.level === "warn") {
-        logger.warn(message);
-      } else {
-        logger.info(message);
-      }
+      console.error(message);
     },
     getWorkingDirectory() {
       return workDir;

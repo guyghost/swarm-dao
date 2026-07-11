@@ -2,14 +2,21 @@ import { afterEach, describe, expect, it, mock } from "bun:test";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { resetLogHandler, resetMinLogLevel, setLogHandler } from "@guyghost/swarm-dao-core";
+import { resetLogHandler, resetMinLogLevel } from "@guyghost/swarm-dao-core";
 import { createMcpHostAdapter, createStdioHostAdapter, resolveDaoRoot } from "../src/host-adapter.js";
 import { createSwarmDaoMcpServer, ensureDaoStorage } from "../src/server.js";
+
+const originalConsole = {
+  log: console.log,
+  error: console.error,
+};
 
 describe("mcp-server", () => {
   afterEach(() => {
     resetLogHandler();
     resetMinLogLevel();
+    console.log = originalConsole.log;
+    console.error = originalConsole.error;
     mock.restore();
   });
 
@@ -51,16 +58,21 @@ describe("mcp-server", () => {
     }
   });
 
-  it("host adapter log routes by severity", async () => {
-    const handler = mock(() => {});
-    setLogHandler(handler);
+  it("host adapter logs to stderr for stdio safety", async () => {
+    const logSpy = mock(() => {});
+    const errorSpy = mock(() => {});
+    // biome-ignore lint/suspicious/noExplicitAny: test stub
+    console.log = logSpy as any;
+    // biome-ignore lint/suspicious/noExplicitAny: test stub
+    console.error = errorSpy as any;
     const adapter = createStdioHostAdapter("mcp", "/tmp/dao");
 
     await adapter.log({ level: "info", service: "test", message: "hello" });
     await adapter.log({ level: "warn", service: "test", message: "careful" });
     await adapter.log({ level: "error", service: "test", message: "broken" });
 
-    expect(handler.mock.calls.map((call) => call[0])).toEqual(["info", "warn", "error"]);
+    expect(logSpy).not.toHaveBeenCalled();
+    expect(errorSpy).toHaveBeenCalledTimes(3);
   });
 
   it("host adapter enforces contained read/write", async () => {
