@@ -986,4 +986,18 @@ describe("swarmDaoExtension", () => {
       });
     });
   });
+
+  describe("pi subprocess safety", () => {
+    it("rejects unsafe model identifiers", async () => {
+      const { assertSafePiModel } = await import("../src/index.js");
+      expect(() => assertSafePiModel("--help")).toThrow("Invalid pi model identifier");
+      expect(() => assertSafePiModel("model;rm -rf /")).toThrow("Invalid pi model identifier");
+      expect(() => assertSafePiModel("anthropic/claude-3.5-sonnet")).not.toThrow();
+    });
+
+    it("rejects prompts containing null bytes", async () => {
+      const { assertSafePiPrompt } = await import("../src/index.js");
+      expect(() => assertSafePiPrompt("hello\0world")).toThrow("Invalid pi prompt");
+    });
+  });
 });

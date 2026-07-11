@@ -49,6 +49,7 @@ import {
   loadConfig,
   // Persistence
   loadState,
+  logger,
   PROPOSAL_TYPE_LABELS,
   // Types
   PROPOSAL_TYPES,
@@ -117,14 +118,36 @@ function extractPiJsonContent(stdout: string): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+const SAFE_PI_MODEL = /^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$/;
+
+export function assertSafePiModel(model: string): void {
+  if (!SAFE_PI_MODEL.test(model)) {
+    throw new Error(`Invalid pi model identifier: ${model}`);
+  }
+}
+
+export function assertSafePiPrompt(prompt: string): void {
+  if (prompt.includes("\0")) {
+    throw new Error("Invalid pi prompt: null bytes are not allowed");
+  }
+}
+
 async function spawnPiSubprocess(
   systemPrompt: string,
   model: string,
   timeoutMs?: number,
 ): Promise<{ content: string | null; error?: string }> {
+  try {
+    assertSafePiModel(model);
+    assertSafePiPrompt(systemPrompt);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { content: null, error: message };
+  }
+
   return new Promise((resolve) => {
     const args = ["--mode", "json", "-p", "--no-session", "--model", model, "-e", systemPrompt];
-    const child = spawn("pi", args, { stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn("pi", args, { stdio: ["ignore", "pipe", "pipe"], shell: false });
     let stdout = "";
     let stderr = "";
     let timedOut = false;
@@ -331,7 +354,14 @@ function createPiHostAdapter(_pi: ExtensionAPI, ctx?: ExtensionCommandContext): 
     },
 
     async log(params): Promise<void> {
-      console.log(`[${params.level}] ${params.service}: ${params.message}`);
+      const message = `[${params.service}] ${params.message}`;
+      if (params.level === "error") {
+        logger.error(message);
+      } else if (params.level === "warn") {
+        logger.warn(message);
+      } else {
+        logger.info(message);
+      }
     },
 
     getWorkingDirectory(): string {
