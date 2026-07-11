@@ -6,10 +6,10 @@ import { resetLogHandler, resetMinLogLevel } from "@guyghost/swarm-dao-core";
 import { createMcpHostAdapter, createStdioHostAdapter, resolveDaoRoot } from "../src/host-adapter.js";
 import { createSwarmDaoMcpServer, ensureDaoStorage } from "../src/server.js";
 
-let originalConsoleLog: typeof console.log;
-let originalConsoleError: typeof console.error;
-
 describe("mcp-server", () => {
+  let originalConsoleLog: typeof console.log;
+  let originalConsoleError: typeof console.error;
+
   beforeEach(() => {
     originalConsoleLog = console.log;
     originalConsoleError = console.error;
