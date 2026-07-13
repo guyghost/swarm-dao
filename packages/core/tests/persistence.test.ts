@@ -112,20 +112,32 @@ describe("persistence", () => {
   });
 
   it("manages agents through add, get, list, and remove", async () => {
-    const agent = {
-      id: "custom-agent",
-      name: "Custom Agent",
-      role: "testing",
-      description: "A test agent",
-      weight: 2,
-      systemPrompt: "test",
-    };
-    await addAgent(agent);
-    expect(getAgent("custom-agent")).toEqual(agent);
-    expect(listAgents().some((a) => a.id === "custom-agent")).toBe(true);
-    expect(await removeAgent("custom-agent")).toBe(true);
-    expect(getAgent("custom-agent")).toBeUndefined();
-    expect(await removeAgent("missing-agent")).toBe(false);
+    const cwd = `/tmp/dao-agent-crud-test-${Date.now()}`;
+
+    try {
+      await initStorage(cwd);
+      const state = createInitialState(cwd);
+      state.initialized = true;
+      setState(state);
+
+      const agent = {
+        id: "custom-agent",
+        name: "Custom Agent",
+        role: "testing",
+        description: "A test agent",
+        weight: 2,
+        systemPrompt: "test",
+      };
+      await addAgent(agent);
+      expect(getAgent("custom-agent")).toEqual(agent);
+      expect(listAgents().some((a) => a.id === "custom-agent")).toBe(true);
+      expect(await removeAgent("custom-agent")).toBe(true);
+      expect(getAgent("custom-agent")).toBeUndefined();
+      expect(await removeAgent("missing-agent")).toBe(false);
+    } finally {
+      setState(null);
+      await fs.rm(cwd, { recursive: true, force: true }).catch(() => {});
+    }
   });
 
   it("loadState repairs corrupted state.json missing proposals, agents, and auditLog", async () => {

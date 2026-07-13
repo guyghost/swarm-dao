@@ -60,7 +60,7 @@ describe("config", () => {
     expect(filtered.find((a) => a.id === "researcher")).toBeUndefined();
   });
 
-  it("mergeConfig deep-merges typeQuorum", () => {
+  it("mergeConfig merges typeQuorum entries by key", () => {
     const base: DAOConfig = {
       quorumPercent: 60,
       approvalThreshold: 55,
