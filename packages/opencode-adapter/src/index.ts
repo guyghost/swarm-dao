@@ -42,6 +42,7 @@ import {
   loadAgentDefinitions,
   loadConfig,
   loadState,
+  logger,
   PROPOSAL_TYPES,
   parseVoteFromOutput,
   performDryRun,
@@ -123,22 +124,33 @@ async function loadOpenCodeHostDefaultModel(directory: string): Promise<string |
     path.join(process.env.HOME ?? "", ".config", "opencode", "config.json"),
   ];
 
-  for (const configPath of candidates) {
-    try {
-      const raw = await fs.readFile(configPath, "utf-8");
-      const parsed = JSON.parse(raw) as Record<string, unknown>;
-      const model =
-        typeof parsed.model === "string"
-          ? parsed.model
-          : typeof parsed.defaultModel === "string"
-            ? parsed.defaultModel
-            : undefined;
-      if (model) {
-        hostDefaultModels.set(directory, model);
-        return model;
+  const reads = await Promise.all(
+    candidates.map(async (configPath) => {
+      try {
+        const raw = await fs.readFile(configPath, "utf-8");
+        const parsed = parseSafeJson<Record<string, unknown>>(raw, configPath);
+        const model =
+          typeof parsed.model === "string"
+            ? parsed.model
+            : typeof parsed.defaultModel === "string"
+              ? parsed.defaultModel
+              : undefined;
+        return model ?? null;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException | undefined)?.code !== "ENOENT") {
+          logger.warn(
+            `Failed to load OpenCode config file "${configPath}": ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+        return null;
       }
-    } catch {
-      // try next candidate
+    }),
+  );
+
+  for (const model of reads) {
+    if (model) {
+      hostDefaultModels.set(directory, model);
+      return model;
     }
   }
 
@@ -190,7 +202,14 @@ function createOpenCodeHostAdapter(
           message: params.message,
         });
       } catch {
-        console.log(`[${params.level}] ${params.service}: ${params.message}`);
+        const message = `[${params.service}] ${params.message}`;
+        if (params.level === "error") {
+          logger.error(message);
+        } else if (params.level === "warn") {
+          logger.warn(message);
+        } else {
+          logger.info(message);
+        }
       }
     },
     getWorkingDirectory() {

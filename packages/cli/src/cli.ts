@@ -360,7 +360,7 @@ async function cmdVote(cwd: string, positional: string[], flags: Record<string, 
   info(`✓ Vote recorded for #${id}: ${positionRaw} by ${agent}`);
 }
 
-async function shipOne(proposalId: number): Promise<void> {
+async function shipOne(proposalId: number, options?: { deferSave?: boolean }): Promise<void> {
   const p = getProposal(proposalId);
   if (!p) err(`proposal #${proposalId} not found`);
   if (p.status !== "controlled") {
@@ -369,7 +369,9 @@ async function shipOne(proposalId: number): Promise<void> {
   const result = await executeProposal(p);
   if (!result.success) err(result.result);
   await recordAudit(p.id, "delivery", "proposal-shipped", "cli", "shipped via ship command");
-  await saveState();
+  if (!options?.deferSave) {
+    await saveState();
+  }
   info(`✓ Shipped #${p.id}: ${p.title}`);
 }
 
@@ -423,7 +425,7 @@ async function cmdShip(cwd: string, positional: string[], flags: Record<string, 
 
     info(`▶ Shipping ${unexecutedDeps.length} dependency(ies) before #${id}...`);
     for (const depId of unexecutedDeps) {
-      await shipOne(depId);
+      await shipOne(depId, { deferSave: true });
     }
   }
 
