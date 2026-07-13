@@ -1,8 +1,28 @@
-import { describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import { promises as fs } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { resetLogHandler, resetMinLogLevel } from "@guyghost/swarm-dao-core";
 import { createMcpHostAdapter, createStdioHostAdapter, resolveDaoRoot } from "../src/host-adapter.js";
-import { createSwarmDaoMcpServer } from "../src/server.js";
+import { createSwarmDaoMcpServer, ensureDaoStorage } from "../src/server.js";
 
 describe("mcp-server", () => {
+  let originalConsoleLog: typeof console.log;
+  let originalConsoleError: typeof console.error;
+
+  beforeEach(() => {
+    originalConsoleLog = console.log;
+    originalConsoleError = console.error;
+  });
+
+  afterEach(() => {
+    resetLogHandler();
+    resetMinLogLevel();
+    console.log = originalConsoleLog;
+    console.error = originalConsoleError;
+    mock.restore();
+  });
+
   it("builds a stdio host adapter", () => {
     const adapter = createStdioHostAdapter("mcp", "/tmp/dao");
     expect(adapter.hostId).toBe("mcp");
@@ -28,5 +48,45 @@ describe("mcp-server", () => {
     const server = createSwarmDaoMcpServer("/tmp/dao");
     expect(server).toBeDefined();
     expect(typeof server.connect).toBe("function");
+  });
+
+  it("ensureDaoStorage initializes DAO storage on disk", async () => {
+    const cwd = path.join(tmpdir(), `swarm-mcp-${Date.now()}`);
+    try {
+      await ensureDaoStorage(cwd);
+      const daoRoot = path.join(cwd, ".dao");
+      await expect(fs.stat(daoRoot)).resolves.toBeDefined();
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("host adapter logs to stderr for stdio safety", async () => {
+    const logSpy = mock((..._args: unknown[]) => {});
+    const errorSpy = mock((..._args: unknown[]) => {});
+    console.log = logSpy;
+    console.error = errorSpy;
+    const adapter = createStdioHostAdapter("mcp", "/tmp/dao");
+
+    await adapter.log({ level: "info", service: "test", message: "hello" });
+    await adapter.log({ level: "warn", service: "test", message: "careful" });
+    await adapter.log({ level: "error", service: "test", message: "broken" });
+
+    expect(logSpy).not.toHaveBeenCalled();
+    expect(errorSpy).toHaveBeenCalledTimes(3);
+  });
+
+  it("host adapter enforces contained read/write", async () => {
+    const root = path.join(tmpdir(), `swarm-mcp-host-${Date.now()}`);
+    await fs.mkdir(root, { recursive: true });
+    const adapter = createStdioHostAdapter("mcp", root);
+
+    try {
+      await adapter.writeFile("inside.txt", "hello");
+      expect(await adapter.readFile("inside.txt")).toBe("hello");
+      await expect(adapter.readFile("../outside.txt")).rejects.toThrow("Path traversal denied");
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
   });
 });

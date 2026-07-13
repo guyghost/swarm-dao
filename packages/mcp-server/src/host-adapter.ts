@@ -27,12 +27,10 @@ export function createStdioHostAdapter(hostId: string, workDir = resolveDaoRoot(
       return [];
     },
     async log(params) {
-      const prefix = `[${params.level}] ${params.service}:`;
-      if (params.level === "error") {
-        console.error(prefix, params.message);
-      } else {
-        console.error(prefix, params.message);
-      }
+      const message = `[${params.service}] ${params.message}`;
+      // Stdio MCP transports reserve stdout for JSON-RPC frames, so all host logs
+      // must go to stderr regardless of level.
+      console.error(message);
     },
     getWorkingDirectory() {
       return workDir;
