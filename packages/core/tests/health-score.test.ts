@@ -18,8 +18,6 @@ import {
   setState,
 } from "@guyghost/swarm-dao-core";
 
-const hasHealthSnapshotAPI = typeof recordHealthSnapshot === "function";
-
 describe("health-score", () => {
   // ── Original tests ──────────────────────────────────────────
 
@@ -142,11 +140,9 @@ describe("health-score", () => {
     expect(formatHealthTrend({ improving: false, change: -5 })).toContain("📉");
   });
 
-  // ── P1: Health snapshot persistence tests ───────────────────
-  // These tests activate once @codegen implements recordHealthSnapshot,
-  // getHealthSnapshots, and getLatestHealthSnapshot in core.
+  // ── Health snapshot persistence tests ───────────────────────
 
-  describe.skipIf(!hasHealthSnapshotAPI)("health snapshot persistence", () => {
+  describe("health snapshot persistence", () => {
     let testDir: string;
 
     beforeEach(async () => {

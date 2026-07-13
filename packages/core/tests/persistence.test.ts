@@ -3,21 +3,25 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { Proposal } from "@guyghost/swarm-dao-core";
 import {
+  addAgent,
   addVote,
   createInitialState,
   createProposal,
   dispatchProposalEvent,
+  getAgent,
   getAuditLog,
   getDaoRoot,
   getProposal,
   getState,
   getStorageSettings,
   initStorage,
+  listAgents,
   listProposals,
   loadState,
   migrateFromLegacy,
   padId,
   recordAudit,
+  removeAgent,
   saveState,
   setState,
   updateStorageSettings,
@@ -105,6 +109,35 @@ describe("persistence", () => {
 
   it("returns dao root path", () => {
     expect(getDaoRoot("/project")).toBe("/project/.dao");
+  });
+
+  it("manages agents through add, get, list, and remove", async () => {
+    const cwd = `/tmp/dao-agent-crud-test-${Date.now()}`;
+
+    try {
+      await initStorage(cwd);
+      const state = createInitialState(cwd);
+      state.initialized = true;
+      setState(state);
+
+      const agent = {
+        id: "custom-agent",
+        name: "Custom Agent",
+        role: "testing",
+        description: "A test agent",
+        weight: 2,
+        systemPrompt: "test",
+      };
+      await addAgent(agent);
+      expect(getAgent("custom-agent")).toEqual(agent);
+      expect(listAgents().some((a) => a.id === "custom-agent")).toBe(true);
+      expect(await removeAgent("custom-agent")).toBe(true);
+      expect(getAgent("custom-agent")).toBeUndefined();
+      expect(await removeAgent("missing-agent")).toBe(false);
+    } finally {
+      setState(null);
+      await fs.rm(cwd, { recursive: true, force: true }).catch(() => {});
+    }
   });
 
   it("loadState repairs corrupted state.json missing proposals, agents, and auditLog", async () => {
@@ -304,14 +337,8 @@ describe("persistence", () => {
    * OpenSpec Scenario: getStorageSettings reads config.json and returns StorageSettings
    *
    * GIVEN a DAO root with a .dao/config.json containing valid StorageSettings
-   * WHEN calling getStorageSettings(daoRoot) synchronously
-   * THEN the returned value should be a plain StorageSettings object, not a Promise
-   *   AND mode should equal "github" (before fix, it is undefined because the return
-   *   is a Promise cast as StorageSettings)
-   *
-   * NOTE: After the fix, getStorageSettings becomes async. This test should be
-   * updated to await the result. For now, it asserts the bug: sync access yields
-   * undefined because the function silently returns a Promise.
+   * WHEN calling getStorageSettings(daoRoot)
+   * THEN the returned value should be a plain StorageSettings object with persisted fields
    */
   it("getStorageSettings returns real StorageSettings, not a Promise cast", async () => {
     const cwd = `/tmp/dao-storage-settings-test-${Date.now()}`;
