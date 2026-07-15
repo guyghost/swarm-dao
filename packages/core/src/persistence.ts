@@ -6,6 +6,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { logger } from "./observability/logging.js";
 import { recordVoteCast } from "./observability/metrics.js";
+import type { DaoStateRepositoryPort } from "./ports/repository.js";
 import type {
   AgentOutput,
   AuditEntry,
@@ -26,7 +27,19 @@ import type {
 import { createInitialState } from "./types/index.js";
 import { redactSensitiveFields, SENSITIVE_KEYS } from "./utils/security.js";
 
-let state: DAOState | null = null;
+class CompatibilityFileRepository implements DaoStateRepositoryPort {
+  public constructor(private readonly state: DAOState) {}
+
+  public get(): DAOState {
+    return this.state;
+  }
+
+  public persist(): Promise<void> {
+    return persistState(this.state);
+  }
+}
+
+let activeRepository: DaoStateRepositoryPort | null = null;
 
 const STATE_FILE = "state.json";
 const DECISIONS_DIR = "decisions";
@@ -286,24 +299,30 @@ export async function migrateFromLegacy(cwd: string, legacyDirectories: string[]
 // ── State Access ─────────────────────────────────────────────
 
 export function getState(): DAOState {
-  if (!state) {
+  if (!activeRepository) {
     throw new Error("DAO not initialized. Run dao_setup first.");
   }
-  return state;
+  return activeRepository.get();
 }
 
 export function setState(newState: DAOState | null): void {
-  state = newState;
+  activeRepository = newState ? new CompatibilityFileRepository(newState) : null;
   // The in-memory state identity changed (or was reset); the write cache no
   // longer reflects what is on disk, so force the next save to be a full write.
   resetWriteCache();
 }
 
+/** Select the repository instance used by compatibility persistence functions. */
+export function setRepository(repository: DaoStateRepositoryPort | null): void {
+  activeRepository = repository;
+  resetWriteCache();
+}
+
 export function getOrCreateState(cwd: string): DAOState {
-  if (!state) {
-    state = createInitialState(getDaoRoot(cwd));
+  if (!activeRepository) {
+    activeRepository = new CompatibilityFileRepository(createInitialState(getDaoRoot(cwd)));
   }
-  return state;
+  return activeRepository.get();
 }
 
 // ── Load / Save ──────────────────────────────────────────────
@@ -353,11 +372,11 @@ export async function loadState(cwd: string, options?: { legacyDirectories?: str
   }, 0);
   if (loaded.nextAuditId <= highestAuditId) loaded.nextAuditId = highestAuditId + 1;
 
-  state = loaded;
+  activeRepository = new CompatibilityFileRepository(loaded);
   // Disk is now the source of truth for the freshly loaded state; reset the
   // cache so the first subsequent save reflects the real on-disk content.
   resetWriteCache();
-  return state;
+  return activeRepository.get();
 }
 
 /**
@@ -403,7 +422,11 @@ async function importLegacyProposalSidecars(daoRoot: string, loaded: DAOState): 
 }
 
 export async function saveState(): Promise<void> {
-  if (!state) return;
+  if (!activeRepository) return;
+  await activeRepository.persist();
+}
+
+async function persistState(state: DAOState): Promise<void> {
   if (!state.daoRoot) return;
   if (!state.proposals) state.proposals = [];
   const daoRoot = state.daoRoot;
@@ -412,11 +435,16 @@ export async function saveState(): Promise<void> {
   await fs.mkdir(daoRoot, { recursive: true });
   await writeJsonFileIfChanged(statePath, state);
 
-  await saveDecisions();
+  await persistDecisions(state);
 }
 
 export async function saveDecisions(): Promise<void> {
-  if (!state?.daoRoot || !state.proposals) return;
+  if (!activeRepository) return;
+  await persistDecisions(activeRepository.get());
+}
+
+async function persistDecisions(state: DAOState): Promise<void> {
+  if (!state.daoRoot || !state.proposals) return;
   const decisionsDir = getDecisionsDir(state.daoRoot);
   await fs.mkdir(decisionsDir, { recursive: true });
 

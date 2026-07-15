@@ -9,29 +9,27 @@ import path from "node:path";
 import type { ProposalType, VotePosition } from "@guyghost/swarm-dao-core";
 import {
   addVote,
+  CreateProposalUseCase,
   configureGitHub,
-  createProposal,
-  executeProposal,
+  FileDaoStateRepository,
   getAllAuditLog,
   getAuditLog,
   getDaoCommandsByPhase,
   getDaoRoot,
-  getOrCreateState,
   getProposal,
   getState,
-  getUnexecutedDependencies,
   ghBranchNameFor,
   ghCreateBranch,
   ghCreatePullRequest,
   initializeAgents,
-  initStorage,
   isGitHubEnabled,
   listProposals,
-  loadState,
   PROPOSAL_TYPES,
   recordAudit,
+  ShipProposalUseCase,
   saveState,
-  setState,
+  setRepository,
+  systemClock,
 } from "@guyghost/swarm-dao-core";
 
 // ── Helpers ─────────────────────────────────────────────────
@@ -69,11 +67,10 @@ function parseFlags(args: string[]): { flags: Record<string, string | true>; pos
   return { flags, positional };
 }
 
-async function ensureLoaded(cwd: string): Promise<void> {
-  const loaded = await loadState(cwd);
-  if (!loaded) {
-    setState(getOrCreateState(cwd));
-  }
+async function ensureLoaded(cwd: string): Promise<FileDaoStateRepository> {
+  const repository = await FileDaoStateRepository.open(cwd);
+  setRepository(repository);
+  return repository;
 }
 
 // ── Commands ────────────────────────────────────────────────
@@ -155,8 +152,8 @@ function buildCliHelp(): string {
 const HELP = buildCliHelp();
 
 async function cmdInit(cwd: string): Promise<void> {
-  const root = await initStorage(cwd);
-  setState(getOrCreateState(cwd));
+  const root = getDaoRoot(cwd);
+  setRepository(await FileDaoStateRepository.open(cwd));
   await saveState();
   info(`✓ DAO storage initialized at ${root}`);
 }
@@ -205,19 +202,26 @@ async function cmdPropose(cwd: string, flags: Record<string, string | true>): Pr
     });
   }
 
-  await ensureLoaded(cwd);
-  const p = await createProposal(title, type, description, by);
-  if (dependsOn && dependsOn.length > 0) {
-    const state = getState();
-    for (const depId of dependsOn) {
-      if (!state.proposals.find((q) => q.id === depId)) {
-        err(`--depends-on references unknown proposal #${depId}`);
-      }
+  const repository = await ensureLoaded(cwd);
+  const result = await new CreateProposalUseCase({
+    repository,
+    clock: systemClock,
+  }).execute({
+    title,
+    type: type as ProposalType,
+    description,
+    proposedBy: by,
+    dependsOn,
+    auditAction: "proposal-created",
+    auditDetails: `via cli: ${title}`,
+  });
+  if (!result.ok) {
+    if (result.error.startsWith("Unknown proposal dependency #")) {
+      err(`--depends-on references unknown proposal #${result.error.match(/#(\d+)/)?.[1] ?? "?"}`);
     }
-    p.dependsOn = dependsOn;
+    err(result.error);
   }
-  await recordAudit(p.id, "governance", "proposal-created", by, `via cli: ${title}`);
-  await saveState();
+  const p = result.proposal;
   info(`✓ Proposal #${p.id} created (${p.status})`);
   info(`  ${p.title} | ${p.type}`);
   if (p.dependsOn && p.dependsOn.length > 0) {
@@ -360,21 +364,6 @@ async function cmdVote(cwd: string, positional: string[], flags: Record<string, 
   info(`✓ Vote recorded for #${id}: ${positionRaw} by ${agent}`);
 }
 
-async function shipOne(proposalId: number, options?: { deferSave?: boolean }): Promise<void> {
-  const p = getProposal(proposalId);
-  if (!p) err(`proposal #${proposalId} not found`);
-  if (p.status !== "controlled") {
-    err(`Proposal #${p.id} must be in 'controlled' state to ship (current: ${p.status})`);
-  }
-  const result = await executeProposal(p);
-  if (!result.success) err(result.result);
-  await recordAudit(p.id, "delivery", "proposal-shipped", "cli", "shipped via ship command");
-  if (!options?.deferSave) {
-    await saveState();
-  }
-  info(`✓ Shipped #${p.id}: ${p.title}`);
-}
-
 async function cmdShip(cwd: string, positional: string[], flags: Record<string, string | true>): Promise<void> {
   const idStr = positional[0];
   if (!idStr) err("usage: swarm-dao ship <id> [--cascade] [--force]");
@@ -384,52 +373,23 @@ async function cmdShip(cwd: string, positional: string[], flags: Record<string, 
   const cascade = flags.cascade === true;
   const force = flags.force === true;
 
-  await ensureLoaded(cwd);
-  const proposal = getProposal(id);
-  if (!proposal) err(`proposal #${id} not found`);
-
-  if (force) {
-    await shipOne(id);
-    return;
-  }
-
-  const unexecutedResolution = getUnexecutedDependencies(id, getState().proposals);
-  if (unexecutedResolution.error) err(unexecutedResolution.error);
-
-  const unexecutedDeps = unexecutedResolution.order ?? [];
-
-  if (unexecutedDeps.length > 0) {
-    if (!cascade) {
-      info(`⚠️  Proposal #${id} has unexecuted dependencies:`);
-      for (const depId of unexecutedDeps) {
-        const dep = getProposal(depId);
-        if (dep) info(`   #${String(dep.id).padStart(3)} [${dep.status.padEnd(12)}] ${dep.title}`);
-      }
-      info("");
+  const repository = await ensureLoaded(cwd);
+  const result = await new ShipProposalUseCase({
+    repository,
+    clock: systemClock,
+  }).execute({ proposalId: id, actor: "cli", cascade, force });
+  if (!result.ok) {
+    if (result.error.includes("unexecuted dependencies found")) {
       info(`Run with --cascade to ship all dependencies first:`);
       info(`  swarm-dao ship ${id} --cascade`);
       err("Dependencies not yet executed — use --cascade to ship in order");
     }
-
-    // Validate all unexecuted deps are in 'controlled' state before executing anything
-    const notReady = unexecutedDeps.filter((depId) => getProposal(depId)?.status !== "controlled");
-    if (notReady.length > 0) {
-      const msgs = notReady
-        .map((depId) => {
-          const dep = getProposal(depId);
-          return dep ? `#${dep.id} (${dep.status})` : `#${depId} (not found)`;
-        })
-        .join(", ");
-      err(`Cannot cascade: dependencies not in 'controlled' state: ${msgs}`);
-    }
-
-    info(`▶ Shipping ${unexecutedDeps.length} dependency(ies) before #${id}...`);
-    for (const depId of unexecutedDeps) {
-      await shipOne(depId, { deferSave: true });
-    }
+    err(result.error.replace("Cannot cascade ship:", "Cannot cascade:"));
   }
-
-  await shipOne(id);
+  for (const shippedId of result.shipped) {
+    const proposal = getProposal(shippedId);
+    info(`✓ Shipped #${shippedId}: ${proposal?.title ?? "proposal"}`);
+  }
 }
 
 async function cmdGithubConfig(cwd: string, flags: Record<string, string | true>): Promise<void> {

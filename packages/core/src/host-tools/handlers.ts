@@ -1,46 +1,46 @@
+import { LegacyDaoStateRepository } from "../adapters/persistence/legacy-dao-state.repository.js";
+import { InitializeDaoUseCase } from "../application/initialize-dao.use-case.js";
+import { ControlProposalUseCase } from "../application/proposals/control-proposal.use-case.js";
+import { CreateAmendmentProposalUseCase } from "../application/proposals/create-amendment-proposal.use-case.js";
+import { CreateProposalUseCase } from "../application/proposals/create-proposal.use-case.js";
+import { DeliberateProposalUseCase } from "../application/proposals/deliberate-proposal.use-case.js";
+import { DryRunProposalUseCase } from "../application/proposals/dry-run-proposal.use-case.js";
+import { ExecuteProposalUseCase } from "../application/proposals/execute-proposal.use-case.js";
+import { RateProposalUseCase } from "../application/proposals/rate-proposal.use-case.js";
+import { RecordDeliberationOutputsUseCase } from "../application/proposals/record-deliberation-outputs.use-case.js";
+import { RollbackProposalUseCase } from "../application/proposals/rollback-proposal.use-case.js";
+import { RoundTableUseCase } from "../application/proposals/round-table.use-case.js";
+import { ShipProposalUseCase } from "../application/proposals/ship-proposal.use-case.js";
+import { StartDeliberationUseCase } from "../application/proposals/start-deliberation.use-case.js";
+import { UpdateProposalUseCase } from "../application/proposals/update-proposal.use-case.js";
 import { loadConfig } from "../config.js";
 import { formatAuditTrail } from "../control/audit.js";
-import { formatControlResult, runGates } from "../control/gates.js";
 import { formatAllArtefacts, generateAllArtefacts } from "../delivery/artefacts.js";
-import { getUnexecutedDependencies } from "../delivery/dependencies.js";
-import { formatDryRun, formatRollback, performDryRun, performRollback } from "../delivery/dry-run.js";
-import { executeProposal } from "../delivery/execution.js";
-import { formatPlan, generateDeliveryPlan, getPlan } from "../delivery/plans.js";
+import { formatPlan, getPlan } from "../delivery/plans.js";
 import { formatAgentsTable, initializeAgents, loadAgentDefinitions } from "../governance/agents.js";
-import { validateAmendmentPayload } from "../governance/amendments.js";
-import { classifyRiskZone } from "../governance/lifecycle.js";
-import { dispatchProposalEvent } from "../governance/proposal.utils.js";
-import { calculateCompositeScore, formatCompositeScore } from "../governance/scoring.js";
-import { formatTallyResult, parseVoteFromOutput, tallyVotes } from "../governance/voting.js";
 import { computeHealthScore, formatHealthScore, generateDashboard } from "../health-score.js";
 import { ghBranchNameFor, ghCreateBranch, ghCreatePullRequest, isGitHubEnabled } from "../integrations/github.js";
-import type { RoundTableSuggestion } from "../intelligence/roundtable.js";
-import { formatRoundTableResults, runRoundTable } from "../intelligence/roundtable.js";
+import { formatRoundTableResults } from "../intelligence/roundtable.js";
+import { buildDispatchInstructions, createDispatchModelContext, formatDispatchPlan } from "../intelligence/swarm.js";
+import { recordProposalExecuted } from "../observability/metrics.js";
+import { getAllAuditLog, getOrCreateState, getProposal, getState, initStorage } from "../persistence.js";
+import { systemClock } from "../ports/clock.js";
+import type { DaoStateRepositoryPort } from "../ports/repository.js";
 import {
-  buildDispatchInstructions,
-  createDispatchModelContext,
-  dispatchSwarm,
-  formatDispatchPlan,
-} from "../intelligence/swarm.js";
-import { synthesize } from "../intelligence/synthesis.js";
-import {
-  addRating,
-  createProposal,
-  createProposalsBatch,
-  getAllAuditLog,
-  getOrCreateState,
-  getProposal,
-  getState,
-  initStorage,
-  recordAudit,
-  saveState,
-  storeCompositeScore,
-  storeDeliberationBatch,
-  storeDeliveryPlan,
-  storeSynthesis,
-} from "../persistence.js";
-import type { AgentOutput, AmendmentPayload, HostAdapter, ProposalType } from "../types/index.js";
-import { PROPOSAL_TYPE_LABELS, PROPOSAL_TYPES } from "../types/index.js";
+  presentAmendment,
+  presentControl,
+  presentDeliberation,
+  presentDryRun,
+  presentExecution,
+  presentInitialization,
+  presentProposalCreated,
+  presentProposalUpdated,
+  presentRating,
+  presentRollback,
+  presentShip,
+} from "../presenters/proposal.presenter.js";
+import type { AmendmentPayload, HostAdapter, ProposalType } from "../types/index.js";
+import { PROPOSAL_TYPES } from "../types/index.js";
 import { loadGitHubConfigFromDaoRoot, saveGitHubConfigToDaoRoot } from "./github-config.js";
 import { DAO_ONBOARDING_MESSAGE } from "./messages.js";
 import { parseSafeJson } from "./utils.js";
@@ -57,6 +57,7 @@ export interface DaoToolContext {
   failOnGateFailure?: boolean;
   getSessionModel?: () => string | undefined;
   hostDefaultModel?: string | undefined;
+  repository?: DaoStateRepositoryPort;
   onDeliberationProgress?: (update: { agentName: string; phase: string }) => void;
 }
 
@@ -67,23 +68,22 @@ export interface RecordOutputInput {
   error?: string;
 }
 
-function requireInitialized(): string | null {
-  const state = getState();
+function repositoryOrLegacy(repository?: DaoStateRepositoryPort): DaoStateRepositoryPort {
+  return repository ?? new LegacyDaoStateRepository();
+}
+
+function requireInitialized(repository?: DaoStateRepositoryPort): string | null {
+  const state = repository ? repository.get() : getState();
   if (!state.initialized) return DAO_ONBOARDING_MESSAGE;
   return null;
 }
 
 export async function handleDaoSetup(ctx: DaoToolContext, useDefaults = true): Promise<string> {
   await initStorage(ctx.workDir);
-  const state = getOrCreateState(ctx.workDir);
-  if (state.initialized) {
-    return `DAO already initialized with ${state.agents.length} agents.`;
-  }
+  if (!ctx.repository) getOrCreateState(ctx.workDir);
   const agents = initializeAgents(useDefaults ? undefined : []);
-  state.agents = agents;
-  state.initialized = true;
-  await saveState();
-  return `# DAO Initialized\n\n${formatAgentsTable(agents)}\n\nRun \`dao_help\` to discover the workflow, then \`dao_propose\` to create proposals.`;
+  const result = await new InitializeDaoUseCase({ repository: repositoryOrLegacy(ctx.repository) }).execute({ agents });
+  return presentInitialization(result);
 }
 
 export interface DaoProposeArgs {
@@ -98,40 +98,33 @@ export interface DaoProposeArgs {
   affectedPaths?: string[];
 }
 
-export async function handleDaoPropose(args: DaoProposeArgs): Promise<string> {
-  const notReady = requireInitialized();
-  if (notReady) return notReady;
-  const proposal = await createProposal(args.title, args.type, args.description, "user", args.context);
-  if (args.problemStatement !== undefined) proposal.problemStatement = args.problemStatement;
-  if (args.acceptanceCriteria !== undefined) proposal.acceptanceCriteria = args.acceptanceCriteria;
-  if (args.successMetrics !== undefined) proposal.successMetrics = args.successMetrics;
-  if (args.rollbackConditions !== undefined) proposal.rollbackConditions = args.rollbackConditions;
-  if (args.affectedPaths !== undefined) proposal.affectedPaths = args.affectedPaths;
-  proposal.riskZone = classifyRiskZone(proposal);
-  await saveState();
-  await recordAudit(proposal.id, "governance", "proposal_created", "user", `Proposal "${args.title}" created`);
-  const typeLabel = PROPOSAL_TYPE_LABELS[args.type] ?? args.type;
-  return `# 📋 Proposal Created — #${proposal.id}\n\n**Title:** ${args.title}\n**Type:** ${typeLabel}\n**Zone:** ${proposal.riskZone}\n\nRun \`dao_deliberate proposalId=${proposal.id}\``;
+export async function handleDaoPropose(args: DaoProposeArgs, repository?: DaoStateRepositoryPort): Promise<string> {
+  const useCase = new CreateProposalUseCase({ repository: repositoryOrLegacy(repository), clock: systemClock });
+  const result = await useCase.execute({ ...args, proposedBy: "user" });
+  if (!result.ok)
+    return result.error === "DAO not initialized. Run dao_setup first." ? DAO_ONBOARDING_MESSAGE : result.error;
+  return presentProposalCreated(result.proposal);
 }
 
 export async function handleDaoDeliberate(ctx: DaoToolContext, proposalId: number): Promise<string> {
-  const notReady = requireInitialized();
+  const notReady = requireInitialized(ctx.repository);
   if (notReady) return notReady;
-  const state = getState();
-  const proposal = getProposal(proposalId);
+  const state = repositoryOrLegacy(ctx.repository).get();
+  const proposal = state.proposals.find((candidate) => candidate.id === proposalId);
   if (!proposal) return `Proposal #${proposalId} not found.`;
   if (proposal.status !== "open") return `Proposal #${proposal.id} is ${proposal.status}, must be open.`;
-  const deliberation = dispatchProposalEvent(proposal, { type: "DELIBERATE" });
-  if (!deliberation.ok) return `Cannot deliberate: ${deliberation.error}`;
-  await recordAudit(proposal.id, "governance", "deliberation_started", "system", `Deliberation on #${proposal.id}`);
-  await saveState();
   const projectConfig = await loadConfig(state.daoRoot);
   const agents = await loadAgentDefinitions(state.daoRoot, projectConfig);
-  const modelContext = createDispatchModelContext(state.config.defaultModel, ctx.adapter, {
-    parentSessionModel: ctx.getSessionModel?.(),
-    hostDefaultModel: ctx.hostDefaultModel,
-  });
   if (ctx.deliberationMode === "manual") {
+    const deliberation = await new StartDeliberationUseCase({
+      repository: repositoryOrLegacy(ctx.repository),
+      clock: systemClock,
+    }).execute({ proposalId });
+    if (!deliberation.ok) return `Cannot deliberate: ${deliberation.error}`;
+    const modelContext = createDispatchModelContext(state.config.defaultModel, ctx.adapter, {
+      parentSessionModel: ctx.getSessionModel?.(),
+      hostDefaultModel: ctx.hostDefaultModel,
+    });
     const instructions = buildDispatchInstructions(proposal, agents, modelContext);
     const plan = formatDispatchPlan(proposal, instructions);
     const parentModel = ctx.getSessionModel?.() ?? ctx.hostDefaultModel;
@@ -139,61 +132,21 @@ export async function handleDaoDeliberate(ctx: DaoToolContext, proposalId: numbe
     return `${plan}${parentNote}`;
   }
   const startTime = Date.now();
-  const outputs = await dispatchSwarm(
-    proposal,
+  const useCase = new DeliberateProposalUseCase({
+    repository: repositoryOrLegacy(ctx.repository),
+    worker: ctx.adapter,
+    clock: systemClock,
+  });
+  const result = await useCase.execute({
+    proposalId,
     agents,
-    ctx.adapter,
-    state.config.maxConcurrent,
-    modelContext,
-    (update) => ctx.onDeliberationProgress?.(update),
-  );
-  const votes = [];
-  const persistedOutputs = [];
-  const agentById = new Map(agents.map((a) => [a.id, a]));
-  for (const output of outputs) {
-    if (output.content) {
-      const weight = agentById.get(output.agentId)?.weight ?? 1;
-      const vote = parseVoteFromOutput(output.agentId, output.agentName, weight, output.content);
-      if (vote) {
-        vote.weight = weight;
-        votes.push(vote);
-      }
-    }
-    persistedOutputs.push(output);
-  }
-  if (votes.length > 0 || persistedOutputs.length > 0) {
-    await storeDeliberationBatch(proposal.id, votes, persistedOutputs);
-  }
-  proposal.votes = votes;
-  const compositeScore = calculateCompositeScore(outputs);
-  proposal.compositeScore = compositeScore;
-  await storeCompositeScore(proposal.id, compositeScore);
-  const tally = tallyVotes(proposal, state.config);
-  const synthesisText = synthesize(proposal, agents, outputs, tally);
-  proposal.synthesis = synthesisText;
-  await storeSynthesis(proposal.id, synthesisText);
-  if (tally.approved) {
-    dispatchProposalEvent(proposal, { type: "APPROVE", tally });
-    await recordAudit(
-      proposal.id,
-      "intelligence",
-      "deliberation_approved",
-      "system",
-      `Approved: ${tally.approvalScore}%`,
-    );
-  } else {
-    dispatchProposalEvent(proposal, { type: "REJECT" });
-    await recordAudit(
-      proposal.id,
-      "intelligence",
-      "deliberation_rejected",
-      "system",
-      `Rejected: ${tally.approvalScore}%`,
-    );
-  }
-  await saveState();
+    parentSessionModel: ctx.getSessionModel?.(),
+    hostDefaultModel: ctx.hostDefaultModel,
+    onUpdate: (update) => ctx.onDeliberationProgress?.(update),
+  });
+  if (!result.ok) return `Cannot deliberate: ${result.error}`;
   const duration = Date.now() - startTime;
-  return `# 🗳️ Deliberation Complete — #${proposal.id} (${duration}ms)\n\n${formatTallyResult(tally)}\n\n${formatCompositeScore(compositeScore)}\n\n${synthesisText}\n\n> Next: \`${ctx.controlToolName} proposalId=${proposal.id}\``;
+  return presentDeliberation(proposal.id, result, { durationMs: duration, controlToolName: ctx.controlToolName });
 }
 
 export async function handleDaoRecordOutputs(
@@ -201,99 +154,30 @@ export async function handleDaoRecordOutputs(
   proposalId: number,
   outputs: RecordOutputInput[],
 ): Promise<string> {
-  const notReady = requireInitialized();
-  if (notReady) return notReady;
-  const state = getState();
-  const proposal = getProposal(proposalId);
-  if (!proposal) return `Proposal #${proposalId} not found.`;
-  if (proposal.status !== "deliberating") return `Expected deliberating (current: ${proposal.status})`;
-  const votes = [];
-  const enrichedOutputs = [];
-  for (const raw of outputs) {
-    const agent = state.agents.find((a) => a.id === raw.agentId);
-    if (!agent) continue;
-    const output: AgentOutput = {
-      agentId: agent.id,
-      agentName: agent.name,
-      role: agent.role,
-      content: raw.content || "",
-      durationMs: raw.durationMs ?? 0,
-      error: raw.error,
-    };
-    const vote = parseVoteFromOutput(agent.id, agent.name, agent.weight, output.content);
-    if (vote) {
-      output.vote = vote;
-      votes.push(vote);
-    }
-    enrichedOutputs.push(output);
-  }
-  await storeDeliberationBatch(proposal.id, votes, enrichedOutputs);
-  proposal.votes = votes;
-  const compositeScore = calculateCompositeScore(enrichedOutputs);
-  proposal.compositeScore = compositeScore;
-  await storeCompositeScore(proposal.id, compositeScore);
-  const synthesisText = synthesize(proposal, state.agents, enrichedOutputs);
-  proposal.synthesis = synthesisText;
-  await storeSynthesis(proposal.id, synthesisText);
-  const tally = tallyVotes(proposal, state.config);
-  if (tally.approved) {
-    dispatchProposalEvent(proposal, { type: "APPROVE", tally });
-    await recordAudit(
-      proposal.id,
-      "intelligence",
-      "deliberation_approved",
-      "system",
-      `Approved: ${tally.approvalScore}%`,
-    );
-  } else {
-    dispatchProposalEvent(proposal, { type: "REJECT" });
-    await recordAudit(
-      proposal.id,
-      "intelligence",
-      "deliberation_rejected",
-      "system",
-      `Rejected: ${tally.approvalScore}%`,
-    );
-  }
-  await saveState();
-  return `# 🗳️ Deliberation Complete — #${proposal.id}\n\n${formatTallyResult(tally)}\n\n${formatCompositeScore(compositeScore)}\n\n${synthesisText}\n\n> Next: \`${ctx.controlToolName} proposalId=${proposal.id}\``;
+  const useCase = new RecordDeliberationOutputsUseCase({
+    repository: repositoryOrLegacy(ctx.repository),
+    clock: systemClock,
+  });
+  const result = await useCase.execute({ proposalId, outputs });
+  if (!result.ok) return result.error;
+  return presentDeliberation(proposalId, result, { controlToolName: ctx.controlToolName });
 }
 
 export async function handleDaoControl(ctx: DaoToolContext, proposalId: number): Promise<string> {
-  const notReady = requireInitialized();
+  const notReady = requireInitialized(ctx.repository);
   if (notReady) return notReady;
-  const state = getState();
-  const proposal = getProposal(proposalId);
-  if (!proposal) return `Proposal #${proposalId} not found.`;
-  if (proposal.status !== "approved") return `Must be approved (current: ${proposal.status})`;
-  const result = runGates(proposal, state.config);
-  if (result.allGatesPassed) {
-    dispatchProposalEvent(proposal, { type: "CONTROL_PASS", result });
-    await recordAudit(proposal.id, "control", "gates_passed", "system", "All gates passed");
-    if (!state.deliveryPlans[proposal.id]) {
-      const plan = generateDeliveryPlan(proposal);
-      await storeDeliveryPlan(proposal.id, plan);
-    }
-  } else {
-    if (ctx.failOnGateFailure) {
-      dispatchProposalEvent(proposal, { type: "CONTROL_FAIL" });
-    }
-    await recordAudit(proposal.id, "control", "gates_failed", "system", `${result.blockerCount} blockers`);
-  }
-  await saveState();
-  return formatControlResult(result);
+  const useCase = new ControlProposalUseCase({ repository: repositoryOrLegacy(ctx.repository), clock: systemClock });
+  const result = await useCase.execute({ proposalId, failOnGateFailure: ctx.failOnGateFailure });
+  if (!result.ok) return result.error;
+  return presentControl(result.control);
 }
 
-export async function handleDaoExecute(proposalId: number): Promise<string> {
-  const proposal = getProposal(proposalId);
-  if (!proposal) return `Proposal #${proposalId} not found.`;
-  if (proposal.status !== "controlled") {
-    return `Must be controlled (current: ${proposal.status}). Run dao_control first.`;
-  }
-  const result = await executeProposal(proposal);
-  await saveState();
-  await recordAudit(proposal.id, "delivery", "proposal_executed", "user", `Executed #${proposal.id}`);
-  return result.result;
+export async function handleDaoExecute(proposalId: number, repository?: DaoStateRepositoryPort): Promise<string> {
+  const useCase = new ExecuteProposalUseCase({ repository: repositoryOrLegacy(repository), clock: systemClock });
+  const result = await useCase.execute({ proposalId, actor: "user" });
+  if (!result.ok) return result.error;
+  recordProposalExecuted(result.proposal.id, result.proposal.type);
+  return presentExecution(result);
 }
 
 export async function handleDaoShip(
@@ -301,62 +185,23 @@ export async function handleDaoShip(
   proposalId: number,
   options?: { cascade?: boolean; force?: boolean },
 ): Promise<string> {
-  const notReady = requireInitialized();
+  const notReady = requireInitialized(ctx.repository);
   if (notReady) return notReady;
-  const state = getState();
-  const proposal = getProposal(proposalId);
-  if (!proposal) return `Proposal #${proposalId} not found.`;
-  const cascade = options?.cascade === true;
-  const force = options?.force === true;
-  const shipped: number[] = [];
-  const shipOne = async (id: number): Promise<string | null> => {
-    const target = getProposal(id);
-    if (!target) return `Proposal #${id} not found.`;
-    if (target.status !== "controlled") {
-      return `Proposal #${target.id} must be in 'controlled' state to ship (current: ${target.status})`;
-    }
-    const result = await executeProposal(target);
-    if (!result.success) return result.result;
-    await recordAudit(target.id, "delivery", "proposal-shipped", ctx.adapter.hostId, "shipped via dao_ship");
-    return null;
-  };
-  if (!force) {
-    const depsResolution = getUnexecutedDependencies(proposal.id, state.proposals);
-    if (depsResolution.error) return depsResolution.error;
-    const pendingDeps = depsResolution.order ?? [];
-    if (pendingDeps.length > 0 && !cascade) {
-      const lines = pendingDeps.map((depId) => {
-        const dep = getProposal(depId);
-        return dep ? `- #${dep.id} [${dep.status}] ${dep.title}` : `- #${depId} [missing]`;
-      });
-      return `Cannot ship proposal #${proposal.id}: unexecuted dependencies found.\n\n${lines.join("\n")}\n\nRetry with \`dao_ship proposalId=${proposal.id} cascade=true\` or \`force=true\`.`;
-    }
-    if (cascade && pendingDeps.length > 0) {
-      const notControlled = pendingDeps.filter((depId) => getProposal(depId)?.status !== "controlled");
-      if (notControlled.length > 0) {
-        const details = notControlled
-          .map((depId) => {
-            const dep = getProposal(depId);
-            return dep ? `#${dep.id} (${dep.status})` : `#${depId} (missing)`;
-          })
-          .join(", ");
-        return `Cannot cascade ship: dependencies not in 'controlled' state: ${details}`;
-      }
-      for (const depId of pendingDeps) {
-        const dep = getProposal(depId);
-        if (!dep || dep.status === "executed") continue;
-        const depError = await shipOne(depId);
-        if (depError) return depError;
-        shipped.push(depId);
-      }
-    }
+  const useCase = new ShipProposalUseCase({ repository: repositoryOrLegacy(ctx.repository), clock: systemClock });
+  const result = await useCase.execute({
+    proposalId,
+    actor: ctx.adapter.hostId,
+    cascade: options?.cascade,
+    force: options?.force,
+  });
+  if (!result.ok) return result.error;
+  for (const id of result.shipped) {
+    const proposal = repositoryOrLegacy(ctx.repository)
+      .get()
+      .proposals.find((candidate) => candidate.id === id);
+    if (proposal) recordProposalExecuted(proposal.id, proposal.type);
   }
-  const targetError = await shipOne(proposal.id);
-  if (targetError) return targetError;
-  shipped.push(proposal.id);
-  await saveState();
-  const summary = shipped.map((id) => `- #${id}`).join("\n");
-  return `# 🚀 Ship Complete\n\nShipped proposals:\n${summary}`;
+  return presentShip(result);
 }
 
 export async function handleDaoList(): Promise<string> {
@@ -408,80 +253,46 @@ export async function handleDaoArtefacts(proposalId: number): Promise<string> {
   return formatAllArtefacts(generateAllArtefacts(proposal));
 }
 
-export async function handleDaoDryRun(proposalId: number): Promise<string> {
-  const proposal = getProposal(proposalId);
-  if (!proposal) return `Proposal #${proposalId} not found.`;
-  const result = await performDryRun(proposal);
-  proposal.dryRunAt = new Date().toISOString();
-  proposal.dryRunCanProceed = result.canProceed;
-  await saveState();
-  return formatDryRun(result);
+export async function handleDaoDryRun(proposalId: number, repository?: DaoStateRepositoryPort): Promise<string> {
+  const result = await new DryRunProposalUseCase({
+    repository: repositoryOrLegacy(repository),
+    clock: systemClock,
+  }).execute({ proposalId });
+  return result.ok ? presentDryRun(result.analysis) : result.error;
 }
 
-export async function handleDaoRollback(proposalId: number): Promise<string> {
-  return formatRollback(await performRollback(proposalId));
+export async function handleDaoRollback(proposalId: number, repository?: DaoStateRepositoryPort): Promise<string> {
+  const result = await new RollbackProposalUseCase({ repository: repositoryOrLegacy(repository) }).execute({
+    proposalId,
+  });
+  return presentRollback(result);
 }
 
-export async function handleDaoDashboard(): Promise<string> {
-  const notReady = requireInitialized();
+export async function handleDaoDashboard(repository?: DaoStateRepositoryPort): Promise<string> {
+  const notReady = requireInitialized(repository);
   if (notReady) return notReady;
-  const state = getState();
+  const state = repositoryOrLegacy(repository).get();
   const dashboard = generateDashboard(state.proposals, state.outcomes, state.agents, state.healthSnapshots);
   const health = computeHealthScore(state.proposals, state.outcomes, state.config.healthWeights);
   return `${dashboard}\n\n${formatHealthScore(health)}`;
 }
 
 export async function handleDaoRoundtable(ctx: DaoToolContext): Promise<string> {
-  const notReady = requireInitialized();
+  const notReady = requireInitialized(ctx.repository);
   if (notReady) return notReady;
   const state = getState();
   const projectConfig = await loadConfig(state.daoRoot);
   const agents = await loadAgentDefinitions(state.daoRoot, projectConfig);
-  const modelContext = createDispatchModelContext(state.config.defaultModel, ctx.adapter, {
+  const result = await new RoundTableUseCase({
+    repository: repositoryOrLegacy(ctx.repository),
+    worker: ctx.adapter,
+    clock: systemClock,
+  }).execute({
+    agents,
     parentSessionModel: ctx.getSessionModel?.(),
     hostDefaultModel: ctx.hostDefaultModel,
   });
-  const suggestions = await runRoundTable(ctx.adapter, agents, state.config.maxConcurrent, modelContext);
-  const proposalIds = new Map<string, number>();
-  const parsedSuggestions = suggestions
-    .map((suggestion) => ({ suggestion, parsed: suggestion.parsed }))
-    .filter(
-      (entry): entry is { suggestion: RoundTableSuggestion; parsed: NonNullable<RoundTableSuggestion["parsed"]> } =>
-        Boolean(entry.parsed),
-    );
-  try {
-    const proposals = await createProposalsBatch(
-      parsedSuggestions.map(({ suggestion, parsed }) => ({
-        title: parsed.title,
-        type: parsed.type,
-        description: parsed.description,
-        proposedBy: suggestion.agentId,
-      })),
-    );
-    for (const [index, { suggestion }] of parsedSuggestions.entries()) {
-      const proposal = proposals[index];
-      if (!proposal) continue;
-      proposal.riskZone = classifyRiskZone(proposal);
-      suggestion.proposalId = proposal.id;
-      proposalIds.set(suggestion.agentId, proposal.id);
-      state.auditLog.push({
-        id: state.nextAuditId++,
-        timestamp: new Date().toISOString(),
-        proposalId: proposal.id,
-        layer: "intelligence",
-        action: "roundtable_proposal_created",
-        actor: suggestion.agentId,
-        details: "Auto-created from round table",
-      });
-    }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    for (const { suggestion } of parsedSuggestions) {
-      suggestion.error = `Failed to create proposal: ${message}`;
-    }
-  }
-  await saveState();
-  return formatRoundTableResults(suggestions, proposalIds);
+  return result.ok ? formatRoundTableResults(result.suggestions, result.proposalIds) : result.error;
 }
 
 export async function handleDaoAudit(proposalId?: number): Promise<string> {
@@ -489,19 +300,22 @@ export async function handleDaoAudit(proposalId?: number): Promise<string> {
   return formatAuditTrail(entries, proposalId);
 }
 
-export async function handleDaoRate(proposalId: number, score: 1 | 2 | 3 | 4 | 5, comment: string): Promise<string> {
-  const proposal = getProposal(proposalId);
-  if (!proposal) return `Proposal #${proposalId} not found.`;
-  if (proposal.status !== "executed") return `Proposal #${proposal.id} is ${proposal.status}, must be executed.`;
-  await addRating(proposal.id, {
-    proposalId: proposal.id,
+export async function handleDaoRate(
+  proposalId: number,
+  score: 1 | 2 | 3 | 4 | 5,
+  comment: string,
+  repository?: DaoStateRepositoryPort,
+): Promise<string> {
+  const result = await new RateProposalUseCase({
+    repository: repositoryOrLegacy(repository),
+    clock: systemClock,
+  }).execute({
+    proposalId,
     rater: "user",
     score,
     comment,
-    ratedAt: new Date().toISOString(),
   });
-  await saveState();
-  return `# ⭐ Rating Recorded — #${proposal.id}\n\n**Score:** ${score}/5\n**Comment:** ${comment}`;
+  return result.ok ? presentRating(result.rating) : result.error;
 }
 
 export async function handleDaoUpdateProposal(
@@ -512,16 +326,13 @@ export async function handleDaoUpdateProposal(
     successMetrics?: string[];
     rollbackConditions?: string[];
   },
+  repository?: DaoStateRepositoryPort,
 ): Promise<string> {
-  const proposal = getProposal(proposalId);
-  if (!proposal) return `Proposal #${proposalId} not found.`;
-  if (proposal.status !== "open") return `Must be open (current: ${proposal.status})`;
-  if (fields.problemStatement !== undefined) proposal.problemStatement = fields.problemStatement;
-  if (fields.acceptanceCriteria !== undefined) proposal.acceptanceCriteria = fields.acceptanceCriteria;
-  if (fields.successMetrics !== undefined) proposal.successMetrics = fields.successMetrics;
-  if (fields.rollbackConditions !== undefined) proposal.rollbackConditions = fields.rollbackConditions;
-  await saveState();
-  return `# 📝 Proposal Updated — #${proposal.id}\n\nUpdated fields applied.`;
+  const result = await new UpdateProposalUseCase({ repository: repositoryOrLegacy(repository) }).execute({
+    proposalId,
+    fields,
+  });
+  return result.ok ? presentProposalUpdated(result.proposal) : result.error;
 }
 
 export interface DaoAmendmentArgs {
@@ -540,8 +351,11 @@ export interface DaoAmendmentArgs {
   removeGates?: string[];
 }
 
-export async function handleDaoProposeAmendment(args: DaoAmendmentArgs): Promise<string> {
-  const notReady = requireInitialized();
+export async function handleDaoProposeAmendment(
+  args: DaoAmendmentArgs,
+  repository?: DaoStateRepositoryPort,
+): Promise<string> {
+  const notReady = requireInitialized(repository);
   if (notReady) return notReady;
   let payload: AmendmentPayload | undefined;
   try {
@@ -585,16 +399,12 @@ export async function handleDaoProposeAmendment(args: DaoAmendmentArgs): Promise
     return `Error: ${err instanceof Error ? err.message : String(err)}`;
   }
   if (!payload) return "Error: amendment payload could not be constructed";
-  const validation = validateAmendmentPayload(payload);
-  if (!validation.valid) return `❌ Validation failed:\n${validation.errors.join("\n")}`;
-  const proposal = await createProposal(args.title, "governance-change", args.description, "user");
-  proposal.amendmentPayload = payload;
-  proposal.amendmentOrigin = { source: "human" };
-  proposal.amendmentState = "pending-vote";
-  proposal.riskZone = classifyRiskZone(proposal);
-  await saveState();
-  await recordAudit(proposal.id, "governance", "amendment_proposed", "user", `Amendment: ${payload.type}`);
-  return `# 📜 Amendment Proposed — #${proposal.id}\n\nType: ${payload.type}\n\nRun \`dao_deliberate proposalId=${proposal.id}\``;
+  const result = await new CreateAmendmentProposalUseCase({
+    repository: repositoryOrLegacy(repository),
+    clock: systemClock,
+  }).execute({ title: args.title, description: args.description, payload, proposedBy: "user" });
+  if (!result.ok) return `❌ ${result.error}`;
+  return presentAmendment(result);
 }
 
 export async function handleDaoConfigGithub(

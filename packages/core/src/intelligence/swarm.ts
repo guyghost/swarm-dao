@@ -3,7 +3,8 @@
 // ============================================================
 
 import { clearProposalCoordinators, registerProposalCoordinators } from "../governance/delegation.utils.js";
-import type { AgentOutput, DAOAgent, DAOConfig, HostAdapter, Proposal } from "../types/index.js";
+import type { AgentWorkerPort } from "../ports/host.js";
+import type { AgentOutput, DAOAgent, DAOConfig, Proposal } from "../types/index.js";
 import { drainDelegations, runDelegations } from "./delegation.js";
 import {
   buildModelResolutionContext,
@@ -96,7 +97,7 @@ After collecting all outputs, call \`dao_record_outputs\` with the collected res
 
 export function createDispatchModelContext(
   configDefaultModel: string,
-  adapter: HostAdapter,
+  adapter: AgentWorkerPort,
   options?: { hostDefaultModel?: string; parentSessionModel?: string },
 ): ModelResolutionContext {
   return buildModelResolutionContext(configDefaultModel, {
@@ -119,7 +120,7 @@ export function createDispatchModelContext(
 export async function dispatchSwarm(
   proposal: Proposal,
   agents: DAOAgent[],
-  adapter: HostAdapter,
+  adapter: AgentWorkerPort,
   maxConcurrent: number,
   modelContext: ModelResolutionContext,
   onUpdate?: (update: SwarmProgressUpdate) => void,

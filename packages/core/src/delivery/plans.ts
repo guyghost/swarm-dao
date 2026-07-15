@@ -128,10 +128,10 @@ function generateBranchName(proposal: Proposal): string {
   return `feature/dao-${proposal.id}-${slug}`;
 }
 
-export function generateDeliveryPlan(proposal: Proposal): DeliveryPlan {
+export function generateDeliveryPlan(proposal: Proposal, options: { now?: string } = {}): DeliveryPlan {
   return {
     proposalId: proposal.id,
-    createdAt: new Date().toISOString(),
+    createdAt: options.now ?? new Date().toISOString(),
     phases: createDefaultPhases(),
     branchStrategy: generateBranchName(proposal),
     rollbackPlan: "Revert the merge commit and redeploy previous version",

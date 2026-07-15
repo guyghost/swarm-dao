@@ -3,7 +3,6 @@
 // ============================================================
 
 import { allCoordinatorsClosed } from "../governance/delegation.utils.js";
-import { getState } from "../persistence.js";
 import type { ChecklistItem, ControlCheckResult, DAOConfig, GateResult, Proposal } from "../types/index.js";
 import { PROPOSAL_TYPE, TYPE_QUORUM } from "../types/index.js";
 
@@ -16,6 +15,7 @@ interface GateDefinition {
   check: (
     proposal: Proposal,
     config: DAOConfig,
+    allProposals?: readonly Proposal[],
   ) => { passed: boolean; message: string; details?: Record<string, unknown> };
 }
 
@@ -112,16 +112,13 @@ const GATES: GateDefinition[] = [
     id: "dependency-readiness",
     name: "Dependency Readiness",
     severity: "info",
-    check: (proposal, _config) => {
+    check: (proposal, _config, allProposals) => {
       const dependsOn = proposal.dependsOn;
       if (!dependsOn || dependsOn.length === 0) {
         return { passed: true, message: "No inter-proposal dependencies" };
       }
 
-      let allProposals: Proposal[];
-      try {
-        allProposals = getState().proposals;
-      } catch {
+      if (!allProposals) {
         return {
           passed: true,
           message: "Dependency readiness could not be verified — please verify manually",
@@ -263,7 +260,11 @@ function generateChecklist(proposal: Proposal): ChecklistItem[] {
 
 // ── Run Gates ────────────────────────────────────────────────
 
-export function runGates(proposal: Proposal, config: DAOConfig): ControlCheckResult {
+export function runGates(
+  proposal: Proposal,
+  config: DAOConfig,
+  options: { allProposals?: readonly Proposal[]; now?: string } = {},
+): ControlCheckResult {
   const gates: GateResult[] = [];
   let blockerCount = 0;
   let warningCount = 0;
@@ -272,7 +273,7 @@ export function runGates(proposal: Proposal, config: DAOConfig): ControlCheckRes
     // Skip gates not in required list
     if (!config.requiredGates.includes(gateDef.id)) continue;
 
-    const result = gateDef.check(proposal, config);
+    const result = gateDef.check(proposal, config, options.allProposals);
     const gate: GateResult = {
       gateId: gateDef.id,
       name: gateDef.name,
@@ -309,7 +310,7 @@ export function runGates(proposal: Proposal, config: DAOConfig): ControlCheckRes
 
   return {
     proposalId: proposal.id,
-    timestamp: new Date().toISOString(),
+    timestamp: options.now ?? new Date().toISOString(),
     allGatesPassed: blockerCount === 0,
     blockerCount,
     warningCount,

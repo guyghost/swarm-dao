@@ -32,7 +32,8 @@ import {
   profileFor,
   registeredArchetypes,
 } from "../governance/delegation.utils.js";
-import type { AgentOutput, DAOAgent, DAOConfig, HostAdapter, Proposal } from "../types/index.js";
+import type { AgentWorkerPort } from "../ports/host.js";
+import type { AgentOutput, DAOAgent, DAOConfig, Proposal } from "../types/index.js";
 import { buildChildModelResolutionContext, type ModelResolutionContext, resolveAgentModel } from "./model.js";
 
 export interface DelegationResult {
@@ -56,7 +57,7 @@ export async function runDelegations(params: {
   parent: DAOAgent;
   parentOutput: AgentOutput;
   proposal: Proposal;
-  adapter: HostAdapter;
+  adapter: AgentWorkerPort;
   config: DAOConfig;
   parentModelContext: ModelResolutionContext;
   onCoordinatorCreated?: (coordinator: DelegationCoordinatorState) => void;

@@ -7,72 +7,48 @@
 import { spawn } from "node:child_process";
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import type { AgentOutput, HostAdapter, Proposal, ProposalType, Vote } from "@guyghost/swarm-dao-core";
+import type {
+  AgentOutput,
+  DaoStateRepositoryPort,
+  HostAdapter,
+  Proposal,
+  ProposalType,
+} from "@guyghost/swarm-dao-core";
 import {
-  addRating,
   // Commands registry (source of truth for the /dao surface)
   buildDaoCommandHelp,
-  calculateCompositeScore,
-  classifyRiskZone,
   computeHealthScore,
-  createDispatchModelContext,
-  createProposal,
-  createProposalsBatch,
-  dispatchProposalEvent,
-  dispatchSwarm,
   // Delivery
   execCommand,
-  executeProposal,
+  FileDaoStateRepository,
   formatAllArtefacts,
   formatAuditTrail,
-  formatCompositeScore,
-  formatControlResult,
-  formatDryRun,
   formatHealthScore,
   formatPlan,
-  formatRollback,
-  formatRoundTableResults,
-  formatTallyResult,
   generateAllArtefacts,
   generateDashboard,
-  generateDeliveryPlan,
   getAllAuditLog,
-  getOrCreateState,
   getPlan,
   getProposal,
   getState,
-  getUnexecutedDependencies,
-  // Governance
-  initializeAgents,
-  initStorage,
-  loadAgentDefinitions,
-  loadConfig,
-  // Persistence
-  loadState,
+  handleDaoControl,
+  handleDaoDeliberate,
+  handleDaoDryRun,
+  handleDaoExecute,
+  handleDaoPropose,
+  handleDaoRate,
+  handleDaoRollback,
+  handleDaoRoundtable,
+  handleDaoSetup,
+  handleDaoShip,
+  handleDaoUpdateProposal,
   logger,
-  PROPOSAL_TYPE_LABELS,
   // Types
   PROPOSAL_TYPES,
-  // Voting & Scoring
-  parseVoteFromOutput,
-  performDryRun,
-  performRollback,
   readFileContained,
-  recordAudit,
   resolveDaoCommand,
-  // Control
-  runGates,
-  // Round Table
-  runRoundTable,
-  saveState,
-  setState,
-  storeCompositeScore,
-  storeDeliberationBatch,
-  storeDeliveryPlan,
-  storeSynthesis,
+  setRepository,
   suggestDaoCommand,
-  synthesize,
-  tallyVotes,
   writeFileContained,
 } from "@guyghost/swarm-dao-core";
 import { Type } from "typebox";
@@ -487,14 +463,12 @@ interface DaoUpdateProposalParams {
 // ── Main Extension Export ────────────────────────────────────
 
 export default function swarmDaoExtension(pi: ExtensionAPI) {
+  let repository: DaoStateRepositoryPort | undefined;
   // Restore state on session start
   pi.on("session_start", async (_event, _ctx) => {
     const cwd = process.cwd();
-    await initStorage(cwd);
-    const loaded = await loadState(cwd);
-    if (!loaded) {
-      setState(getOrCreateState(cwd));
-    }
+    repository = await FileDaoStateRepository.open(cwd);
+    setRepository(repository);
     return undefined;
   });
 
@@ -541,19 +515,17 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
       useDefaults: Type.Optional(Type.Boolean({ description: "Use default agents (default: true)" })),
     }),
     async execute(_id, params: DaoSetupParams) {
-      const state = getState();
-      if (state.initialized) {
-        return toolResult(`DAO already initialized with ${state.agents.length} agents.`);
-      }
-
-      const agents = initializeAgents(params.useDefaults !== false ? undefined : []);
-      state.agents = agents;
-      state.initialized = true;
-      await saveState();
-
-      const table = agents.map((a) => `| ${a.name} | ${a.weight} | ${a.role} |`).join("\n");
       return toolResult(
-        `# DAO Initialized\n\n| Agent | Weight | Role |\n|-------|--------|------|\n${table}\n\nRun \`dao_propose\` to create proposals.`,
+        await handleDaoSetup(
+          {
+            adapter: createPiHostAdapter(pi),
+            workDir: process.cwd(),
+            deliberationMode: "auto",
+            controlToolName: "dao_check",
+            repository,
+          },
+          params.useDefaults !== false,
+        ),
       );
     },
   });
@@ -575,26 +547,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
       affectedPaths: Type.Optional(Type.Array(Type.String())),
     }),
     async execute(_id, params: DaoProposeParams) {
-      const state = getState();
-      if (!state.initialized) return toolResult(PI_ONBOARDING_MESSAGE);
-
-      const proposal = await createProposal(params.title, params.type, params.description, "user", params.context);
-      if (params.problemStatement !== undefined) proposal.problemStatement = params.problemStatement;
-      if (params.acceptanceCriteria !== undefined) proposal.acceptanceCriteria = params.acceptanceCriteria;
-      if (params.successMetrics !== undefined) proposal.successMetrics = params.successMetrics;
-      if (params.rollbackConditions !== undefined) proposal.rollbackConditions = params.rollbackConditions;
-      if (params.affectedPaths !== undefined) proposal.affectedPaths = params.affectedPaths;
-
-      const zone = classifyRiskZone(proposal);
-      proposal.riskZone = zone;
-      await saveState();
-
-      await recordAudit(proposal.id, "governance", "proposal_created", "user", `Proposal "${params.title}" created`);
-      await saveState();
-
-      return toolResult(
-        `# 📋 Proposal Created — #${proposal.id}\n\n**Title:** ${params.title}\n**Type:** ${PROPOSAL_TYPE_LABELS[params.type as ProposalType]}\n**Zone:** ${zone}\n\nRun \`dao_deliberate proposalId=${proposal.id}\` to deliberate.`,
-      );
+      return toolResult(await handleDaoPropose({ ...params, type: params.type as ProposalType }, repository));
     },
   });
 
@@ -607,107 +560,33 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
       proposalId: Type.Number(),
     }),
     async execute(_id, params: DaoDeliberateParams, _signal, onUpdate, ctx) {
-      const state = getState();
-      if (!state.initialized) return toolResult(PI_ONBOARDING_MESSAGE);
-
-      const proposal = getProposal(Number(params.proposalId));
-      if (!proposal) return toolResult(`Proposal #${params.proposalId} not found.`);
-      if (proposal.status !== "open")
-        return toolResult(`Proposal #${proposal.id} is ${proposal.status}, must be open.`);
-
-      // Transition
-      const transition = dispatchProposalEvent(proposal, { type: "DELIBERATE" });
-      if (!transition.ok) return toolResult(`Cannot deliberate: ${transition.error}`);
-
-      await recordAudit(proposal.id, "governance", "deliberation_started", "system", `Deliberation on #${proposal.id}`);
-      await saveState();
-
       if (onUpdate) {
-        onUpdate({ content: [{ type: "text", text: `🗳️ Deliberating proposal #${proposal.id}...` }], details: {} });
+        onUpdate({
+          content: [{ type: "text", text: `🗳️ Deliberating proposal #${params.proposalId}...` }],
+          details: {},
+        });
       }
-
-      const startTime = Date.now();
       const adapter = createPiHostAdapter(pi, ctx);
-      const projectConfig = await loadConfig(state.daoRoot);
-      const agents = await loadAgentDefinitions(state.daoRoot, projectConfig);
-      const modelContext = createDispatchModelContext(state.config.defaultModel, adapter);
-
-      const outputs = await dispatchSwarm(
-        proposal,
-        agents,
-        adapter,
-        state.config.maxConcurrent,
-        modelContext,
-        (update) => {
-          if (onUpdate) {
-            onUpdate({
-              content: [{ type: "text", text: `${update.agentName}: ${update.phase}` }],
-              details: {},
-            });
-          }
-        },
-      );
-
-      // Parse votes
-      const votes: Vote[] = [];
-      const persistedOutputs: AgentOutput[] = [];
-      for (const output of outputs) {
-        if (output.content) {
-          const vote = parseVoteFromOutput(
-            output.agentId,
-            output.agentName,
-            agents.find((a) => a.id === output.agentId)?.weight ?? 1,
-            output.content,
-          );
-          if (vote) {
-            vote.weight = agents.find((a) => a.id === output.agentId)?.weight ?? 1;
-            votes.push(vote);
-          }
-        }
-        persistedOutputs.push(output);
-      }
-      if (votes.length > 0 || persistedOutputs.length > 0) {
-        await storeDeliberationBatch(proposal.id, votes, persistedOutputs);
-      }
-      proposal.votes = votes;
-
-      // Composite score
-      const compositeScore = calculateCompositeScore(outputs);
-      proposal.compositeScore = compositeScore;
-      await storeCompositeScore(proposal.id, compositeScore);
-
-      // Synthesis
-      const tally = tallyVotes(proposal, state.config);
-      const synthesisText = synthesize(proposal, agents, outputs, tally);
-      proposal.synthesis = synthesisText;
-      await storeSynthesis(proposal.id, synthesisText);
-
-      // Final transition
-      if (tally.approved) {
-        dispatchProposalEvent(proposal, { type: "APPROVE", tally });
-        await recordAudit(
-          proposal.id,
-          "intelligence",
-          "deliberation_approved",
-          "system",
-          `Approved: ${tally.approvalScore}%`,
-        );
-      } else {
-        dispatchProposalEvent(proposal, { type: "REJECT" });
-        await recordAudit(
-          proposal.id,
-          "intelligence",
-          "deliberation_rejected",
-          "system",
-          `Rejected: ${tally.approvalScore}%`,
-        );
-      }
-
-      await saveState();
-
-      const duration = Date.now() - startTime;
       return toolResult(
-        `# 🗳️ Deliberation Complete — #${proposal.id} (${duration}ms)\n\n${formatTallyResult(tally)}\n\n${formatCompositeScore(compositeScore)}\n\n${synthesisText}\n\n> Next: \`dao_check proposalId=${proposal.id}\``,
+        await handleDaoDeliberate(
+          {
+            adapter,
+            workDir: process.cwd(),
+            deliberationMode: "auto",
+            controlToolName: "dao_check",
+            failOnGateFailure: true,
+            repository,
+            onDeliberationProgress: (update) => {
+              if (onUpdate) {
+                onUpdate({
+                  content: [{ type: "text", text: `${update.agentName}: ${update.phase}` }],
+                  details: {},
+                });
+              }
+            },
+          },
+          Number(params.proposalId),
+        ),
       );
     },
   });
@@ -719,30 +598,19 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
     description: "Run quality control gates",
     parameters: Type.Object({ proposalId: Type.Number() }),
     async execute(_id, params: DaoCheckParams) {
-      const state = getState();
-      if (!state.initialized) return toolResult(PI_ONBOARDING_MESSAGE);
-
-      const proposal = getProposal(params.proposalId);
-      if (!proposal) return toolResult(`Proposal #${params.proposalId} not found.`);
-      if (proposal.status !== "approved") return toolResult(`Must be approved (current: ${proposal.status})`);
-
-      const result = runGates(proposal, state.config);
-
-      if (result.allGatesPassed) {
-        dispatchProposalEvent(proposal, { type: "CONTROL_PASS", result });
-        await recordAudit(proposal.id, "control", "gates_passed", "system", "All gates passed");
-        // Generate delivery plan after gates pass, making it available before execution
-        if (!state.deliveryPlans[proposal.id]) {
-          const plan = generateDeliveryPlan(proposal);
-          await storeDeliveryPlan(proposal.id, plan);
-        }
-      } else {
-        dispatchProposalEvent(proposal, { type: "CONTROL_FAIL" });
-        await recordAudit(proposal.id, "control", "gates_failed", "system", `${result.blockerCount} blockers`);
-      }
-
-      await saveState();
-      return toolResult(formatControlResult(result));
+      return toolResult(
+        await handleDaoControl(
+          {
+            adapter: createPiHostAdapter(pi),
+            workDir: process.cwd(),
+            deliberationMode: "auto",
+            controlToolName: "dao_check",
+            failOnGateFailure: true,
+            repository,
+          },
+          params.proposalId,
+        ),
+      );
     },
   });
 
@@ -789,20 +657,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
     description: "Execute a controlled proposal",
     parameters: Type.Object({ proposalId: Type.Number() }),
     async execute(_id, params: DaoExecuteParams) {
-      const _state = getState();
-      const proposal = getProposal(params.proposalId);
-      if (!proposal) return toolResult(`Proposal #${params.proposalId} not found.`);
-      if (proposal.status !== "controlled") {
-        return toolResult(`Must be controlled (current: ${proposal.status}). Run dao_control first.`);
-      }
-
-      const result = await executeProposal(proposal);
-      await saveState();
-
-      await recordAudit(proposal.id, "delivery", "proposal_executed", "user", `Executed #${proposal.id}`);
-      await saveState();
-
-      return toolResult(result.result);
+      return toolResult(await handleDaoExecute(params.proposalId, repository));
     },
   });
 
@@ -817,76 +672,19 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
       force: Type.Optional(Type.Boolean()),
     }),
     async execute(_id, params: DaoShipParams) {
-      const state = getState();
-      if (!state.initialized) return toolResult(PI_ONBOARDING_MESSAGE);
-
-      const proposal = getProposal(params.proposalId);
-      if (!proposal) return toolResult(`Proposal #${params.proposalId} not found.`);
-
-      const cascade = params.cascade === true;
-      const force = params.force === true;
-
-      const shipOne = async (proposalId: number): Promise<string | null> => {
-        const target = getProposal(proposalId);
-        if (!target) return `Proposal #${proposalId} not found.`;
-        if (target.status !== "controlled") {
-          return `Proposal #${target.id} must be in 'controlled' state to ship (current: ${target.status})`;
-        }
-
-        const result = await executeProposal(target);
-        if (!result.success) return result.result;
-
-        await recordAudit(target.id, "delivery", "proposal-shipped", "pi", "shipped via dao_ship");
-        return null;
-      };
-
-      const shipped: number[] = [];
-
-      if (!force) {
-        const depsResolution = getUnexecutedDependencies(proposal.id, state.proposals);
-        if (depsResolution.error) return toolResult(depsResolution.error);
-        const pendingDeps = depsResolution.order ?? [];
-
-        if (pendingDeps.length > 0 && !cascade) {
-          const lines = pendingDeps.map((depId) => {
-            const dep = getProposal(depId);
-            return dep ? `- #${dep.id} [${dep.status}] ${dep.title}` : `- #${depId} [missing]`;
-          });
-          return toolResult(
-            `Cannot ship proposal #${proposal.id}: unexecuted dependencies found.\n\n${lines.join("\n")}\n\nRetry with \`dao_ship proposalId=${proposal.id} cascade=true\` or \`force=true\`.`,
-          );
-        }
-
-        if (cascade && pendingDeps.length > 0) {
-          const notControlled = pendingDeps.filter((depId) => getProposal(depId)?.status !== "controlled");
-          if (notControlled.length > 0) {
-            const details = notControlled
-              .map((depId) => {
-                const dep = getProposal(depId);
-                return dep ? `#${dep.id} (${dep.status})` : `#${depId} (missing)`;
-              })
-              .join(", ");
-            return toolResult(`Cannot cascade ship: dependencies not in 'controlled' state: ${details}`);
-          }
-
-          for (const depId of pendingDeps) {
-            const dep = getProposal(depId);
-            if (!dep || dep.status === "executed") continue;
-            const depError = await shipOne(depId);
-            if (depError) return toolResult(depError);
-            shipped.push(depId);
-          }
-        }
-      }
-
-      const targetError = await shipOne(proposal.id);
-      if (targetError) return toolResult(targetError);
-      shipped.push(proposal.id);
-
-      await saveState();
-
-      const summary = shipped.map((id) => `- #${id}`).join("\n");
-      return toolResult(`# 🚀 Ship Complete\n\nShipped proposals:\n${summary}`);
+      return toolResult(
+        await handleDaoShip(
+          {
+            adapter: createPiHostAdapter(pi),
+            workDir: process.cwd(),
+            deliberationMode: "auto",
+            controlToolName: "dao_check",
+            repository,
+          },
+          params.proposalId,
+          { cascade: params.cascade, force: params.force },
+        ),
+      );
     },
   });
 
@@ -930,21 +728,13 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
       comment: Type.String(),
     }),
     async execute(_id, params: DaoRateParams) {
-      const proposal = getProposal(Number(params.proposalId));
-      if (!proposal) return toolResult(`Proposal #${params.proposalId} not found.`);
-      if (proposal.status !== "executed")
-        return toolResult(`Proposal #${proposal.id} is ${proposal.status}, must be executed.`);
-
-      await addRating(proposal.id, {
-        proposalId: proposal.id,
-        rater: "user",
-        score: Number(params.score) as 1 | 2 | 3 | 4 | 5,
-        comment: params.comment,
-        ratedAt: new Date().toISOString(),
-      });
-      await saveState();
       return toolResult(
-        `# ⭐ Rating Recorded — #${proposal.id}\n\n**Score:** ${params.score}/5\n**Comment:** ${params.comment}`,
+        await handleDaoRate(
+          Number(params.proposalId),
+          Number(params.score) as 1 | 2 | 3 | 4 | 5,
+          params.comment,
+          repository,
+        ),
       );
     },
   });
@@ -971,13 +761,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
     description: "Preview execution without applying changes",
     parameters: Type.Object({ proposalId: Type.Number() }),
     async execute(_id, params: DaoDryRunParams) {
-      const proposal = getProposal(Number(params.proposalId));
-      if (!proposal) return toolResult(`Proposal #${params.proposalId} not found.`);
-      const result = await performDryRun(proposal);
-      proposal.dryRunAt = new Date().toISOString();
-      proposal.dryRunCanProceed = result.canProceed;
-      await saveState();
-      return toolResult(formatDryRun(result));
+      return toolResult(await handleDaoDryRun(Number(params.proposalId), repository));
     },
   });
 
@@ -988,8 +772,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
     description: "Revert proposal execution to pre-execution snapshot",
     parameters: Type.Object({ proposalId: Type.Number() }),
     async execute(_id, params: DaoRollbackParams) {
-      const result = await performRollback(Number(params.proposalId));
-      return toolResult(formatRollback(result));
+      return toolResult(await handleDaoRollback(Number(params.proposalId), repository));
     },
   });
 
@@ -1000,59 +783,17 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
     description: "Ask every agent to suggest a proposal idea",
     parameters: Type.Object({}),
     async execute(_id, _params: DaoRoundtableParams, _signal, _onUpdate, ctx) {
-      const state = getState();
-      if (!state.initialized) return toolResult(PI_ONBOARDING_MESSAGE);
-
       const adapter = createPiHostAdapter(pi, ctx);
-      const projectConfig = await loadConfig(state.daoRoot);
-      const agents = await loadAgentDefinitions(state.daoRoot, projectConfig);
-      const modelContext = createDispatchModelContext(state.config.defaultModel, adapter);
-      const suggestions = await runRoundTable(adapter, agents, state.config.maxConcurrent, modelContext);
-
-      // Create proposals from valid suggestions
-      const proposalIds = new Map<string, number>();
-      const parsedSuggestions = suggestions
-        .map((suggestion) => ({ suggestion, parsed: suggestion.parsed }))
-        .filter(
-          (
-            entry,
-          ): entry is {
-            suggestion: (typeof suggestions)[number];
-            parsed: NonNullable<(typeof suggestions)[number]["parsed"]>;
-          } => Boolean(entry.parsed),
-        );
-      try {
-        const proposals = await createProposalsBatch(
-          parsedSuggestions.map(({ suggestion, parsed }) => ({
-            title: parsed.title,
-            type: parsed.type,
-            description: parsed.description,
-            proposedBy: suggestion.agentId,
-          })),
-        );
-        for (const [index, { suggestion }] of parsedSuggestions.entries()) {
-          const proposal = proposals[index];
-          if (!proposal) continue;
-          proposal.riskZone = classifyRiskZone(proposal);
-          suggestion.proposalId = proposal.id;
-          proposalIds.set(suggestion.agentId, proposal.id);
-          await recordAudit(
-            proposal.id,
-            "intelligence",
-            "roundtable_proposal_created",
-            suggestion.agentId,
-            `Auto-created from round table`,
-          );
-        }
-      } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : String(error);
-        for (const { suggestion } of parsedSuggestions) {
-          suggestion.error = `Failed to create proposal: ${message}`;
-        }
-      }
-
-      await saveState();
-      return toolResult(formatRoundTableResults(suggestions, proposalIds));
+      return toolResult(
+        await handleDaoRoundtable({
+          adapter,
+          workDir: process.cwd(),
+          deliberationMode: "auto",
+          controlToolName: "dao_check",
+          getSessionModel: () => detectParentSessionModel(ctx),
+          repository,
+        }),
+      );
     },
   });
 
@@ -1069,17 +810,18 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
       rollbackConditions: Type.Optional(Type.Array(Type.String())),
     }),
     async execute(_id, params: DaoUpdateProposalParams) {
-      const proposal = getProposal(Number(params.proposalId));
-      if (!proposal) return toolResult(`Proposal #${params.proposalId} not found.`);
-      if (proposal.status !== "open") return toolResult(`Must be open (current: ${proposal.status})`);
-
-      if (params.problemStatement !== undefined) proposal.problemStatement = params.problemStatement;
-      if (params.acceptanceCriteria !== undefined) proposal.acceptanceCriteria = params.acceptanceCriteria;
-      if (params.successMetrics !== undefined) proposal.successMetrics = params.successMetrics;
-      if (params.rollbackConditions !== undefined) proposal.rollbackConditions = params.rollbackConditions;
-
-      await saveState();
-      return toolResult(`# 📝 Proposal Updated — #${proposal.id}\n\nUpdated fields applied.`);
+      return toolResult(
+        await handleDaoUpdateProposal(
+          Number(params.proposalId),
+          {
+            problemStatement: params.problemStatement,
+            acceptanceCriteria: params.acceptanceCriteria,
+            successMetrics: params.successMetrics,
+            rollbackConditions: params.rollbackConditions,
+          },
+          repository,
+        ),
+      );
     },
   });
 
@@ -1102,21 +844,13 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
   };
 
   const runDaoSetup = async (): Promise<string> => {
-    let state: ReturnType<typeof getState>;
-    try {
-      state = getState();
-    } catch {
-      state = getOrCreateState(process.cwd());
-    }
-    if (state.initialized) {
-      return `DAO already initialized with ${state.agents.length} agents. Run \`/dao help\` for commands.`;
-    }
-    const agents = initializeAgents();
-    state.agents = agents;
-    state.initialized = true;
-    setState(state);
-    await saveState();
-    return `# DAO Initialized\n\nAgents: ${agents.length}\nRun \`/dao status\` to view the dashboard.`;
+    return handleDaoSetup({
+      adapter: createPiHostAdapter(pi),
+      workDir: process.cwd(),
+      deliberationMode: "auto",
+      controlToolName: "dao_check",
+      repository,
+    });
   };
 
   const renderProposalList = (

@@ -1,48 +1,10 @@
-import { captureSnapshot, getSnapshot, getState, saveState } from "../persistence.js";
+import { analyzeProposalDryRun } from "../domain/dry-run.js";
+import { captureSnapshot, getSnapshot, getState } from "../persistence.js";
 import type { DryRunResult, ExecutionSnapshot, Proposal } from "../types/index.js";
-import { PROPOSAL_TYPE } from "../types/index.js";
 import { execCommand } from "../utils/host.js";
 
 export async function performDryRun(proposal: Proposal): Promise<DryRunResult> {
-  const _state = getState();
-
-  // Analyze what would change
-  const filesAffected: string[] = [];
-  const risks: string[] = [];
-
-  // Check affected paths
-  if (proposal.affectedPaths && proposal.affectedPaths.length > 0) {
-    filesAffected.push(...proposal.affectedPaths);
-  }
-
-  // Risk assessment based on proposal type
-  if (proposal.type === PROPOSAL_TYPE.SECURITY_CHANGE) {
-    risks.push("Security-sensitive changes require extra review");
-  }
-  if (proposal.riskZone === "red") {
-    risks.push("Red-zone proposal: high risk detected");
-  }
-  if (!Array.isArray(proposal.acceptanceCriteria) || proposal.acceptanceCriteria.length === 0) {
-    risks.push("No acceptance criteria defined");
-  }
-
-  // Estimate duration based on proposal type
-  const durationMap: Record<Proposal["type"], string> = {
-    [PROPOSAL_TYPE.PRODUCT_FEATURE]: "3-7 days",
-    [PROPOSAL_TYPE.SECURITY_CHANGE]: "1-2 weeks",
-    [PROPOSAL_TYPE.TECHNICAL_CHANGE]: "2-5 days",
-    [PROPOSAL_TYPE.RELEASE_CHANGE]: "1-3 days",
-    [PROPOSAL_TYPE.GOVERNANCE_CHANGE]: "1-2 days",
-  };
-
-  return {
-    proposalId: proposal.id,
-    preview: `This proposal would modify ${filesAffected.length || "unknown number of"} files and requires ${durationMap[proposal.type] || "unknown duration"}.`,
-    filesAffected,
-    risks,
-    estimatedDuration: durationMap[proposal.type] || "TBD",
-    canProceed: risks.filter((r) => r.includes("high risk") || r.includes("Security-sensitive")).length === 0,
-  };
+  return analyzeProposalDryRun(proposal);
 }
 
 export function formatDryRun(result: DryRunResult): string {
@@ -94,15 +56,6 @@ export async function performRollback(proposalId: number): Promise<{ success: bo
   const snapshot = getSnapshot(proposalId);
   if (!snapshot) {
     return { success: false, message: `No snapshot found for proposal #${proposalId}` };
-  }
-
-  // In a real implementation, this would restore files and git state
-  // For now, we mark the proposal as rolled back conceptually
-  const proposal = getState().proposals.find((p) => p.id === proposalId);
-  if (proposal) {
-    proposal.status = "open";
-    proposal.resolvedAt = undefined;
-    await saveState();
   }
 
   return {
