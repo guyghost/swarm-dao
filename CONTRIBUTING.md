@@ -39,12 +39,17 @@ To bypass in an emergency: `git push --no-verify` (use sparingly).
 ```
 swarm-dao/
 ├── packages/
-│   ├── core/              # Business logic (host-agnostic)
-│   ├── pi-adapter/        # Pi coding agent bridge
-│   ├── opencode-adapter/  # OpenCode bridge
+│   ├── core/              # Business logic (host-agnostic, hexagonal core)
+│   ├── mcp-server/        # Swarm DAO as a stdio MCP server
+│   ├── pi-adapter/        # Pi coding agent bridge (native tool spawning)
+│   ├── opencode-adapter/  # OpenCode plugin (manual dispatch)
+│   ├── copilot-adapter/   # GitHub Copilot plugin (MCP + instructions)
+│   ├── claude-adapter/    # Claude Code plugin (MCP + slash commands)
+│   ├── codex-adapter/     # OpenAI Codex plugin (MCP + AGENTS.md)
 │   └── cli/               # Standalone CLI
 ├── agents/                # Shared agent prompts
-├── docs/                  # Documentation
+├── models/                # Behavioral model docs (XState workflows live in packages/core/src/models)
+├── docs/                  # Documentation (ADRs, guides)
 └── .github/workflows/     # CI/CD
 ```
 
@@ -80,7 +85,7 @@ Quick checklist:
 
 Please include:
 - Swarm DAO version
-- Host (Pi, OpenCode, CLI)
+- Host (Pi, OpenCode, CLI, Copilot, Claude Code, Codex, or generic MCP client)
 - Steps to reproduce
 - Expected vs actual behavior
 

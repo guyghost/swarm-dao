@@ -123,6 +123,18 @@ bun test
 
 ## Examples
 
-See existing adapters:
-- `packages/pi-adapter/src/index.ts` — Pi Extension
-- `packages/opencode-adapter/src/index.ts` — OpenCode Plugin
+Two integration patterns exist today:
+
+**Native tool registration** (host calls into the core directly):
+- `packages/pi-adapter/src/index.ts` — Pi Extension (spawns sub-agents natively)
+- `packages/opencode-adapter/src/index.ts` — OpenCode Plugin (manual dispatch via `dao_record_outputs`)
+
+**MCP server** (host speaks MCP; no native spawning, deliberation is always manual):
+- `packages/mcp-server/src/server.ts` — generic stdio MCP server, reused by:
+  - `packages/copilot-adapter/` — GitHub Copilot
+  - `packages/claude-adapter/` — Claude Code
+  - `packages/codex-adapter/` — OpenAI Codex
+
+If your host can already speak MCP, wrapping `@guyghost/swarm-dao-mcp` (or
+copying one of the three adapter packages above) is usually less work than
+implementing a native `HostAdapter` from scratch.

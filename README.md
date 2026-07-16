@@ -41,30 +41,41 @@ Inside Pi:
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  Hosts                                                      │
-│  ┌─────────┐  ┌─────────────┐  ┌──────────┐  ┌──────────┐  │
-│  │   Pi    │  │  OpenCode   │  │   CLI    │  │ Future…  │  │
-│  └────┬────┘  └──────┬──────┘  └────┬─────┘  └────┬─────┘  │
-│       │              │              │             │         │
-│  ┌────┴──────────────┴──────────────┴─────────────┴─────┐   │
-│  │              Host Adapter Interface                  │   │
-│  │   spawnAgent · spawnAgents · log · exec · readFile  │   │
-│  └─────────────────────────┬────────────────────────────┘   │
-│                            │                                 │
-│  ┌─────────────────────────┴────────────────────────────┐   │
-│  │                   Swarm DAO Core                     │   │
-│  │  ┌──────────┐ ┌────────────┐ ┌──────────┐ ┌────────┐ │   │
-│  │  │Governance│ │Intelligence│ │ Delivery │ │Control │ │   │
-│  │  │  (L1)    │ │   (L2)     │ │  (L3)    │ │ (L4)   │ │   │
-│  │  └──────────┘ └────────────┘ └──────────┘ └────────┘ │   │
-│  └──────────────────────────────────────────────────────┘   │
-│                            │                                 │
-│  ┌─────────────────────────┴────────────────────────────┐   │
-│  │              Persistence (.dao/ local files)         │   │
-│  └──────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────────────┐
+│  Hosts                                                                │
+│  ┌──────┐ ┌──────────┐ ┌─────────┐ ┌───────┐ ┌────────┐ ┌──────────┐ │
+│  │  Pi  │ │ OpenCode │ │ Copilot │ │Claude │ │ Codex  │ │ CLI/MCP… │ │
+│  └──┬───┘ └────┬─────┘ └────┬────┘ └───┬───┘ └───┬────┘ └────┬─────┘ │
+│     │          │            │          │         │           │       │
+│  ┌──┴──────────┴────────────┴──────────┴─────────┴───────────┴────┐  │
+│  │                     Host Adapter Interface                    │  │
+│  │      spawnAgent · spawnAgents · log · exec · readFile · …     │  │
+│  └──────────────────────────────┬─────────────────────────────────┘  │
+│                                 │                                     │
+│  ┌──────────────────────────────┴─────────────────────────────────┐  │
+│  │                        Swarm DAO Core                          │  │
+│  │  ┌──────────┐ ┌────────────┐ ┌──────────┐ ┌────────┐          │  │
+│  │  │Governance│ │Intelligence│ │ Delivery │ │Control │          │  │
+│  │  │  (L1)    │ │   (L2)     │ │  (L3)    │ │ (L4)   │          │  │
+│  │  └──────────┘ └────────────┘ └──────────┘ └────────┘          │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+│                                 │                                     │
+│  ┌──────────────────────────────┴─────────────────────────────────┐  │
+│  │                Persistence (.dao/ local files)                │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+└───────────────────────────────────────────────────────────────────────┘
 ```
+
+The 4 layers above are the **governance model** (what the DAO does). Internally,
+`@guyghost/swarm-dao-core` is organized as a hexagonal functional core — pure
+`domain`/`models` (XState workflows), `application` use cases, narrow `ports`,
+instance-owned `adapters`, and `presenters` — with no ambient I/O in the
+business logic. See [ADR-002](docs/ADR-002-hexagonal-core.md) and
+[models/README.md](models/README.md) for that internal boundary.
+
+Pi spawns sub-agents natively; OpenCode, Copilot, Claude Code, and Codex use
+manual/MCP-based dispatch (see [Pi vs OpenCode Differences](docs/USAGE.md#pi-vs-opencode-differences)
+for the pattern all non-native hosts share).
 
 ## Packages
 
@@ -205,6 +216,25 @@ The Pi extension is auto-discovered from `.pi/extensions/` or `~/.pi/agent/exten
 > dao_execute proposalId=1
 ```
 
+## Copilot, Claude Code, and Codex Usage
+
+These hosts don't load a native extension/plugin — they speak **MCP**. Each
+has a dedicated adapter package that bundles the MCP server plus native
+config and instructions:
+
+| Host | Package | Bundles |
+|------|---------|---------|
+| GitHub Copilot | `@guyghost/swarm-dao-copilot-adapter` | `.vscode/mcp.json`, `copilot-instructions.md` |
+| Claude Code | `@guyghost/swarm-dao-claude-adapter` | `.mcp.json`, `CLAUDE.md`, `/dao-*` slash commands |
+| OpenAI Codex | `@guyghost/swarm-dao-codex-adapter` | `config.toml` snippet, `AGENTS.md` |
+| Any other MCP host | `@guyghost/swarm-dao-mcp` | stdio MCP server only |
+
+Install the adapter for your host (`npm install @guyghost/swarm-dao-<host>-adapter`)
+and follow its README for the exact config file to copy. Deliberation over MCP
+is always **manual**, the same pattern as OpenCode above: `dao_deliberate`
+returns a dispatch plan, the host spawns the sub-agents, then
+`dao_record_outputs` feeds the results back in.
+
 ## Configuration
 
 Per-project config in `.dao/config.json`:
@@ -224,10 +254,35 @@ Per-project config in `.dao/config.json`:
 }
 ```
 
-Modes:
-- `opt-in` *(default)* : Tools available but never auto-invoked
-- `suggest` : Nudges assistant to consider DAO proposal for trigger keywords
-- `enforce` : Blocks edits on critical paths without approved proposal
+`mode` declares intent (`opt-in` *(default)*, `suggest`, `enforce`) and
+`criticalPaths` declares the paths that matter — today only `agentOverrides`
+is actively applied (agents are filtered/overridden on every `dao_deliberate`
+call). `mode`-based edit blocking and path-based suggestions are not wired
+into any host yet; treat them as reserved schema for now.
+
+## Delegated Facet Investigation (advanced, opt-in)
+
+Any agent can declare `delegates` (facet + archetype) so it can hand off a
+narrow sub-question to a child agent mid-deliberation. Disabled by default —
+opt in per project:
+
+```json
+{
+  "delegation": {
+    "enabled": true,
+    "maxDepth": 1,
+    "maxChildrenPerParent": 3,
+    "foldTimeoutMs": 30000
+  }
+}
+```
+
+- Children are spawned via the same `HostAdapter.spawnAgent`, one level deep
+  (a child cannot itself delegate).
+- The child's output is folded into the parent's content under a
+  `## Delegated Facets` section — it never touches the parent's `## Vote`.
+- Governed by two pure state machines (coordinator budget + per-request
+  gate/fold lifecycle) in `packages/core/src/governance/delegation.machine.ts`.
 
 ## Artefacts
 
@@ -245,8 +300,13 @@ Auto-generated for every approved proposal:
 
 ## GitHub Integration
 
+Available via the CLI (see above) and the MCP tools (`dao_config_github`,
+`dao_github_create_branch`, `dao_github_open_pr` — exposed by
+`@guyghost/swarm-dao-mcp` and the Copilot/Claude/Codex adapters). **Not**
+currently exposed as tools on the Pi extension or the OpenCode plugin.
+
 ```bash
-# Configure
+# Via an MCP host (Claude, Codex, Copilot, or a generic MCP client)
 > dao_config_github token="ghp_..." owner="myorg" repo="myrepo" enabled=true
 
 # Create branch
@@ -314,6 +374,8 @@ Release workflow included (`.github/workflows/publish.yml`):
 ## Documentation
 
 - [ADR-001: Unified Architecture](docs/ADR-001-unified-architecture.md)
+- [ADR-002: Hexagonal Functional Core](docs/ADR-002-hexagonal-core.md)
+- [Behavioral Models Overview](models/README.md)
 - [Extension Guide](docs/EXTENSION-GUIDE.md)
 - [Usage Guide](docs/USAGE.md)
 - [Agent Prompts](docs/AGENT-PROMPTS.md)
