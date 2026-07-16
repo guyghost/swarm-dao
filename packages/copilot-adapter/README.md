@@ -6,7 +6,7 @@ Copilot CLI, and the Copilot coding agent).
 It bundles:
 
 - the Swarm DAO MCP server (`swarm-dao-copilot` bin)
-- a native `.vscode/mcp.json` template
+- a native `.mcp.json` template
 - Copilot custom instructions (`copilot-instructions.md`)
 - a `HostAdapter` implementation for programmatic use
 
@@ -20,7 +20,7 @@ npm install @guyghost/swarm-dao-copilot-adapter
 
 ### VS Code Copilot Chat
 
-Copy `.vscode/mcp.json` into your project (it registers the `swarm-dao` MCP
+Copy `.mcp.json` into your project root (it registers the `swarm-dao` MCP
 server). Restart VS Code, then the `dao_*` tools appear under the `swarm-dao`
 MCP server in Copilot Chat.
 
