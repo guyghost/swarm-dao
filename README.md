@@ -224,7 +224,7 @@ config and instructions:
 
 | Host | Package | Bundles |
 |------|---------|---------|
-| GitHub Copilot | `@guyghost/swarm-dao-copilot-adapter` | `.vscode/mcp.json`, `copilot-instructions.md` |
+| GitHub Copilot | `@guyghost/swarm-dao-copilot-adapter` | `.mcp.json`, `copilot-instructions.md` |
 | Claude Code | `@guyghost/swarm-dao-claude-adapter` | `.mcp.json`, `CLAUDE.md`, `/dao-*` slash commands |
 | OpenAI Codex | `@guyghost/swarm-dao-codex-adapter` | `config.toml` snippet, `AGENTS.md` |
 | Any other MCP host | `@guyghost/swarm-dao-mcp` | stdio MCP server only |
