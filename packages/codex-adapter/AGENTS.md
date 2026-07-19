@@ -19,14 +19,16 @@ tools that ship with this adapter.
 
 ## First run
 
-If you are not sure whether the DAO is initialized, call `dao_status` (or
-`dao_dashboard`) before anything else.
+If you are not sure whether the DAO is initialized, call `dao_dashboard`
+before anything else.
 
-- `initialized: false` → run `dao_setup` once, then start the workflow below.
-- `initialized: true` → skip straight to the workflow.
+- It returns the onboarding message `# DAO not initialized` → run
+  `dao_setup` once, then start the workflow below.
+- Otherwise it returns the governance dashboard → skip straight to the
+  workflow.
 
 If a user asks "what's the state of the DAO?" without a specific proposal,
-call `dao_status` — do **not** read `.dao/` files directly.
+call `dao_dashboard` — do **not** read `.dao/` files directly.
 
 ## Workflow
 
@@ -71,8 +73,9 @@ entry per agent:
 
 - `agentId` **must match** the dispatch-plan entry — the model uses it to fold
   the output into the right vote/score slot.
-- If a sub-agent failed or returned nothing useful, set `error` instead of
-  `content` for that entry: `{ "agentId": "researcher", "error": "timeout" }`.
+- If a sub-agent failed or returned nothing useful, keep `content` (empty
+  string is fine) and add `error` for that entry:
+  `{ "agentId": "researcher", "content": "", "error": "timeout" }`.
 
 ## When things go wrong
 
