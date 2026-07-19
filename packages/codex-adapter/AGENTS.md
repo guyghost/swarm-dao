@@ -7,9 +7,12 @@ tools that ship with this adapter.
 
 ## The contract
 
-- DAO state lives in **`.dao/`** (`state.json`, `decisions/`, `config.json`).
-- **Never edit anything under `.dao/` directly** — always go through `dao_*`
-  tools. Hand-edits break invariants the model enforces.
+- DAO state lives in **`.dao/`**:
+  - `state.json`, `decisions/` → runtime state. **Never hand-edit** — always
+    go through `dao_*` tools; hand-edits break invariants the model enforces.
+  - `config.json` → user-authored project input (`mode`, `criticalPaths`,
+    `agentOverrides`). Safe to edit by hand; no `dao_*` tool writes it. See
+    the README "Configuration" section for the schema.
 - The canonical command list lives in
   `packages/core/src/commands/registry.ts`. If anything below drifts from the
   registry, **the registry wins**.
@@ -85,8 +88,9 @@ entry per agent:
   to preview the change without applying it.
 - **Executed proposal misbehaves** → `dao_rollback proposalId=N` reverts to
   the pre-execution snapshot.
-- **Always rate outcomes** → `dao_rate proposalId=N score=1..5` keeps the
-  governance health score accurate.
+- **Always rate outcomes** → `dao_rate proposalId=N score=1..5 comment="…"`
+  keeps the governance health score accurate (`comment` is required by the
+  schema).
 
 ## Operating rules
 
