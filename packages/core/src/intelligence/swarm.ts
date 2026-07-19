@@ -85,7 +85,7 @@ ${instructions
 
 Spawn this sub-agent with the following task (use \`task\` with \`model="${inst.model}"\` when available):
 \`\`\`
-${inst.prompt.slice(0, 500)}${inst.prompt.length > 500 ? "..." : ""}
+${inst.prompt}
 \`\`\`
 `,
   )
