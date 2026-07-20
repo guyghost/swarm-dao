@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "graph-engineering.graph.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "version",
+    "scope",
+    "proposalStateAuthority",
+    "evidenceRoot",
+    "owner",
+    "nodes",
+    "edges",
+    "requiredAnchors",
+    "anchorCommands",
+    "maxRetries"
+  ],
+  "properties": {
+    "$schema": { "const": "./graph-engineering.graph.schema.json" },
+    "id": { "const": "swarm-dao-graph-engineering-pilot" },
+    "version": { "const": 1 },
+    "scope": { "const": "repository-change-control" },
+    "proposalStateAuthority": { "const": "none" },
+    "evidenceRoot": { "const": "evidence/graph-runs" },
+    "owner": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "authority"],
+      "properties": {
+        "id": { "const": "human-owner" },
+        "kind": { "const": "human" },
+        "authority": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": ["owns_target", "approves_model_hash", "rejects_model", "authorizes_retry", "cancels"]
+          }
+        }
+      }
+    },
+    "nodes": {
+      "type": "array",
+      "minItems": 6,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "kind", "authority", "emits"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "kind": { "enum": ["ai_worker", "deterministic"] },
+          "authority": { "enum": ["signal_only", "anchor", "veto"] },
+          "emits": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+        }
+      }
+    },
+    "edges": {
+      "type": "array",
+      "minItems": 10,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["from", "to", "type"],
+        "properties": {
+          "from": { "type": "string", "minLength": 1 },
+          "to": { "type": "string", "minLength": 1 },
+          "type": { "enum": ["feeds", "validates", "owns_target", "authorizes", "watches", "vetoes"] }
+        }
+      }
+    },
+    "requiredAnchors": {
+      "const": [
+        "model-contract",
+        "graph-tests",
+        "architecture-contract",
+        "repository-ci",
+        "runtime-scenario",
+        "regression"
+      ]
+    },
+    "anchorCommands": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "model-contract",
+        "graph-tests",
+        "architecture-contract",
+        "repository-ci",
+        "runtime-scenario",
+        "regression"
+      ],
+      "properties": {
+        "model-contract": { "const": "bun run graph:validate" },
+        "graph-tests": {
+          "const": "bun test packages/core/tests/graph-engineering.machine.test.ts tools/graph-engineering/tests"
+        },
+        "architecture-contract": {
+          "const": "bun test packages/core/tests/architecture.contract.test.ts packages/core/tests/application.architecture.test.ts"
+        },
+        "repository-ci": { "const": "bun run ci" },
+        "runtime-scenario": { "const": "bun run graph:demo" },
+        "regression": { "const": "bun run graph:regression" }
+      }
+    },
+    "maxRetries": { "const": 2 }
+  }
+}

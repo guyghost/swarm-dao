@@ -1,0 +1,17 @@
+{
+  "description": "Swarm DAO Graph Engineering lifecycle gate.",
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun .codex/hooks/verify-stop.ts",
+            "timeout": 30,
+            "statusMessage": "Checking Graph Engineering terminal state"
+          }
+        ]
+      }
+    ]
+  }
+}

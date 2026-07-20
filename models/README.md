@@ -57,6 +57,17 @@ snapshot; it does not rewrite the historical proposal lifecycle.
 AI worker outputs are signals only: agent text is parsed into votes and scores, then deterministic
 tally, gate, and lifecycle policies select the permitted event and transition.
 
+## Graph Engineering change control
+
+`graph-engineering.md` and `graph-engineering.graph.json` define a separate
+repository-local workflow for Codex change runs. Its executable XState model
+lives in `packages/core/src/models/graph-engineering.machine.ts`.
+
+This workflow never owns or mutates proposal status and never writes `.dao/`.
+It gates implementation through exact-hash human approval and six deterministic
+anchors while the proposal lifecycle above remains the sole business-state
+authority.
+
 ## Review checklist
 
 Before adding or changing a workflow, cover:
