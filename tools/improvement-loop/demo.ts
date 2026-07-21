@@ -1,8 +1,8 @@
 import { resolve } from "node:path";
 import {
-  REQUIRED_IMPROVEMENT_ANCHORS,
   arbitratePairedSignals,
   assertFrozenSetIntact,
+  REQUIRED_IMPROVEMENT_ANCHORS,
 } from "../../packages/core/src/models/improvement-loop.machine.js";
 import { validateImprovementContract } from "./contract.js";
 import { createImprovementRunner } from "./runner.js";
@@ -68,15 +68,20 @@ await submitRequired(
   ]),
 );
 
-// The deterministic anchor verifier records the four non-auto anchors.
+// The deterministic anchor verifier records the four non-auto anchors. This is
+// a reference scenario: it drives the state machine through the happy path so
+// the flow is observable end-to-end. It does NOT execute the anchorCommands
+// (that is the job of `bun run improvement:anchors`, bound to the anchor-reality
+// gate). The evidence below is explicitly labelled as simulation so the
+// persisted journal is never mistaken for executed anchor evidence.
 for (const anchor of REQUIRED_IMPROVEMENT_ANCHORS) {
   const auto = anchor === "counter-metric-paired" || anchor === "arbitration-policy";
   if (auto) continue;
-  let evidence = `${anchor} satisfied`;
+  let evidence = `demo simulation: ${anchor} recorded as passed by the reference scenario`;
   if (anchor === "frozen-set-intact") {
     const intact = assertFrozenSetIntact(referenceHash, referenceHash);
     if (!intact) throw new Error("frozen set integrity failed in the reference scenario");
-    evidence = `frozen set intact: ${referenceHash}`;
+    evidence = `demo simulation: frozen set intact: ${referenceHash}`;
   }
   await submitRequired(
     makeSignal("ANCHOR_RECORDED", "tool", "anchor-verifier", { anchor, status: "passed" }, [evidence]),

@@ -73,4 +73,20 @@ describe("improvement contract validation", () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  it("rejects weakening the owner kind from human to ai", async () => {
+    const dir = await stageRoot();
+    try {
+      const graph = await baseGraph();
+      const owner = { ...(graph.owner as Record<string, unknown>) };
+      owner.kind = "ai";
+      graph.owner = owner;
+      await writeGraph(dir, graph);
+      const result = await validateImprovementContract(dir);
+      expect(result.valid).toBe(false);
+      expect(result.issues.join("\n")).toMatch(/owner kind must be human/);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });

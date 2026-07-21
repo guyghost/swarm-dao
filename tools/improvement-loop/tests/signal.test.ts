@@ -51,4 +51,40 @@ describe("improvement signal validation", () => {
     const result = validateImprovementSignal({ ...baseAiSignal, source: "tool" });
     expect(result.ok).toBe(false);
   });
+
+  it("binds event authority to the producer's declared graph node", () => {
+    // An AI producer cannot emit a human-authority event by forging source: "human".
+    const forged = validateImprovementSignal({
+      cycleId: "improvement-signal",
+      type: "CANCEL",
+      source: "human",
+      producer: "sensor",
+      occurredAt: "2026-07-21T12:00:00.000Z",
+      payload: { reason: "forged by an AI producer" },
+      evidence: ["forged"],
+    });
+    expect(forged.ok).toBe(false);
+    if (forged.ok) return;
+    expect(forged.issues.join("\n")).toMatch(/sensor is not declared to emit CANCEL/);
+
+    // An AI producer cannot emit an event outside its declared emissions.
+    const wrongEmit = validateImprovementSignal({
+      ...baseAiSignal,
+      type: "DRIFT_ESTIMATE",
+      payload: { driftClass: "none" },
+    });
+    expect(wrongEmit.ok).toBe(false);
+
+    // The human-owner producer can emit a human-authority event.
+    const humanCancel = validateImprovementSignal({
+      cycleId: "improvement-signal",
+      type: "CANCEL",
+      source: "human",
+      producer: "human-owner",
+      occurredAt: "2026-07-21T12:00:00.000Z",
+      payload: { reason: "owner cancelled" },
+      evidence: ["owner cancelled"],
+    });
+    expect(humanCancel.ok).toBe(true);
+  });
 });

@@ -100,13 +100,38 @@ export const validateImprovementContract = async (rootDirectory: string): Promis
   const nodeIds = nodes.flatMap((node) => (typeof node.id === "string" ? [node.id] : []));
   if (!sameOrderedStrings(nodeIds, EXPECTED_NODE_IDS)) issues.push("graph node set or order changed");
   if (new Set(nodeIds).size !== nodeIds.length) issues.push("node ids must be unique");
+  const ALLOWED_NODE_KINDS = new Set(["ai_worker", "deterministic"]);
   for (const node of nodes) {
+    if (!ALLOWED_NODE_KINDS.has(String(node.kind))) {
+      issues.push(`node ${String(node.id)} has an unexpected kind ${String(node.kind)}`);
+    }
     if (node.kind === "ai_worker" && node.authority !== "signal_only") {
       issues.push(`AI node ${String(node.id)} has state authority`);
     }
+    if (node.kind === "deterministic" && node.authority !== "anchor") {
+      issues.push(`deterministic node ${String(node.id)} must be anchor authority`);
+    }
   }
 
+  // The improvement loop is human-owned. The owner kind, id, and authority set
+  // are authority-critical invariants the manual schema check below does not
+  // cover, so enforce them explicitly: weakening owner.kind to "ai" would let
+  // an AI node own the frozen set or approve reference changes.
+  const EXPECTED_OWNER_AUTHORITY = [
+    "owns_target",
+    "approves_reference_change",
+    "rejects_reference_change",
+    "owns_frozen_set",
+    "authorizes_retry",
+    "cancels",
+  ];
   const owner = isRecord(graph.owner) ? graph.owner : {};
+  if (owner.id !== "human-owner") issues.push("owner id must be human-owner");
+  if (owner.kind !== "human") issues.push("owner kind must be human");
+  if (!sameOrderedStrings(strings(owner.authority), EXPECTED_OWNER_AUTHORITY)) {
+    issues.push("owner authority set drifted from the frozen model");
+  }
+
   const endpoints = new Set([...nodeIds, "state-machine", String(owner.id)]);
   const edges = Array.isArray(graph.edges) ? graph.edges.filter(isRecord) : [];
   const edgeKeys = edges.map((edge) => `${String(edge.from)}:${String(edge.type)}:${String(edge.to)}`);

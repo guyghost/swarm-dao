@@ -44,6 +44,40 @@ type RunnerOptions = Readonly<{
 const validCycleId = (cycleId: string): boolean =>
   /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(cycleId) && !cycleId.includes("..");
 
+// Reopening an existing cycle must not overwrite its immutable correlation
+// inputs. If evidence already exists, the caller-supplied referenceHash and
+// scope must exactly match what was sealed at initialization; otherwise a
+// second `improvement:init` could replace the human-owned reference hash
+// without a REFERENCE_CHANGE_APPROVED event.
+const assertImmutableInputsMatch = async (runDirectory: string, options: RunnerOptions): Promise<void> => {
+  let content: string;
+  try {
+    content = await readFile(resolve(runDirectory, "snapshot.json"), "utf8");
+  } catch (error) {
+    if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") return;
+    throw error;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    throw new Error(`existing snapshot for cycle ${options.cycleId} is not valid JSON`);
+  }
+  const context =
+    typeof parsed === "object" && parsed !== null && "context" in parsed
+      ? (parsed as { context: { referenceHash?: unknown; scope?: unknown } }).context
+      : null;
+  if (!context) throw new Error(`existing snapshot for cycle ${options.cycleId} has no context`);
+  if (context.referenceHash !== options.referenceHash) {
+    throw new Error(
+      `cycle ${options.cycleId} already exists with a different referenceHash; use REFERENCE_CHANGE_APPROVED to change it`,
+    );
+  }
+  if (context.scope !== options.scope) {
+    throw new Error(`cycle ${options.cycleId} already exists with a different scope`);
+  }
+};
+
 const eventTypeFrom = (input: unknown): string | null => {
   if (typeof input !== "object" || input === null || !("type" in input)) return null;
   return typeof input.type === "string" ? input.type : null;
@@ -76,7 +110,11 @@ export class ImprovementRunner {
     this.#cycleId = options.cycleId;
     this.#runDirectory = runDirectory;
     this.#clock = options.clock ?? (() => new Date().toISOString());
-    this.#actor = createImprovementActor({ cycleId: options.cycleId, scope: options.scope, referenceHash: options.referenceHash });
+    this.#actor = createImprovementActor({
+      cycleId: options.cycleId,
+      scope: options.scope,
+      referenceHash: options.referenceHash,
+    });
   }
 
   static async create(options: RunnerOptions): Promise<ImprovementRunner> {
@@ -87,6 +125,7 @@ export class ImprovementRunner {
     if (!runDirectory.startsWith(`${root}${sep}`)) throw new Error("cycleId resolves outside the evidence root");
 
     await mkdir(runDirectory, { recursive: true });
+    await assertImmutableInputsMatch(runDirectory, options);
     const runner = new ImprovementRunner(options, runDirectory);
     await runner.#restoreJournal();
     await runner.#persistSnapshot(serializeSnapshot(runner.#actor));

@@ -50,6 +50,26 @@ const FORBIDDEN_AI_AUTHORITY_KEYS = new Set([
   "permission",
 ]);
 
+// Producer -> { declared source, emitted event types }. Mirrors the frozen
+// authority model in models/improvement-loop.graph.json so that a signal's
+// authority is bound to the producer's declared node, not to a caller-supplied
+// `source` label. An AI producer (e.g. "sensor") therefore cannot emit a
+// human-authority event (e.g. CANCEL) by forging source: "human".
+const PRODUCER_EMISSIONS: Readonly<
+  Record<string, Readonly<{ source: ImprovementSignalSource; emits: ReadonlySet<string> }>>
+> = {
+  sensor: { source: "ai", emits: new Set(["METRIC_SAMPLED"]) },
+  "counter-sensor": { source: "ai", emits: new Set(["COUNTER_SAMPLED"]) },
+  "sample-gate": { source: "tool", emits: new Set(["SAMPLES_SEALED", "PERMISSION_DENIED"]) },
+  "drift-auditor": { source: "ai", emits: new Set(["DRIFT_ESTIMATE"]) },
+  arbitrator: { source: "tool", emits: new Set(["ARBITRATION"]) },
+  "anchor-verifier": { source: "tool", emits: new Set(["ANCHOR_RECORDED", "PERMISSION_DENIED"]) },
+  "human-owner": {
+    source: "human",
+    emits: new Set(["REFERENCE_CHANGE_APPROVED", "REFERENCE_CHANGE_REJECTED", "RETRY_AUTHORIZED", "CANCEL"]),
+  },
+};
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
@@ -184,6 +204,24 @@ export const validateImprovementSignal = (input: unknown): ImprovementSignalVali
   if (!validSource) issues.push("source must be ai, tool, human, or system");
   if (knownType && validSource && EVENT_SOURCES[knownType] !== source) {
     issues.push(`source for ${knownType} must be ${EVENT_SOURCES[knownType]}`);
+  }
+
+  // Bind the event's authority to the producer's declared graph node. EVALUATE
+  // is emitted by the improvement-runner (a system principal with no graph
+  // producer node) and is gated by the source === "system" rule above.
+  const producer = typeof input.producer === "string" ? input.producer : "";
+  if (knownType && knownType !== "EVALUATE") {
+    const declared = PRODUCER_EMISSIONS[producer];
+    if (!declared) {
+      issues.push(`producer ${producer || "?"} is not a declared graph producer for ${knownType}`);
+    } else {
+      if (!declared.emits.has(knownType)) {
+        issues.push(`producer ${producer} is not declared to emit ${knownType}`);
+      }
+      if (validSource && declared.source !== source) {
+        issues.push(`producer ${producer} must use source ${declared.source}, not ${source}`);
+      }
+    }
   }
 
   issues.push(...findForbiddenKeys(input, FORBIDDEN_TRANSITION_KEYS));
