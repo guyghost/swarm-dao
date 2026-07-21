@@ -68,6 +68,32 @@ It gates implementation through exact-hash human approval and six deterministic
 anchors while the proposal lifecycle above remains the sole business-state
 authority.
 
+## Improvement loop (self-improvement cycle)
+
+`improvement-loop.md` and `improvement-loop.graph.json` define a
+self-improvement layer that sits *above* the proposal lifecycle and Graph
+Engineering change control. Its executable XState model lives in
+`packages/core/src/models/improvement-loop.machine.ts`.
+
+The loop pairs an optimizing metric against a counter-metric, audits drift,
+arbitrates the paired signal deterministically, and only succeeds when six
+ground-contact anchors pass. It never owns proposal or graph-engineering state
+(`proposalStateAuthority: "none"`). Drift-detached routes to human reference
+review; the frozen set of anchors and commands cannot be unfrozen without an
+exact-hash human reference change. AI workers (sensor, counter-sensor,
+drift-auditor) emit signals only; the deterministic arbitrator and anchor
+verifier decide outcomes.
+
+| command | anchor |
+|---|---|
+| `bun run improvement:validate` | counter-metric-paired |
+| `bun test packages/core/tests/improvement-loop.machine.test.ts` | drift-audit |
+| `bun test packages/core/tests/improvement-loop.arbitration.test.ts` | arbitration-policy |
+| `bun run improvement:anchors` | anchor-reality |
+| `bun test packages/core/tests/improvement-loop.frozen.test.ts` | frozen-set-intact |
+| `bun run improvement:regression` | regression |
+
+
 ## Review checklist
 
 Before adding or changing a workflow, cover:
