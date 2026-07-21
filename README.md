@@ -284,6 +284,75 @@ opt in per project:
 - Governed by two pure state machines (coordinator budget + per-request
   gate/fold lifecycle) in `packages/core/src/governance/delegation.machine.ts`.
 
+## Graph Engineering (deterministic change control)
+
+A repository-local change-control overlay for Codex work. It moves a change run
+from an explicit reviewed model to a verified implementation through an XState
+machine, typed AI signals, an exact human-approved model hash, six frozen
+deterministic anchors, and durable evidence — so model approval, implementation
+authorization, verification, retries, and terminal outcomes are all
+deterministic.
+
+- Executable model: `packages/core/src/models/graph-engineering.machine.ts`;
+  spec: [`models/graph-engineering.md`](models/graph-engineering.md).
+- **Boundary:** it owns only the state of a change *run*. It never emits
+  proposal events and never writes `.dao/`. A run may carry an immutable
+  `proposalId` correlation, but that value grants no permission and causes no
+  transition in either machine.
+- AI workers (`modeler`, `implementer`) produce **signals only**; the human
+  owner approves the exact model hash, and tools enforce the six success anchors
+  (model-contract, graph-tests, architecture-contract, repository-ci,
+  runtime-scenario, regression).
+- Evidence lives in `evidence/graph-runs/` and is **not committed**.
+
+```bash
+# Initialize / inspect / submit a signal for a change run
+bun run graph:init -- --run-id <id>
+bun run graph:status -- --run-id <id>
+bun run graph:submit -- --run-id <id> --signal <file>
+
+# Validate the reviewed model hash and graph contract
+bun run graph:validate
+
+# End-to-end reference scenario + the six-anchor regression counter-check
+bun run graph:demo
+bun run graph:regression
+```
+
+## Improvement Loop (self-improvement cycle)
+
+A self-improvement layer that sits *above* the proposal lifecycle and Graph
+Engineering. Each cycle pairs an optimizing metric with a required
+counter-metric (Goodhart pairing), audits the metric for drift, arbitrates any
+conflict between the paired signals deterministically, and only succeeds when
+six ground-contact anchors pass. A cycle can never succeed on AI judgment
+alone, and a metric can never travel without its counter-metric.
+
+- Executable model: `packages/core/src/models/improvement-loop.machine.ts`;
+  spec: [`models/improvement-loop.md`](models/improvement-loop.md).
+- **Boundary:** it owns only the state of an improvement *cycle run*
+  (`proposalStateAuthority: "none"`). It never changes proposal or Graph
+  Engineering status; correlation is immutable and one-way.
+- AI workers (`sensor`, `counter-sensor`, `drift-auditor`) emit **signals only**;
+  a deterministic `arbitrator` and `anchor-verifier` decide outcomes, and the
+  human owner owns reference (target) values and the frozen set.
+- Evidence lives in `evidence/improvement-cycles/` and is **not committed**.
+
+```bash
+# Initialize (reference hash required) / inspect / submit a signal for a cycle
+bun run improvement:init -- --cycle-id <id> --reference-hash <hash> [--scope <s>]
+bun run improvement:status -- --cycle-id <id>
+bun run improvement:submit -- --cycle-id <id> --signal <file>
+
+# Validate the reviewed model hash; run the frozen ground-contact anchors
+bun run improvement:validate
+bun run improvement:anchors
+
+# End-to-end reference scenario + arbitration / frozen-set / regression tests
+bun run improvement:demo
+bun run improvement:regression
+```
+
 ## Artefacts
 
 Auto-generated for every approved proposal:
@@ -376,6 +445,10 @@ Release workflow included (`.github/workflows/publish.yml`):
 - [ADR-001: Unified Architecture](docs/ADR-001-unified-architecture.md)
 - [ADR-002: Hexagonal Functional Core](docs/ADR-002-hexagonal-core.md)
 - [Behavioral Models Overview](models/README.md)
+- [Graph Engineering Model](models/graph-engineering.md)
+- [Improvement Loop Model](models/improvement-loop.md)
+- [Command Registry](docs/DAO_COMMAND_REGISTRY.md)
+- [MCP Host Integration Guide](docs/MCP_INTEGRATION.md)
 - [Extension Guide](docs/EXTENSION-GUIDE.md)
 - [Usage Guide](docs/USAGE.md)
 - [Agent Prompts](docs/AGENT-PROMPTS.md)
