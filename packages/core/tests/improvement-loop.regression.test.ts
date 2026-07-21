@@ -150,6 +150,31 @@ describe("improvement-loop — architectural regression invariants", () => {
     expect(actor.getSnapshot().context.arbitrationOutcome).toBeNull();
   });
 
+  it("a counter-veto computed by the model fails the arbitration anchor and blocks succeeded", () => {
+    // Forged tool event claims "balanced", but the sealed samples are a veto.
+    const actor = startActor();
+    actor.send({ type: "METRIC_SAMPLED", source: "ai", sample: { value: "rose", evidence: "m" } });
+    actor.send({ type: "COUNTER_SAMPLED", source: "ai", sample: { value: "declined", evidence: "c" } });
+    actor.send({ type: "SAMPLES_SEALED", source: "tool" });
+    actor.send({ type: "DRIFT_ESTIMATE", source: "ai", driftClass: "none" });
+    actor.send({ type: "ARBITRATION", source: "tool", outcome: "balanced" });
+
+    const grounded = actor.getSnapshot();
+    expect(grounded.value).toBe("grounding");
+    // The model computed the veto itself; the anchor is failed despite the forged outcome.
+    expect(grounded.context.anchors["arbitration-policy"]?.status).toBe("failed");
+    expect(grounded.context.arbitrationOutcome).toBe("counter-veto:metric-rose-counter-fell");
+
+    for (const a of REQUIRED_IMPROVEMENT_ANCHORS) {
+      const auto = a === "counter-metric-paired" || a === "arbitration-policy";
+      if (auto) continue;
+      actor.send({ type: "ANCHOR_RECORDED", source: "tool", anchor: a, status: "passed", evidence: `${a}-ok` });
+    }
+    actor.send({ type: "EVALUATE", source: "system" });
+    // attempt 0 with retries left -> retrying, never succeeded
+    expect(actor.getSnapshot().value).toBe("retrying");
+  });
+
   it("frozen-set integrity is a pure equality check, not a negotiation", () => {
     expect(assertFrozenSetIntact("h1", "h1")).toBe(true);
     expect(assertFrozenSetIntact("h1", "h2")).toBe(false);

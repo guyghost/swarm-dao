@@ -43,6 +43,8 @@ const FORBIDDEN_AI_AUTHORITY_KEYS = new Set([
   "approval",
   "approve",
   "referenceHash",
+  "reference",
+  "target",
   "retry",
   "cancel",
   "permission",
@@ -87,11 +89,7 @@ const requireSample = (
   issues: string[],
 ): { value: string; evidence: string } => {
   const sample = payload.sample;
-  if (
-    !isRecord(sample) ||
-    !nonEmptyString(sample.value) ||
-    !nonEmptyString(sample.evidence)
-  ) {
+  if (!isRecord(sample) || !nonEmptyString(sample.value) || !nonEmptyString(sample.evidence)) {
     issues.push("payload.sample must be { value: string, evidence: string }");
     return { value: "", evidence: "" };
   }
@@ -123,7 +121,11 @@ const buildEvent = (
       if (driftClass !== "none" && driftClass !== "partial" && driftClass !== "detached") {
         issues.push("payload.driftClass must be none, partial, or detached");
       }
-      return { type, source, driftClass: driftClass === "detached" ? "detached" : driftClass === "partial" ? "partial" : "none" };
+      return {
+        type,
+        source,
+        driftClass: driftClass === "detached" ? "detached" : driftClass === "partial" ? "partial" : "none",
+      };
     }
     case "ARBITRATION":
       return { type, source, outcome: requiredPayloadString(payload, "outcome", issues) };

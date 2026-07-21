@@ -115,6 +115,21 @@ export const validateImprovementContract = async (rootDirectory: string): Promis
       issues.push(`edge ${String(edge.from)} -> ${String(edge.to)} is orphaned`);
     }
   }
+  // Edges encode authority relationships, so the graph must be exactly the
+  // frozen set: no missing edges, no duplicates, and no extras that could
+  // introduce new authority paths.
+  const requiredEdgeSet = new Set<string>(REQUIRED_EDGES);
+  const seenEdges = new Set<string>();
+  for (const edgeKey of edgeKeys) {
+    if (seenEdges.has(edgeKey)) {
+      issues.push(`duplicate edge ${edgeKey}`);
+    } else {
+      seenEdges.add(edgeKey);
+    }
+    if (!requiredEdgeSet.has(edgeKey)) {
+      issues.push(`unexpected edge ${edgeKey}`);
+    }
+  }
   for (const requiredEdge of REQUIRED_EDGES) {
     if (!edgeKeys.includes(requiredEdge)) issues.push(`missing edge ${requiredEdge}`);
   }

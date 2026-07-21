@@ -31,13 +31,17 @@ const main = async (): Promise<void> => {
   if (command === "submit" && !values.signal) throw new Error(`--signal is required\n${usage}`);
 
   let referenceHash = values["reference-hash"] ?? "";
+  let scope = values.scope ?? "default";
   if (command === "init") {
     if (!referenceHash) throw new Error(`--reference-hash is required\n${usage}`);
   } else {
-    // status/submit recover the reference hash from the persisted snapshot
+    // status/submit recover the reference hash AND scope from the persisted
+    // snapshot so running without the original flags cannot mutate the stored
+    // cycle identity.
     try {
       const snapshot = JSON.parse(await readFile(resolve(evidenceRoot, cycleId, "snapshot.json"), "utf8"));
       referenceHash = snapshot?.context?.referenceHash ?? "";
+      scope = snapshot?.context?.scope ?? "default";
     } catch (error) {
       if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") {
         throw new Error(`cycle ${cycleId} has no snapshot; run improvement:init first`);
@@ -49,7 +53,7 @@ const main = async (): Promise<void> => {
   const runner = await createImprovementRunner({
     evidenceRoot,
     cycleId,
-    scope: values.scope ?? "default",
+    scope,
     referenceHash,
   });
 

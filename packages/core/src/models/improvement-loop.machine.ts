@@ -187,18 +187,24 @@ const improvementSetup = setup({
     recordDrift: assign(({ context, event }) =>
       event.type === "DRIFT_ESTIMATE" ? { ...context, driftClass: event.driftClass } : context,
     ),
-    recordArbitration: assign(({ context, event }) =>
-      event.type === "ARBITRATION"
-        ? {
-            ...context,
-            arbitrationOutcome: event.outcome,
-            anchors: {
-              ...context.anchors,
-              "arbitration-policy": { status: "passed", evidence: event.outcome, attempt: context.attempt },
-            },
-          }
-        : context,
-    ),
+    // The model - not the tool adapter - computes the arbitration outcome from
+    // the sealed samples, so a counter-veto actually fails this anchor (blocking
+    // succeeded) and a forged tool event cannot bypass the policy.
+    recordArbitration: assign(({ context }) => {
+      const { outcome, arbitrationPolicyPassed } = arbitratePairedSignals(context.metric, context.counterMetric);
+      return {
+        ...context,
+        arbitrationOutcome: outcome,
+        anchors: {
+          ...context.anchors,
+          "arbitration-policy": {
+            status: arbitrationPolicyPassed ? "passed" : "failed",
+            evidence: outcome,
+            attempt: context.attempt,
+          },
+        },
+      };
+    }),
     recordAnchorOnce: assign(({ context, event }) => {
       if (event.type !== "ANCHOR_RECORDED" || context.anchors[event.anchor] !== undefined) return context;
       return {
