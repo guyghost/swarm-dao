@@ -64,6 +64,7 @@ Quick checklist:
 - [ ] Add type stubs if host SDK isn't installable standalone
 - [ ] Add tests
 - [ ] Update README
+- [ ] Configure the npm Trusted Publisher for the new package before its first release (see [Releasing](#releasing))
 
 ## Code Style
 
@@ -80,6 +81,33 @@ Quick checklist:
 4. Run CI locally (`bun run ci`)
 5. Commit with clear messages
 6. Open a PR with description of changes
+
+## Releasing
+
+Releases are driven by [Changesets](https://github.com/changesets/changesets)
+and the [`publish.yml`](.github/workflows/publish.yml) workflow — **versions are
+never bumped by hand.**
+
+1. **Add a changeset** describing the change and the packages/semver to bump:
+   ```bash
+   bun run changeset
+   ```
+   Commit the generated `.changeset/*.md` alongside your change and open a PR.
+2. **Merge the feature PR.** The `version` job (on `pull_request_target`) opens
+   a separate `chore(release): version packages` PR on `changeset-release/main`
+   with the bumped versions and changelogs.
+3. **Merge the version PR.** Pushing to `main` triggers the `publish` job, which
+   builds and publishes every changed package to npm with provenance.
+
+Publishing uses **npm Trusted Publishing (OIDC)** — no `NPM_TOKEN` is stored.
+Each package must have its Trusted Publisher configured on npmjs.com
+(owner `guyghost`, repo `swarm-dao`, workflow `publish.yml`) **before** it can
+publish through OIDC; otherwise you will see
+`npm error 404 Not Found - PUT`. Packages first published manually (classic
+token, no provenance) need their Trusted Publisher added before the OIDC
+workflow can publish them. See the README [CI/CD](README.md#cicd) section for
+setup and troubleshooting, and remember to configure a new package's Trusted
+Publisher before its first release.
 
 ## Reporting Issues
 

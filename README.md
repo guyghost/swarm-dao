@@ -436,9 +436,36 @@ GitHub Actions workflow included (`.github/workflows/ci.yml`):
 - Build verification
 - Pi extension npm package validation
 
-Release workflow included (`.github/workflows/publish.yml`):
-- Creates Changesets version PRs from `pull_request_target`
-- Publishes to npm from `main` via GitHub OIDC trusted publishing
+Release workflow (`.github/workflows/publish.yml`) runs in two phases:
+
+1. **Version** (on `pull_request_target` to `main`) — `changesets/action` reads any
+   `.changeset/*.md` files on the PR and opens a `chore(release): version packages`
+   PR on the `changeset-release/main` branch with the bumped versions and changelogs.
+2. **Publish** (on `push` to `main`, i.e. when the version PR merges) — runs
+   `changeset publish`, building each package and publishing to npm with
+   `id-token: write`, Node ≥ 24, and `NPM_CONFIG_PROVENANCE=true`.
+
+Publishing uses **npm Trusted Publishing (OIDC)** — there is no long-lived
+`NPM_TOKEN`. Every package must have its Trusted Publisher linked on npmjs.com
+**individually**; a package without it fails with
+`npm error 404 Not Found - PUT … - Not found` even though the workflow itself is
+correct.
+
+To configure a package (npm package owner, on npmjs.com): package page →
+**Settings → Publishing access → Trusted Publisher**, with:
+
+- Repository owner: `guyghost`
+- Repository: `swarm-dao`
+- Workflow filename: `publish.yml`
+- Environment: *(leave blank)*
+
+A package first published manually (classic token, no provenance) will not
+publish through OIDC until its Trusted Publisher is added. **When adding a new
+package, configure its Trusted Publisher before its first release.** Confirm a
+package is OIDC-configured by checking its registry metadata for
+`dist.attestations` and `npmUser: GitHub Actions` (`trustedPublisher.id: github`).
+
+See [CONTRIBUTING.md](CONTRIBUTING.md#releasing) for the maintainer release flow.
 
 ## Documentation
 
