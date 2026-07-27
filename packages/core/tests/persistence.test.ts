@@ -7,6 +7,7 @@ import {
   addVote,
   createInitialState,
   createProposal,
+  createProposalsBatch,
   dispatchProposalEvent,
   getAgent,
   getAuditLog,
@@ -78,6 +79,27 @@ describe("persistence", () => {
 
     expect(getProposal(1)?.title).toBe("Feature A");
     expect(listProposals().length).toBe(2);
+  });
+
+  it("rejects an unknown proposal type instead of silently casting", async () => {
+    await expect(createProposal("Bad", "not-a-real-type", "d", "user")).rejects.toThrow(/Unknown proposal type/);
+    // State must be untouched: no proposal persisted, id counter unchanged.
+    expect(listProposals().length).toBe(0);
+    const next = await createProposal("Good", "product-feature", "d", "user");
+    expect(next.id).toBe(1);
+  });
+
+  it("createProposalsBatch validates all entries before mutating any id", async () => {
+    const before = getState().nextProposalId;
+    await expect(
+      createProposalsBatch([
+        { title: "OK", type: "product-feature", description: "d", proposedBy: "u" },
+        { title: "BAD", type: "unknown-type", description: "d", proposedBy: "u" },
+      ]),
+    ).rejects.toThrow(/Unknown proposal type/);
+    // Atomic: no partial persist, id counter untouched.
+    expect(getState().nextProposalId).toBe(before);
+    expect(listProposals().length).toBe(0);
   });
 
   it("adds votes", async () => {
@@ -278,6 +300,91 @@ describe("persistence", () => {
       const statePath = path.join(daoRoot, "state.json");
       const content = await fs.readFile(statePath, "utf-8");
       expect(content.endsWith("\n")).toBe(true);
+    } finally {
+      setState(null);
+      await fs.rm(cwd, { recursive: true, force: true }).catch(() => {});
+    }
+  });
+
+  /**
+   * Atomic-write guard: a successful save must not leave transient temp files
+   * on disk. writeAtomic() writes to `*.tmp-<pid>-<token>` then renames; the
+   * temp file must never survive a completed write.
+   */
+  it("saveState leaves no .tmp residue after a successful write", async () => {
+    const cwd = `/tmp/dao-atomic-residue-test-${Date.now()}`;
+    const daoRoot = getDaoRoot(cwd);
+
+    try {
+      await initStorage(cwd);
+      const state = createInitialState(cwd);
+      state.initialized = true;
+      state.daoRoot = daoRoot;
+      setState(state);
+
+      await saveState();
+
+      const entries = await fs.readdir(daoRoot);
+      const tmpLeftovers = entries.filter((name) => name.includes(".tmp-"));
+      expect(tmpLeftovers).toEqual([]);
+    } finally {
+      setState(null);
+      await fs.rm(cwd, { recursive: true, force: true }).catch(() => {});
+    }
+  });
+
+  /**
+   * Atomic-write guard: if the final rename fails (e.g. transient FS error),
+   * the target file must remain byte-identical to its prior content and the
+   * temp file must be cleaned up. No partial write may ever be observable.
+   */
+  it("saveState keeps the target intact and cleans tmp when rename fails", async () => {
+    const cwd = `/tmp/dao-atomic-failure-test-${Date.now()}`;
+    const daoRoot = getDaoRoot(cwd);
+    const statePath = path.join(daoRoot, "state.json");
+
+    try {
+      await initStorage(cwd);
+      const state = createInitialState(cwd);
+      state.initialized = true;
+      state.daoRoot = daoRoot;
+      setState(state);
+
+      // Baseline: a clean save lands on disk.
+      await saveState();
+      const baseline = await fs.readFile(statePath, "utf-8");
+
+      // Mutate in-memory state (bypass recordAudit, which would save on its own)
+      // so the next saveState() has new bytes to write and bypasses the cache.
+      const s = getState();
+      s.auditLog.push({
+        id: s.nextAuditId++,
+        timestamp: new Date().toISOString(),
+        proposalId: 0,
+        layer: "control",
+        action: "force-change",
+        actor: "test",
+        details: "{}",
+      });
+
+      // Force the atomic rename step to fail for every file written this round.
+      const renameSpy = spyOn(fs, "rename").mockRejectedValue(
+        Object.assign(new Error("simulated rename failure"), { code: "EIO" }),
+      );
+
+      // saveState should reject because the write cannot be committed.
+      await expect(saveState()).rejects.toThrow("simulated rename failure");
+
+      // The on-disk state.json is untouched (no partial / no new content).
+      const after = await fs.readFile(statePath, "utf-8");
+      expect(after).toBe(baseline);
+
+      // No temp file survives the failed write.
+      const entries = await fs.readdir(daoRoot);
+      const tmpLeftovers = entries.filter((name) => name.includes(".tmp-"));
+      expect(tmpLeftovers).toEqual([]);
+
+      renameSpy.mockRestore();
     } finally {
       setState(null);
       await fs.rm(cwd, { recursive: true, force: true }).catch(() => {});

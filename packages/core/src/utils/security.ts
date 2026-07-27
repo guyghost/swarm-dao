@@ -4,9 +4,25 @@
 
 /**
  * Recursively redacts sensitive fields in an object.
- * Replaces values of keys like 'token', 'secret', 'password', 'key' with '[REDACTED]'.
+ * Replaces values of keys like 'token', 'secret', 'password', 'key' with '[REDACTED].
+ *
+ * Substring match (case-insensitive) against lowercased key names, so e.g.
+ * `apiKey`, `api_token`, `userPassword` are all caught. Kept intentionally
+ * narrow: deliberately omits over-broad substrings like `auth` (matches
+ * `author`/`authority`) and `session` (matches `sessionCount`) to avoid
+ * masking benign fields.
  */
-export const SENSITIVE_KEYS: ReadonlySet<string> = new Set(["token", "secret", "password", "key", "apikey"]);
+export const SENSITIVE_KEYS: ReadonlySet<string> = new Set([
+  "token",
+  "secret",
+  "password",
+  "passphrase",
+  "key",
+  "apikey",
+  "bearer",
+  "credential",
+  "jwt",
+]);
 
 export function redactSensitiveFields<T>(obj: T): T {
   if (obj === null || typeof obj !== "object") {

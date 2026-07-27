@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { configureGitHub, isGitHubEnabled } from "../integrations/github.js";
+import { logger } from "../observability/logging.js";
 
 export async function loadGitHubConfigFromDaoRoot(daoRoot: string): Promise<boolean> {
   const configPath = path.join(daoRoot, "config.json");
@@ -13,8 +14,9 @@ export async function loadGitHubConfigFromDaoRoot(daoRoot: string): Promise<bool
       configureGitHub({ ...github, enabled: github.enabled ?? true });
       return isGitHubEnabled();
     }
-  } catch {
-    // no config file
+  } catch (error) {
+    // Missing or invalid config is a normal cold-start state; log at debug.
+    logger.debug("loadGitHubConfigFromDaoRoot: no config (%s)", error instanceof Error ? error.message : String(error));
   }
   return false;
 }
@@ -28,8 +30,12 @@ export async function saveGitHubConfigToDaoRoot(
   let configData: Record<string, unknown> = {};
   try {
     configData = JSON.parse(await fs.readFile(configPath, "utf-8")) as Record<string, unknown>;
-  } catch {
-    // no existing config
+  } catch (error) {
+    // No existing config yet; this is expected on first write.
+    logger.debug(
+      "saveGitHubConfigToDaoRoot: starting fresh config (%s)",
+      error instanceof Error ? error.message : String(error),
+    );
   }
   configData.github = { ...githubConfig, enabled: true, token: "[REDACTED]" };
   await fs.writeFile(configPath, JSON.stringify(configData, null, 2), "utf-8");
