@@ -130,7 +130,38 @@ async function readJsonFile<T>(filePath: string): Promise<T> {
 }
 
 async function writeJsonFile(filePath: string, value: unknown): Promise<void> {
-  await fs.writeFile(filePath, formatJson(value), "utf-8");
+  await writeAtomic(filePath, formatJson(value));
+}
+
+/**
+ * Write `content` to `filePath` atomically: serialize to a sibling temp file,
+ * then `rename` it over the target. POSIX `rename(2)` is atomic, so a reader
+ * (or a crash at any instant) observes either the previous content or the new
+ * content — never a partial write. The temp file lives in the same directory
+ * to guarantee a same-filesystem rename.
+ */
+async function writeAtomic(filePath: string, content: string): Promise<void> {
+  const tmpPath = `${filePath}.tmp-${process.pid}-${randomToken()}`;
+  try {
+    await fs.writeFile(tmpPath, content, "utf-8");
+    await fs.rename(tmpPath, filePath);
+  } catch (error) {
+    await safeUnlink(tmpPath);
+    throw error;
+  }
+}
+
+function randomToken(): string {
+  // Short, collision-resistant suffix for concurrent writers within one PID.
+  return Math.random().toString(36).slice(2, 10);
+}
+
+async function safeUnlink(p: string): Promise<void> {
+  try {
+    await fs.unlink(p);
+  } catch {
+    // Ignore — file may not exist or may already be gone.
+  }
 }
 
 /**
@@ -162,7 +193,7 @@ function resetWriteCache(): void {
 async function writeJsonFileIfChanged(filePath: string, value: unknown): Promise<boolean> {
   const serialized = formatJson(value);
   if (writeCache.get(filePath) === serialized) return false;
-  await fs.writeFile(filePath, serialized, "utf-8");
+  await writeAtomic(filePath, serialized);
   writeCache.set(filePath, serialized);
   return true;
 }
