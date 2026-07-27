@@ -45,26 +45,33 @@ export function tallyVotes(proposal: Proposal, config: DAOConfig): TallyResult {
   const votes = proposal.votes || [];
   const totalAgents = proposal.agentOutputs?.length || votes.length;
 
-  const weightedFor = votes
-    .filter((v) => v.position === "for")
-    .reduce((sum, v) => sum + normalizeVoteWeight(v.weight), 0);
+  // Single pass over votes: accumulate weighted totals + voting-agent count.
+  let weightedFor = 0;
+  let weightedAgainst = 0;
+  let weightedAbstain = 0;
+  let totalObservedWeight = 0;
+  let votingAgents = 0;
 
-  const weightedAgainst = votes
-    .filter((v) => v.position === "against")
-    .reduce((sum, v) => sum + normalizeVoteWeight(v.weight), 0);
-
-  const weightedAbstain = votes
-    .filter((v) => v.position === "abstain")
-    .reduce((sum, v) => sum + normalizeVoteWeight(v.weight), 0);
+  for (const v of votes) {
+    const w = normalizeVoteWeight(v.weight);
+    totalObservedWeight += w;
+    if (v.position === "for") {
+      weightedFor += w;
+      votingAgents++;
+    } else if (v.position === "against") {
+      weightedAgainst += w;
+      votingAgents++;
+    } else {
+      weightedAbstain += w;
+    }
+  }
 
   const totalVotingWeight = weightedFor + weightedAgainst + weightedAbstain;
-  const votingAgents = votes.filter((v) => v.position !== "abstain").length;
 
-  // Quorum check: % of total agent weight that participated
+  // Quorum check: % of total agent weight that participated.
+  // Unobserved agents (totalAgents - votes.length) each contribute default weight 1.
   const totalPossibleWeight =
-    totalAgents > 0
-      ? votes.reduce((sum, v) => sum + normalizeVoteWeight(v.weight), 0) + (totalAgents - votes.length) * 1
-      : totalVotingWeight;
+    totalAgents > 0 ? totalObservedWeight + (totalAgents - votes.length) * 1 : totalVotingWeight;
 
   const quorumPercent = totalPossibleWeight > 0 ? Math.round((totalVotingWeight / totalPossibleWeight) * 100) : 0;
 

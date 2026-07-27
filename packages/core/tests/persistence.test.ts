@@ -7,6 +7,7 @@ import {
   addVote,
   createInitialState,
   createProposal,
+  createProposalsBatch,
   dispatchProposalEvent,
   getAgent,
   getAuditLog,
@@ -78,6 +79,27 @@ describe("persistence", () => {
 
     expect(getProposal(1)?.title).toBe("Feature A");
     expect(listProposals().length).toBe(2);
+  });
+
+  it("rejects an unknown proposal type instead of silently casting", async () => {
+    await expect(createProposal("Bad", "not-a-real-type", "d", "user")).rejects.toThrow(/Unknown proposal type/);
+    // State must be untouched: no proposal persisted, id counter unchanged.
+    expect(listProposals().length).toBe(0);
+    const next = await createProposal("Good", "product-feature", "d", "user");
+    expect(next.id).toBe(1);
+  });
+
+  it("createProposalsBatch validates all entries before mutating any id", async () => {
+    const before = getState().nextProposalId;
+    await expect(
+      createProposalsBatch([
+        { title: "OK", type: "product-feature", description: "d", proposedBy: "u" },
+        { title: "BAD", type: "unknown-type", description: "d", proposedBy: "u" },
+      ]),
+    ).rejects.toThrow(/Unknown proposal type/);
+    // Atomic: no partial persist, id counter untouched.
+    expect(getState().nextProposalId).toBe(before);
+    expect(listProposals().length).toBe(0);
   });
 
   it("adds votes", async () => {

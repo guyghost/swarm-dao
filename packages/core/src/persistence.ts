@@ -21,10 +21,11 @@ import type {
   ExecutionVerification,
   Proposal,
   ProposalOutcome,
+  ProposalType,
   StorageSettings,
   Vote,
 } from "./types/index.js";
-import { createInitialState } from "./types/index.js";
+import { createInitialState, PROPOSAL_TYPES } from "./types/index.js";
 import { redactSensitiveFields, SENSITIVE_KEYS } from "./utils/security.js";
 
 class CompatibilityFileRepository implements DaoStateRepositoryPort {
@@ -569,6 +570,18 @@ export function listAgents(): DAOAgent[] {
 
 // ── Proposal CRUD ────────────────────────────────────────────
 
+/**
+ * Validates that a proposal type string is a known ProposalType.
+ * Throws on unknown types instead of silently casting, so malformed input
+ * (from CLI, config, or batch import) fails fast rather than poisoning state.
+ */
+function assertProposalType(type: string): ProposalType {
+  if (!PROPOSAL_TYPES.includes(type as ProposalType)) {
+    throw new Error(`Unknown proposal type "${type}". Expected one of: ${PROPOSAL_TYPES.join(", ")}.`);
+  }
+  return type as ProposalType;
+}
+
 export async function createProposal(
   title: string,
   type: string,
@@ -577,10 +590,12 @@ export async function createProposal(
   context?: string,
 ): Promise<Proposal> {
   const s = getState();
+  // Validate before touching nextProposalId, so an invalid type doesn't burn an id.
+  const validatedType = assertProposalType(type);
   const proposal: Proposal = {
     id: s.nextProposalId++,
     title,
-    type: type as Proposal["type"],
+    type: validatedType,
     description,
     context,
     proposedBy,
@@ -604,12 +619,15 @@ export async function createProposalsBatch(
   }>,
 ): Promise<Proposal[]> {
   if (entries.length === 0) return [];
+  // Validate all types up front so a single bad entry doesn't leave state
+  // with nextProposalId already advanced for the preceding valid entries.
+  const validated = entries.map((entry) => ({ ...entry, type: assertProposalType(entry.type) }));
   const s = getState();
-  const proposals = entries.map((entry) => {
+  const proposals = validated.map((entry) => {
     const proposal: Proposal = {
       id: s.nextProposalId++,
       title: entry.title,
-      type: entry.type as Proposal["type"],
+      type: entry.type,
       description: entry.description,
       context: entry.context,
       proposedBy: entry.proposedBy,
