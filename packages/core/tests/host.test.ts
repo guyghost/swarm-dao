@@ -49,4 +49,46 @@ describe("utils/host.ts", () => {
     }
     await fs.rm(root, { recursive: true, force: true });
   });
+
+  it("rejects absolute paths when baseDir is set", async () => {
+    const root = path.join(tmpdir(), `swarm-host-${Date.now()}`);
+    await fs.mkdir(root, { recursive: true });
+    await expect(readFileContained("/etc/passwd", root)).rejects.toThrow("Path traversal denied");
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  it("rejects null bytes in paths", async () => {
+    const root = path.join(tmpdir(), `swarm-host-${Date.now()}`);
+    await fs.mkdir(root, { recursive: true });
+    await expect(readFileContained("safe\0.txt", root)).rejects.toThrow("Path traversal denied");
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  it("rejects symlink escapes outside the base directory", async () => {
+    const parent = path.join(tmpdir(), `swarm-host-${Date.now()}`);
+    const root = path.join(parent, "root");
+    const outside = path.join(parent, "outside");
+    await fs.mkdir(root, { recursive: true });
+    await fs.mkdir(outside, { recursive: true });
+    await fs.writeFile(path.join(outside, "secret.txt"), "leaked", "utf-8");
+    await fs.symlink(outside, path.join(root, "link-out"));
+
+    await expect(readFileContained("link-out/secret.txt", root)).rejects.toThrow("Path traversal denied");
+    await fs.rm(parent, { recursive: true, force: true });
+  });
+
+  it("rejects writes through symlink escapes when parent segments are missing", async () => {
+    const parent = path.join(tmpdir(), `swarm-host-${Date.now()}`);
+    const root = path.join(parent, "root");
+    const outside = path.join(parent, "outside");
+    await fs.mkdir(root, { recursive: true });
+    await fs.mkdir(outside, { recursive: true });
+    await fs.symlink(outside, path.join(root, "link-out"));
+
+    await expect(writeFileContained("link-out/nested/new.txt", "leaked", root)).rejects.toThrow(
+      "Path traversal denied",
+    );
+    await expect(fs.readFile(path.join(outside, "nested", "new.txt"), "utf-8")).rejects.toThrow();
+    await fs.rm(parent, { recursive: true, force: true });
+  });
 });

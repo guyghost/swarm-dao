@@ -321,6 +321,12 @@ opencode
 
 ### Workflow 5: GitHub Integration
 
+> **Note:** `dao_config_github`, `dao_github_create_branch`, and
+> `dao_github_open_pr` are exposed by the MCP tools (`@guyghost/swarm-dao-mcp`
+> and the Copilot/Claude/Codex adapters) and by the standalone CLI
+> (`swarm-dao github-config` / `github-branch` / `github-pr`). They are not
+> registered as tools on the Pi extension or the OpenCode plugin.
+
 ```
 # Configure
 > dao_config_github
@@ -411,9 +417,14 @@ ls ~/.config/opencode/plugins/swarm-dao/
 
 ### Agents do not respond
 
-Check the configured model:
+List the agents and their resolved model:
 ```
-> dao_config_show
+> dao_agents
+```
+
+Or check the dashboard, which prints the active quorum/approval/risk config:
+```
+> dao_dashboard
 ```
 
 ### TypeScript compilation error

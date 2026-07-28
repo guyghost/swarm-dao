@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "improvement-loop.graph.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "version",
+    "scope",
+    "proposalStateAuthority",
+    "evidenceRoot",
+    "owner",
+    "nodes",
+    "edges",
+    "requiredAnchors",
+    "anchorCommands",
+    "maxRetries"
+  ],
+  "properties": {
+    "$schema": { "const": "./improvement-loop.graph.schema.json" },
+    "id": { "const": "swarm-dao-improvement-loop" },
+    "version": { "const": 1 },
+    "scope": { "const": "self-improvement-cycle" },
+    "proposalStateAuthority": { "const": "none" },
+    "evidenceRoot": { "const": "evidence/improvement-cycles" },
+    "owner": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "authority"],
+      "properties": {
+        "id": { "const": "human-owner" },
+        "kind": { "const": "human" },
+        "authority": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "owns_target",
+              "approves_reference_change",
+              "rejects_reference_change",
+              "owns_frozen_set",
+              "authorizes_retry",
+              "cancels"
+            ]
+          }
+        }
+      }
+    },
+    "nodes": {
+      "type": "array",
+      "minItems": 6,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "kind", "authority", "emits"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "kind": { "enum": ["ai_worker", "deterministic"] },
+          "authority": { "enum": ["signal_only", "anchor"] },
+          "emits": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+        }
+      }
+    },
+    "edges": {
+      "type": "array",
+      "minItems": 10,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["from", "to", "type"],
+        "properties": {
+          "from": { "type": "string", "minLength": 1 },
+          "to": { "type": "string", "minLength": 1 },
+          "type": { "enum": ["feeds", "validates", "owns_target", "authorizes", "vetoes"] }
+        }
+      }
+    },
+    "requiredAnchors": {
+      "const": [
+        "counter-metric-paired",
+        "drift-audit",
+        "arbitration-policy",
+        "anchor-reality",
+        "frozen-set-intact",
+        "regression"
+      ]
+    },
+    "anchorCommands": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "counter-metric-paired",
+        "drift-audit",
+        "arbitration-policy",
+        "anchor-reality",
+        "frozen-set-intact",
+        "regression"
+      ],
+      "properties": {
+        "counter-metric-paired": { "const": "bun run improvement:validate" },
+        "drift-audit": { "const": "bun test packages/core/tests/improvement-loop.machine.test.ts" },
+        "arbitration-policy": { "const": "bun test packages/core/tests/improvement-loop.arbitration.test.ts" },
+        "anchor-reality": { "const": "bun run improvement:anchors" },
+        "frozen-set-intact": { "const": "bun test packages/core/tests/improvement-loop.frozen.test.ts" },
+        "regression": { "const": "bun run improvement:regression" }
+      }
+    },
+    "maxRetries": { "const": 2 }
+  }
+}

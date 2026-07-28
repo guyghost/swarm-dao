@@ -6,6 +6,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { logger } from "./observability/logging.js";
 import { recordVoteCast } from "./observability/metrics.js";
+import type { DaoStateRepositoryPort } from "./ports/repository.js";
 import type {
   AgentOutput,
   AuditEntry,
@@ -20,13 +21,26 @@ import type {
   ExecutionVerification,
   Proposal,
   ProposalOutcome,
+  ProposalType,
   StorageSettings,
   Vote,
 } from "./types/index.js";
-import { createInitialState } from "./types/index.js";
+import { createInitialState, PROPOSAL_TYPES } from "./types/index.js";
 import { redactSensitiveFields, SENSITIVE_KEYS } from "./utils/security.js";
 
-let state: DAOState | null = null;
+class CompatibilityFileRepository implements DaoStateRepositoryPort {
+  public constructor(private readonly state: DAOState) {}
+
+  public get(): DAOState {
+    return this.state;
+  }
+
+  public persist(): Promise<void> {
+    return persistState(this.state);
+  }
+}
+
+let activeRepository: DaoStateRepositoryPort | null = null;
 
 const STATE_FILE = "state.json";
 const DECISIONS_DIR = "decisions";
@@ -117,7 +131,38 @@ async function readJsonFile<T>(filePath: string): Promise<T> {
 }
 
 async function writeJsonFile(filePath: string, value: unknown): Promise<void> {
-  await fs.writeFile(filePath, formatJson(value), "utf-8");
+  await writeAtomic(filePath, formatJson(value));
+}
+
+/**
+ * Write `content` to `filePath` atomically: serialize to a sibling temp file,
+ * then `rename` it over the target. POSIX `rename(2)` is atomic, so a reader
+ * (or a crash at any instant) observes either the previous content or the new
+ * content — never a partial write. The temp file lives in the same directory
+ * to guarantee a same-filesystem rename.
+ */
+async function writeAtomic(filePath: string, content: string): Promise<void> {
+  const tmpPath = `${filePath}.tmp-${process.pid}-${randomToken()}`;
+  try {
+    await fs.writeFile(tmpPath, content, "utf-8");
+    await fs.rename(tmpPath, filePath);
+  } catch (error) {
+    await safeUnlink(tmpPath);
+    throw error;
+  }
+}
+
+function randomToken(): string {
+  // Short, collision-resistant suffix for concurrent writers within one PID.
+  return Math.random().toString(36).slice(2, 10);
+}
+
+async function safeUnlink(p: string): Promise<void> {
+  try {
+    await fs.unlink(p);
+  } catch {
+    // Ignore — file may not exist or may already be gone.
+  }
 }
 
 /**
@@ -149,7 +194,7 @@ function resetWriteCache(): void {
 async function writeJsonFileIfChanged(filePath: string, value: unknown): Promise<boolean> {
   const serialized = formatJson(value);
   if (writeCache.get(filePath) === serialized) return false;
-  await fs.writeFile(filePath, serialized, "utf-8");
+  await writeAtomic(filePath, serialized);
   writeCache.set(filePath, serialized);
   return true;
 }
@@ -286,24 +331,30 @@ export async function migrateFromLegacy(cwd: string, legacyDirectories: string[]
 // ── State Access ─────────────────────────────────────────────
 
 export function getState(): DAOState {
-  if (!state) {
+  if (!activeRepository) {
     throw new Error("DAO not initialized. Run dao_setup first.");
   }
-  return state;
+  return activeRepository.get();
 }
 
 export function setState(newState: DAOState | null): void {
-  state = newState;
+  activeRepository = newState ? new CompatibilityFileRepository(newState) : null;
   // The in-memory state identity changed (or was reset); the write cache no
   // longer reflects what is on disk, so force the next save to be a full write.
   resetWriteCache();
 }
 
+/** Select the repository instance used by compatibility persistence functions. */
+export function setRepository(repository: DaoStateRepositoryPort | null): void {
+  activeRepository = repository;
+  resetWriteCache();
+}
+
 export function getOrCreateState(cwd: string): DAOState {
-  if (!state) {
-    state = createInitialState(getDaoRoot(cwd));
+  if (!activeRepository) {
+    activeRepository = new CompatibilityFileRepository(createInitialState(getDaoRoot(cwd)));
   }
-  return state;
+  return activeRepository.get();
 }
 
 // ── Load / Save ──────────────────────────────────────────────
@@ -353,11 +404,11 @@ export async function loadState(cwd: string, options?: { legacyDirectories?: str
   }, 0);
   if (loaded.nextAuditId <= highestAuditId) loaded.nextAuditId = highestAuditId + 1;
 
-  state = loaded;
+  activeRepository = new CompatibilityFileRepository(loaded);
   // Disk is now the source of truth for the freshly loaded state; reset the
   // cache so the first subsequent save reflects the real on-disk content.
   resetWriteCache();
-  return state;
+  return activeRepository.get();
 }
 
 /**
@@ -403,7 +454,11 @@ async function importLegacyProposalSidecars(daoRoot: string, loaded: DAOState): 
 }
 
 export async function saveState(): Promise<void> {
-  if (!state) return;
+  if (!activeRepository) return;
+  await activeRepository.persist();
+}
+
+async function persistState(state: DAOState): Promise<void> {
   if (!state.daoRoot) return;
   if (!state.proposals) state.proposals = [];
   const daoRoot = state.daoRoot;
@@ -412,11 +467,16 @@ export async function saveState(): Promise<void> {
   await fs.mkdir(daoRoot, { recursive: true });
   await writeJsonFileIfChanged(statePath, state);
 
-  await saveDecisions();
+  await persistDecisions(state);
 }
 
 export async function saveDecisions(): Promise<void> {
-  if (!state?.daoRoot || !state.proposals) return;
+  if (!activeRepository) return;
+  await persistDecisions(activeRepository.get());
+}
+
+async function persistDecisions(state: DAOState): Promise<void> {
+  if (!state.daoRoot || !state.proposals) return;
   const decisionsDir = getDecisionsDir(state.daoRoot);
   await fs.mkdir(decisionsDir, { recursive: true });
 
@@ -510,6 +570,18 @@ export function listAgents(): DAOAgent[] {
 
 // ── Proposal CRUD ────────────────────────────────────────────
 
+/**
+ * Validates that a proposal type string is a known ProposalType.
+ * Throws on unknown types instead of silently casting, so malformed input
+ * (from CLI, config, or batch import) fails fast rather than poisoning state.
+ */
+function assertProposalType(type: string): ProposalType {
+  if (!PROPOSAL_TYPES.includes(type as ProposalType)) {
+    throw new Error(`Unknown proposal type "${type}". Expected one of: ${PROPOSAL_TYPES.join(", ")}.`);
+  }
+  return type as ProposalType;
+}
+
 export async function createProposal(
   title: string,
   type: string,
@@ -518,10 +590,12 @@ export async function createProposal(
   context?: string,
 ): Promise<Proposal> {
   const s = getState();
+  // Validate before touching nextProposalId, so an invalid type doesn't burn an id.
+  const validatedType = assertProposalType(type);
   const proposal: Proposal = {
     id: s.nextProposalId++,
     title,
-    type: type as Proposal["type"],
+    type: validatedType,
     description,
     context,
     proposedBy,
@@ -545,12 +619,15 @@ export async function createProposalsBatch(
   }>,
 ): Promise<Proposal[]> {
   if (entries.length === 0) return [];
+  // Validate all types up front so a single bad entry doesn't leave state
+  // with nextProposalId already advanced for the preceding valid entries.
+  const validated = entries.map((entry) => ({ ...entry, type: assertProposalType(entry.type) }));
   const s = getState();
-  const proposals = entries.map((entry) => {
+  const proposals = validated.map((entry) => {
     const proposal: Proposal = {
       id: s.nextProposalId++,
       title: entry.title,
-      type: entry.type as Proposal["type"],
+      type: entry.type,
       description: entry.description,
       context: entry.context,
       proposedBy: entry.proposedBy,

@@ -2,6 +2,7 @@
 // Swarm DAO Core — GitHub Integration
 // ============================================================
 
+import { logger } from "../observability/logging.js";
 import type { Proposal } from "../types/index.js";
 import { HttpRequestError, requestJson } from "./http.js";
 import { slugify } from "./utils.js";
@@ -147,7 +148,8 @@ export async function ghCreateIssue(
     );
     if (!data) return null;
     return { number: data.number, url: data.html_url };
-  } catch {
+  } catch (error) {
+    logger.warn("ghCreateIssue failed: %s", error instanceof Error ? error.message : String(error));
     return null;
   }
 }
@@ -165,7 +167,8 @@ export async function ghUpdateIssue(
       body: JSON.stringify(updates),
     });
     return true;
-  } catch {
+  } catch (error) {
+    logger.warn("ghUpdateIssue failed: %s", error instanceof Error ? error.message : String(error));
     return false;
   }
 }

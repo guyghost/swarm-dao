@@ -12,6 +12,12 @@ build/
 .dao/
 .opencode-dao/
 
+# Graph Engineering local evidence
+evidence/graph-runs/
+
+# Improvement Loop local evidence
+evidence/improvement-cycles/
+
 # IDE
 .vscode/
 .idea/

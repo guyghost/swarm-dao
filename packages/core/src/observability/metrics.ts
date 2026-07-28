@@ -15,78 +15,191 @@ function matchesLabels(a?: Record<string, string>, b?: Record<string, string>): 
   return Object.entries(b).every(([k, v]) => a[k] === v);
 }
 
+/**
+ * Maximum number of distinct label-sets retained per metric. Memory is bounded
+ * by this cap (× bucket count for histograms). When exceeded, new label-sets
+ * fold into the unlabeled bucket so the exact grand total is preserved; only
+ * the per-label breakdown beyond the cap becomes approximate. Equivalent to a
+ * Prometheus cardinality limit.
+ */
+const MAX_LABEL_SETS = 1024;
+/** Bounded recent-observation sample retained on the public `values` field. */
+const RECENT_SAMPLE_CAP = 128;
+/** Bounded reservoir used for percentile estimation on histograms. */
+const RESERVOIR_CAP = 256;
+
+function labelSignature(labels?: Record<string, string>): string {
+  if (!labels) return "";
+  const keys = Object.keys(labels);
+  if (keys.length === 0) return "";
+  keys.sort();
+  let sig = "";
+  for (const k of keys) sig += `${k}=${labels[k]}\u0001`;
+  return sig;
+}
+
+function pushRecentSample(arr: MetricValue[], mv: MetricValue): void {
+  if (arr.length >= RECENT_SAMPLE_CAP) arr.shift();
+  arr.push(mv);
+}
+
+function timestamp(): string {
+  return new Date().toISOString();
+}
+
 export interface Counter {
   name: string;
   description: string;
+  /** Bounded recent-observation sample for inspection (not authoritative). */
   values: MetricValue[];
   increment(labels?: Record<string, string>): void;
   getCount(labels?: Record<string, string>): number;
+  reset(): void;
 }
 
 export interface Gauge {
   name: string;
   description: string;
+  /** Bounded recent-observation sample for inspection (not authoritative). */
   values: MetricValue[];
   set(value: number, labels?: Record<string, string>): void;
   getValue(labels?: Record<string, string>): number;
+  reset(): void;
 }
 
 export interface Histogram {
   name: string;
   description: string;
   buckets: number[];
+  /** Bounded recent-observation sample for inspection (not authoritative). */
   values: MetricValue[];
   observe(value: number, labels?: Record<string, string>): void;
   getPercentile(p: number, labels?: Record<string, string>): number;
   getCount(labels?: Record<string, string>): number;
+  getSum(labels?: Record<string, string>): number;
   getBucketCounts(labels?: Record<string, string>): Record<string, number>;
+  reset(): void;
+}
+
+interface CounterAggregate {
+  labels?: Record<string, string>;
+  count: number;
 }
 
 class CounterImpl implements Counter {
   values: MetricValue[] = [];
+  private readonly aggregates = new Map<string, CounterAggregate>();
+
   constructor(
     public name: string,
     public description: string,
   ) {}
 
   increment(labels?: Record<string, string>): void {
-    this.values.push({
-      name: this.name,
-      value: 1,
-      timestamp: new Date().toISOString(),
-      labels,
-    });
+    this.getOrCreate(labels).count++;
+    pushRecentSample(this.values, { name: this.name, value: 1, timestamp: timestamp(), labels });
   }
 
   getCount(labels?: Record<string, string>): number {
-    return this.values.filter((v) => matchesLabels(v.labels, labels)).length;
+    let total = 0;
+    for (const agg of this.aggregates.values()) {
+      if (matchesLabels(agg.labels, labels)) total += agg.count;
+    }
+    return total;
   }
+
+  reset(): void {
+    this.values = [];
+    this.aggregates.clear();
+  }
+
+  private getOrCreate(labels?: Record<string, string>): CounterAggregate {
+    const sig = labelSignature(labels);
+    const existing = this.aggregates.get(sig);
+    if (existing) return existing;
+    if (this.aggregates.size >= MAX_LABEL_SETS) {
+      // Fold overflow into the unlabeled bucket so the grand total stays exact.
+      const overflow = this.aggregates.get("");
+      if (overflow) return overflow;
+      const created: CounterAggregate = { count: 0 };
+      this.aggregates.set("", created);
+      return created;
+    }
+    const created: CounterAggregate = { labels, count: 0 };
+    this.aggregates.set(sig, created);
+    return created;
+  }
+}
+
+interface GaugeAggregate {
+  labels?: Record<string, string>;
+  value: number;
+  seq: number;
 }
 
 class GaugeImpl implements Gauge {
   values: MetricValue[] = [];
+  private readonly aggregates = new Map<string, GaugeAggregate>();
+  private seq = 0;
+
   constructor(
     public name: string,
     public description: string,
   ) {}
 
   set(value: number, labels?: Record<string, string>): void {
-    this.values.push({
-      name: this.name,
-      value,
-      timestamp: new Date().toISOString(),
-      labels,
-    });
+    const agg = this.getOrCreate(labels);
+    agg.value = value;
+    agg.seq = ++this.seq;
+    pushRecentSample(this.values, { name: this.name, value, timestamp: timestamp(), labels });
   }
 
   getValue(labels?: Record<string, string>): number {
-    const matching = this.values.filter((v) => matchesLabels(v.labels, labels));
-    return matching.length > 0 ? (matching[matching.length - 1]?.value ?? 0) : 0;
+    let best: GaugeAggregate | undefined;
+    for (const agg of this.aggregates.values()) {
+      if (!matchesLabels(agg.labels, labels)) continue;
+      if (!best || agg.seq > best.seq) best = agg;
+    }
+    return best?.value ?? 0;
   }
+
+  reset(): void {
+    this.values = [];
+    this.aggregates.clear();
+    this.seq = 0;
+  }
+
+  private getOrCreate(labels?: Record<string, string>): GaugeAggregate {
+    const sig = labelSignature(labels);
+    const existing = this.aggregates.get(sig);
+    if (existing) return existing;
+    if (this.aggregates.size >= MAX_LABEL_SETS) {
+      const overflow = this.aggregates.get("");
+      if (overflow) return overflow;
+      const created: GaugeAggregate = { value: 0, seq: 0 };
+      this.aggregates.set("", created);
+      return created;
+    }
+    const created: GaugeAggregate = { labels, value: 0, seq: 0 };
+    this.aggregates.set(sig, created);
+    return created;
+  }
+}
+
+interface HistogramAggregate {
+  labels?: Record<string, string>;
+  count: number;
+  sum: number;
+  /** Cumulative counts per bucket boundary; last entry is `+Inf`. */
+  bucketCounts: number[];
+  /** Bounded reservoir of recent observed values for percentile estimation. */
+  samples: number[];
 }
 
 class HistogramImpl implements Histogram {
   values: MetricValue[] = [];
+  private readonly aggregates = new Map<string, HistogramAggregate>();
+
   constructor(
     public name: string,
     public description: string,
@@ -94,36 +207,85 @@ class HistogramImpl implements Histogram {
   ) {}
 
   observe(value: number, labels?: Record<string, string>): void {
-    this.values.push({
-      name: this.name,
-      value,
-      timestamp: new Date().toISOString(),
-      labels,
-    });
+    const agg = this.getOrCreate(labels);
+    agg.count++;
+    agg.sum += value;
+    for (let i = 0; i < this.buckets.length; i++) {
+      if (value <= (this.buckets[i] ?? Number.POSITIVE_INFINITY)) {
+        agg.bucketCounts[i] = (agg.bucketCounts[i] ?? 0) + 1;
+      }
+    }
+    const infIdx = this.buckets.length;
+    agg.bucketCounts[infIdx] = (agg.bucketCounts[infIdx] ?? 0) + 1; // +Inf
+    if (agg.samples.length >= RESERVOIR_CAP) agg.samples.shift();
+    agg.samples.push(value);
+    pushRecentSample(this.values, { name: this.name, value, timestamp: timestamp(), labels });
   }
 
   getCount(labels?: Record<string, string>): number {
-    return this.values.filter((v) => matchesLabels(v.labels, labels)).length;
+    let total = 0;
+    for (const agg of this.aggregates.values()) {
+      if (matchesLabels(agg.labels, labels)) total += agg.count;
+    }
+    return total;
+  }
+
+  getSum(labels?: Record<string, string>): number {
+    let total = 0;
+    for (const agg of this.aggregates.values()) {
+      if (matchesLabels(agg.labels, labels)) total += agg.sum;
+    }
+    return total;
   }
 
   getPercentile(p: number, labels?: Record<string, string>): number {
-    const matching = this.values
-      .filter((v) => matchesLabels(v.labels, labels))
-      .map((v) => v.value)
-      .sort((a, b) => a - b);
-    if (matching.length === 0) return 0;
-    const index = Math.max(0, Math.ceil((p / 100) * matching.length) - 1);
-    return matching[index] ?? 0;
+    const samples: number[] = [];
+    for (const agg of this.aggregates.values()) {
+      if (matchesLabels(agg.labels, labels)) {
+        for (const s of agg.samples) samples.push(s);
+      }
+    }
+    if (samples.length === 0) return 0;
+    samples.sort((a, b) => a - b);
+    const index = Math.max(0, Math.ceil((p / 100) * samples.length) - 1);
+    return samples[index] ?? 0;
   }
 
   getBucketCounts(labels?: Record<string, string>): Record<string, number> {
-    const matching = this.values.filter((v) => matchesLabels(v.labels, labels)).map((v) => v.value);
     const counts: Record<string, number> = {};
-    for (const bucket of this.buckets) {
-      counts[`le_${bucket}`] = matching.filter((v) => v <= bucket).length;
+    for (let i = 0; i < this.buckets.length; i++) counts[`le_${this.buckets[i]}`] = 0;
+    counts["+Inf"] = 0;
+    for (const agg of this.aggregates.values()) {
+      if (!matchesLabels(agg.labels, labels)) continue;
+      for (let i = 0; i < this.buckets.length; i++) {
+        const key = `le_${this.buckets[i]}`;
+        counts[key] = (counts[key] ?? 0) + (agg.bucketCounts[i] ?? 0);
+      }
+      counts["+Inf"] = (counts["+Inf"] ?? 0) + (agg.bucketCounts[this.buckets.length] ?? 0);
     }
-    counts["+Inf"] = matching.length;
     return counts;
+  }
+
+  reset(): void {
+    this.values = [];
+    this.aggregates.clear();
+  }
+
+  private getOrCreate(labels?: Record<string, string>): HistogramAggregate {
+    const sig = labelSignature(labels);
+    const existing = this.aggregates.get(sig);
+    if (existing) return existing;
+    const bucketCounts = new Array<number>(this.buckets.length + 1).fill(0);
+    if (this.aggregates.size >= MAX_LABEL_SETS) {
+      const overflow = this.aggregates.get("");
+      if (overflow) return overflow;
+      const created: HistogramAggregate = { count: 0, sum: 0, bucketCounts, samples: [] };
+      this.aggregates.set("", created);
+      return created;
+    }
+    const created: HistogramAggregate = { labels, count: 0, sum: 0, bucketCounts, samples: [] };
+    this.aggregates.set(sig, created);
+    return created;
   }
 }
 
@@ -172,15 +334,9 @@ export function getAllMetrics(): { counters: Counter[]; gauges: Gauge[]; histogr
 }
 
 export function resetMetrics(): void {
-  for (const counter of counters.values()) {
-    counter.values = [];
-  }
-  for (const gauge of gauges.values()) {
-    gauge.values = [];
-  }
-  for (const histogram of histograms.values()) {
-    histogram.values = [];
-  }
+  for (const counter of counters.values()) counter.reset();
+  for (const gauge of gauges.values()) gauge.reset();
+  for (const histogram of histograms.values()) histogram.reset();
 }
 
 // ── DAO Metrics ──────────────────────────────────────────────
@@ -284,7 +440,7 @@ export function formatMetricsPrometheus(): string {
       output += `${histogram.name}_bucket{le="${bucket}"} ${count}\n`;
     }
     output += `${histogram.name}_count ${histogram.getCount()}\n`;
-    output += `${histogram.name}_sum ${histogram.values.reduce((s, v) => s + v.value, 0)}\n\n`;
+    output += `${histogram.name}_sum ${histogram.getSum()}\n\n`;
   }
 
   return output;

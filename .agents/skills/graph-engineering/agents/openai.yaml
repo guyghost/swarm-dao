@@ -1,0 +1,4 @@
+interface:
+  display_name: "Graph Engineering"
+  short_description: "Gouverner les changements Swarm DAO par un graphe"
+  default_prompt: "Use $graph-engineering to model, review, implement, and verify this Swarm DAO change through deterministic graph gates."

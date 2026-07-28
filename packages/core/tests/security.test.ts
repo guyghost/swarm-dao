@@ -47,6 +47,36 @@ describe("security", () => {
     expect(redacted.AWS_SECRET_ACCESS_KEY).toBe("[REDACTED]");
   });
 
+  it("redacts extended secret naming conventions (bearer, jwt, credential, passphrase)", () => {
+    const config = {
+      authorizationBearer: "Bearer xyz",
+      jwtToken: "ey...",
+      awsCredentials: "AKIA...",
+      dbPassphrase: "long-passphrase",
+      oauthAccessToken: "tok-1",
+    };
+
+    const redacted = redactSensitiveFields(config);
+    expect(redacted.authorizationBearer).toBe("[REDACTED]");
+    expect(redacted.jwtToken).toBe("[REDACTED]");
+    expect(redacted.awsCredentials).toBe("[REDACTED]");
+    expect(redacted.dbPassphrase).toBe("[REDACTED]");
+    expect(redacted.oauthAccessToken).toBe("[REDACTED]");
+  });
+
+  it("does not over-redact benign author/authority fields", () => {
+    const config = {
+      author: "jane",
+      authority: "admin",
+      sessionTitle: "kickoff",
+    };
+
+    const redacted = redactSensitiveFields(config);
+    expect(redacted.author).toBe("jane");
+    expect(redacted.authority).toBe("admin");
+    expect(redacted.sessionTitle).toBe("kickoff");
+  });
+
   it("saveConfig redacts tokens in the file", async () => {
     const config: ProjectConfig = {
       mode: "opt-in",

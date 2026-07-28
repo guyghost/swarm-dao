@@ -1,0 +1,87 @@
+{
+  "$schema": "./graph-engineering.graph.schema.json",
+  "id": "swarm-dao-graph-engineering-pilot",
+  "version": 1,
+  "scope": "repository-change-control",
+  "proposalStateAuthority": "none",
+  "evidenceRoot": "evidence/graph-runs",
+  "owner": {
+    "id": "human-owner",
+    "kind": "human",
+    "authority": [
+      "owns_target",
+      "approves_model_hash",
+      "rejects_model",
+      "authorizes_retry",
+      "cancels"
+    ]
+  },
+  "nodes": [
+    {
+      "id": "modeler",
+      "kind": "ai_worker",
+      "authority": "signal_only",
+      "emits": ["MODEL_DRAFTED"]
+    },
+    {
+      "id": "model-contract-validator",
+      "kind": "deterministic",
+      "authority": "anchor",
+      "emits": ["MODEL_CONTRACT_VALID", "MODEL_CONTRACT_INVALID"]
+    },
+    {
+      "id": "implementer",
+      "kind": "ai_worker",
+      "authority": "signal_only",
+      "emits": ["IMPLEMENTATION_READY", "IMPLEMENTATION_FAILED"]
+    },
+    {
+      "id": "runtime-verifier",
+      "kind": "deterministic",
+      "authority": "anchor",
+      "emits": ["ANCHOR_RECORDED"]
+    },
+    {
+      "id": "architecture-watcher",
+      "kind": "deterministic",
+      "authority": "veto",
+      "emits": ["ANCHOR_RECORDED"]
+    },
+    {
+      "id": "regression-watcher",
+      "kind": "deterministic",
+      "authority": "veto",
+      "emits": ["ANCHOR_RECORDED"]
+    }
+  ],
+  "edges": [
+    { "from": "modeler", "to": "model-contract-validator", "type": "feeds" },
+    { "from": "model-contract-validator", "to": "state-machine", "type": "validates" },
+    { "from": "human-owner", "to": "state-machine", "type": "owns_target" },
+    { "from": "state-machine", "to": "implementer", "type": "authorizes" },
+    { "from": "implementer", "to": "runtime-verifier", "type": "feeds" },
+    { "from": "architecture-watcher", "to": "implementer", "type": "watches" },
+    { "from": "regression-watcher", "to": "implementer", "type": "watches" },
+    { "from": "runtime-verifier", "to": "state-machine", "type": "validates" },
+    { "from": "architecture-watcher", "to": "state-machine", "type": "vetoes" },
+    { "from": "regression-watcher", "to": "state-machine", "type": "vetoes" }
+  ],
+  "requiredAnchors": [
+    "model-contract",
+    "graph-tests",
+    "architecture-contract",
+    "repository-ci",
+    "runtime-scenario",
+    "regression"
+  ],
+  "anchorCommands": {
+    "model-contract": "bun run graph:validate",
+    "graph-tests": "bun test packages/core/tests/graph-engineering.machine.test.ts tools/graph-engineering/tests",
+    "architecture-contract": "bun test packages/core/tests/architecture.contract.test.ts packages/core/tests/application.architecture.test.ts",
+    "repository-ci": "bun run ci",
+    "runtime-scenario": "bun run graph:demo",
+    "regression": "bun run graph:regression"
+  },
+  "maxRetries": 2
+}
+

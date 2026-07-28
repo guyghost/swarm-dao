@@ -2,7 +2,9 @@
 // Swarm DAO Core — Round Table (Agents suggest proposals)
 // ============================================================
 
-import type { DAOAgent, HostAdapter, ProposalType } from "../types/index.js";
+import type { ClockPort } from "../ports/clock.js";
+import type { AgentWorkerPort } from "../ports/host.js";
+import type { DAOAgent, ProposalType } from "../types/index.js";
 import { PROPOSAL_TYPE, PROPOSAL_TYPES } from "../types/index.js";
 import { type ModelResolutionContext, resolveAgentModel } from "./model.js";
 
@@ -34,10 +36,11 @@ Output format:
 Be specific. Reference actual files, patterns, or problems if you can.`;
 
 export async function runRoundTable(
-  adapter: HostAdapter,
+  adapter: AgentWorkerPort,
   agents: DAOAgent[],
   maxConcurrent: number,
   modelContext: ModelResolutionContext,
+  clock: ClockPort = { now: () => new Date().toISOString() },
 ): Promise<RoundTableSuggestion[]> {
   const suggestions: RoundTableSuggestion[] = [];
 
@@ -58,7 +61,7 @@ export async function runRoundTable(
             status: "open",
             votes: [],
             agentOutputs: [],
-            createdAt: new Date().toISOString(),
+            createdAt: clock.now(),
           },
           systemPrompt: `${agent.systemPrompt}\n\n${SUGGESTION_PROMPT}`,
           model: resolveAgentModel(agent, modelContext),

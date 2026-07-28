@@ -3,21 +3,26 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { Proposal } from "@guyghost/swarm-dao-core";
 import {
+  addAgent,
   addVote,
   createInitialState,
   createProposal,
+  createProposalsBatch,
   dispatchProposalEvent,
+  getAgent,
   getAuditLog,
   getDaoRoot,
   getProposal,
   getState,
   getStorageSettings,
   initStorage,
+  listAgents,
   listProposals,
   loadState,
   migrateFromLegacy,
   padId,
   recordAudit,
+  removeAgent,
   saveState,
   setState,
   updateStorageSettings,
@@ -76,6 +81,27 @@ describe("persistence", () => {
     expect(listProposals().length).toBe(2);
   });
 
+  it("rejects an unknown proposal type instead of silently casting", async () => {
+    await expect(createProposal("Bad", "not-a-real-type", "d", "user")).rejects.toThrow(/Unknown proposal type/);
+    // State must be untouched: no proposal persisted, id counter unchanged.
+    expect(listProposals().length).toBe(0);
+    const next = await createProposal("Good", "product-feature", "d", "user");
+    expect(next.id).toBe(1);
+  });
+
+  it("createProposalsBatch validates all entries before mutating any id", async () => {
+    const before = getState().nextProposalId;
+    await expect(
+      createProposalsBatch([
+        { title: "OK", type: "product-feature", description: "d", proposedBy: "u" },
+        { title: "BAD", type: "unknown-type", description: "d", proposedBy: "u" },
+      ]),
+    ).rejects.toThrow(/Unknown proposal type/);
+    // Atomic: no partial persist, id counter untouched.
+    expect(getState().nextProposalId).toBe(before);
+    expect(listProposals().length).toBe(0);
+  });
+
   it("adds votes", async () => {
     const p = await createProposal("Vote test", "product-feature", "Test", "user");
     await addVote(p.id, { agentId: "a", agentName: "A", position: "for", reasoning: "Yes", weight: 3 });
@@ -105,6 +131,35 @@ describe("persistence", () => {
 
   it("returns dao root path", () => {
     expect(getDaoRoot("/project")).toBe("/project/.dao");
+  });
+
+  it("manages agents through add, get, list, and remove", async () => {
+    const cwd = `/tmp/dao-agent-crud-test-${Date.now()}`;
+
+    try {
+      await initStorage(cwd);
+      const state = createInitialState(cwd);
+      state.initialized = true;
+      setState(state);
+
+      const agent = {
+        id: "custom-agent",
+        name: "Custom Agent",
+        role: "testing",
+        description: "A test agent",
+        weight: 2,
+        systemPrompt: "test",
+      };
+      await addAgent(agent);
+      expect(getAgent("custom-agent")).toEqual(agent);
+      expect(listAgents().some((a) => a.id === "custom-agent")).toBe(true);
+      expect(await removeAgent("custom-agent")).toBe(true);
+      expect(getAgent("custom-agent")).toBeUndefined();
+      expect(await removeAgent("missing-agent")).toBe(false);
+    } finally {
+      setState(null);
+      await fs.rm(cwd, { recursive: true, force: true }).catch(() => {});
+    }
   });
 
   it("loadState repairs corrupted state.json missing proposals, agents, and auditLog", async () => {
@@ -252,6 +307,91 @@ describe("persistence", () => {
   });
 
   /**
+   * Atomic-write guard: a successful save must not leave transient temp files
+   * on disk. writeAtomic() writes to `*.tmp-<pid>-<token>` then renames; the
+   * temp file must never survive a completed write.
+   */
+  it("saveState leaves no .tmp residue after a successful write", async () => {
+    const cwd = `/tmp/dao-atomic-residue-test-${Date.now()}`;
+    const daoRoot = getDaoRoot(cwd);
+
+    try {
+      await initStorage(cwd);
+      const state = createInitialState(cwd);
+      state.initialized = true;
+      state.daoRoot = daoRoot;
+      setState(state);
+
+      await saveState();
+
+      const entries = await fs.readdir(daoRoot);
+      const tmpLeftovers = entries.filter((name) => name.includes(".tmp-"));
+      expect(tmpLeftovers).toEqual([]);
+    } finally {
+      setState(null);
+      await fs.rm(cwd, { recursive: true, force: true }).catch(() => {});
+    }
+  });
+
+  /**
+   * Atomic-write guard: if the final rename fails (e.g. transient FS error),
+   * the target file must remain byte-identical to its prior content and the
+   * temp file must be cleaned up. No partial write may ever be observable.
+   */
+  it("saveState keeps the target intact and cleans tmp when rename fails", async () => {
+    const cwd = `/tmp/dao-atomic-failure-test-${Date.now()}`;
+    const daoRoot = getDaoRoot(cwd);
+    const statePath = path.join(daoRoot, "state.json");
+
+    try {
+      await initStorage(cwd);
+      const state = createInitialState(cwd);
+      state.initialized = true;
+      state.daoRoot = daoRoot;
+      setState(state);
+
+      // Baseline: a clean save lands on disk.
+      await saveState();
+      const baseline = await fs.readFile(statePath, "utf-8");
+
+      // Mutate in-memory state (bypass recordAudit, which would save on its own)
+      // so the next saveState() has new bytes to write and bypasses the cache.
+      const s = getState();
+      s.auditLog.push({
+        id: s.nextAuditId++,
+        timestamp: new Date().toISOString(),
+        proposalId: 0,
+        layer: "control",
+        action: "force-change",
+        actor: "test",
+        details: "{}",
+      });
+
+      // Force the atomic rename step to fail for every file written this round.
+      const renameSpy = spyOn(fs, "rename").mockRejectedValue(
+        Object.assign(new Error("simulated rename failure"), { code: "EIO" }),
+      );
+
+      // saveState should reject because the write cannot be committed.
+      await expect(saveState()).rejects.toThrow("simulated rename failure");
+
+      // The on-disk state.json is untouched (no partial / no new content).
+      const after = await fs.readFile(statePath, "utf-8");
+      expect(after).toBe(baseline);
+
+      // No temp file survives the failed write.
+      const entries = await fs.readdir(daoRoot);
+      const tmpLeftovers = entries.filter((name) => name.includes(".tmp-"));
+      expect(tmpLeftovers).toEqual([]);
+
+      renameSpy.mockRestore();
+    } finally {
+      setState(null);
+      await fs.rm(cwd, { recursive: true, force: true }).catch(() => {});
+    }
+  });
+
+  /**
    * Optimization guard: saveState() must not rewrite proposal sidecars or
    * decision files whose serialized content has not changed since the last save.
    *
@@ -304,14 +444,8 @@ describe("persistence", () => {
    * OpenSpec Scenario: getStorageSettings reads config.json and returns StorageSettings
    *
    * GIVEN a DAO root with a .dao/config.json containing valid StorageSettings
-   * WHEN calling getStorageSettings(daoRoot) synchronously
-   * THEN the returned value should be a plain StorageSettings object, not a Promise
-   *   AND mode should equal "github" (before fix, it is undefined because the return
-   *   is a Promise cast as StorageSettings)
-   *
-   * NOTE: After the fix, getStorageSettings becomes async. This test should be
-   * updated to await the result. For now, it asserts the bug: sync access yields
-   * undefined because the function silently returns a Promise.
+   * WHEN calling getStorageSettings(daoRoot)
+   * THEN the returned value should be a plain StorageSettings object with persisted fields
    */
   it("getStorageSettings returns real StorageSettings, not a Promise cast", async () => {
     const cwd = `/tmp/dao-storage-settings-test-${Date.now()}`;

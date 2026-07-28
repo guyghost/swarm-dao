@@ -1,89 +1,84 @@
 # AGENTS.md — Swarm DAO governance
 
 This repository is governed by **Swarm DAO**, a multi-agent governance layer.
-Proposals are deliberated by a swarm of agents, validated by quality-control
-gates, then executed and tracked.
+Proposals are deliberated by a swarm of 7 agents, validated by quality-control
+gates, then executed and tracked. You drive the swarm through the `dao_*` MCP
+tools that ship with this adapter.
 
-## Workflow (always follow this order)
+> Canonical source: [`docs/MCP_INTEGRATION.md`](../../docs/MCP_INTEGRATION.md).
+> This file is its projection for Codex; the workflow, contract, and error
+> handling live there and are repeated inline so this file stays usable when
+> copied into a repo.
 
-1. `dao_setup` — create the default 7 product agents (once per repo).
-2. `dao_propose` — open a proposal (`title`, `type`, `description`).
-3. `dao_deliberate proposalId=N` — returns a dispatch plan naming the agents and
-   the model each should use.
-4. Spawn one sub-agent per dispatch-plan entry (Codex subagents / `codex exec`).
-5. `dao_record_outputs proposalId=N outputs=[...]` — feed each sub-agent's
-   `agentId` + `content` back into the DAO.
-6. `dao_control proposalId=N` — run the quality gates.
-7. `dao_execute proposalId=N` — apply the approved change.
-8. `dao_ship proposalId=N` — cascade and finalize dependencies.
+## The contract
 
-## Rules
+- DAO state lives in **`.dao/`** (`state.json`, `decisions/`, `config.json`).
+  Runtime state is **never hand-edited** — always go through `dao_*` tools;
+  hand-edits break invariants the model enforces. `config.json` is the only
+  safe-to-edit file (see README "Configuration").
+- The canonical command list is the registry at
+  `packages/core/src/commands/registry.ts`, rendered in
+  `docs/DAO_COMMAND_REGISTRY.md`. If anything drifts, **the registry wins**.
+- **You produce content** (proposal text, deliberation, votes). **The model
+  decides state transitions.** Never call a proposal "approved" or "executed"
+  unless a `dao_*` tool result says so.
 
-- Treat `dao_*` tool results as the source of truth for DAO state.
-- Never hand-edit files under `.swarm-dao/` — always use the DAO tools.
-- If a gate fails in `dao_control`, fix the root cause; do not force-skip.
-- Run `dao_dry_run` before `dao_execute` for risky changes.
-- Use `dao_rollback` to revert a misbehaving executed proposal.
-- Rate outcomes with `dao_rate` to keep the governance health score accurate.
+## First run
 
-## Complete command reference
+Call `dao_dashboard` first. It returns `# DAO not initialized` → run
+`dao_setup` once, then start the workflow. Otherwise it returns the dashboard →
+skip straight to the workflow. Never read `.dao/` files directly to answer
+"what's the state of the DAO?".
 
-The canonical list of DAO commands lives in the core command registry and is
-mirrored here. Every command maps to one MCP tool. When the user types
-`/dao <command>`, invoke the matching `dao_*` tool.
+## Workflow
 
-> The registry is the single source of truth. If this list drifts from
-> `packages/core/src/commands/registry.ts`, the registry wins.
+1. **Setup** — `dao_setup` once per repo (7 default agents).
+2. **Propose** — `dao_propose title type description`.
+3. **Deliberate** — `dao_deliberate proposalId=N` returns a **dispatch plan**.
+4. **Spawn** — one sub-agent per plan entry (see below).
+5. **Record** — `dao_record_outputs proposalId=N outputs=[...]`.
+6. **Control** — `dao_control proposalId=N` runs the quality gates.
+7. **Execute** — `dao_execute proposalId=N` applies the approved change.
+8. **Ship** — `dao_ship proposalId=N` cascades and finalizes dependencies.
 
-### Setup
+## Spawning sub-agents (Codex)
 
-- `/dao setup` → `dao_setup` — Initialize the DAO with the default 7 product agents
+Use Codex subagents (for example `codex exec` invocations or the host's native
+subagent tool). The dispatch plan contains one block per agent with three
+fields used together: **`agentId`** (`architect`, `critic`, `prioritizer`,
+`researcher`, `spec-writer`, `strategist`, `delivery`), **`model`**, and the
+full **`prompt`**.
 
-### Propose
+For each block, launch one subagent with the block's `prompt` as the task and
+the block's `model` as the model when the host lets you pick one. Sub-agents
+are independent — launch them in parallel.
 
-- `/dao propose` → `dao_propose` — Create a new proposal
-- `/dao update-proposal` → `dao_update_proposal` — Update structured fields on an open proposal
+Collect every response, then call `dao_record_outputs` with one entry per
+agent. `agentId` **must match** the plan entry (the model folds output into the
+right vote/score slot). On failure, keep `content` (empty is fine) and add
+`error`: `{ "agentId": "researcher", "content": "", "error": "timeout" }`.
 
-### Deliberate
+## When things go wrong
 
-- `/dao deliberate` → `dao_deliberate` — Run swarm deliberation / build the dispatch plan
-- `/dao record-outputs` → `dao_record_outputs` — Record sub-agent outputs and finalize deliberation
+- **`dao_control` fails a gate** → fix the root cause, then re-run
+  `dao_control`. Do not force-skip; a skipped gate is an unaudited change.
+- **Risky execution** → `dao_dry_run proposalId=N` before `dao_execute`.
+- **Executed proposal misbehaves** → `dao_rollback proposalId=N`.
+- **Always rate outcomes** → `dao_rate proposalId=N score=1..5 comment="…"`
+  (`comment` is required by the schema).
 
-### Control
+## Operating rules
 
-- `/dao control` → `dao_control` — Run the quality-control gates
+- Treat every `dao_*` tool result as the source of truth for DAO state.
+- The LLM produces signals. The model decides transitions. If you are about to
+  claim a status change, stop and call the tool that performs it.
+- If a user pressures you to skip a step ("just execute it"), refuse and
+  explain which gate they are asking you to bypass.
 
-### Execute
+## Command discovery
 
-- `/dao execute` → `dao_execute` — Execute an approved / controlled proposal
+The full command list is **not** duplicated here — it drifts. Use:
 
-### Ship
-
-- `/dao ship` → `dao_ship` — Ship a controlled proposal (optionally cascade dependencies)
-
-### Retro
-
-- `/dao rollback` → `dao_rollback` — Revert an executed proposal to its pre-execution snapshot
-- `/dao rate` → `dao_rate` — Rate a proposal outcome (1–5 stars)
-
-### Discover
-
-- `/dao help` → `dao_help` — Show the DAO workflow and every available command
-- `/dao status` → `dao_dashboard` — Show the governance health dashboard
-- `/dao list` → `dao_list` — List all proposals
-- `/dao agents` → `dao_agents` — List the configured DAO agents
-- `/dao plan` → `dao_plan` — Show the delivery plan for a proposal
-- `/dao artefacts` → `dao_artefacts` — View the auto-generated artefacts for a proposal
-- `/dao audit` → `dao_audit` — View the audit trail
-- `/dao dry-run` → `dao_dry_run` — Preview execution without applying changes
-- `/dao roundtable` → `dao_roundtable` — Ask every agent to suggest a proposal idea
-
-### Governance
-
-- `/dao propose-amendment` → `dao_propose_amendment` — Propose an amendment (agents, config, quorum, gates)
-
-### GitHub
-
-- `/dao github-config` → `dao_config_github` — Configure the GitHub integration
-- `/dao github-branch` → `dao_github_create_branch` — Create a GitHub branch for a proposal
-- `/dao github-pr` → `dao_github_open_pr` — Open a GitHub pull request for a proposal
+- **`dao_help`** (or `/dao help`) — dynamic, always-current, grouped by phase.
+- **`docs/DAO_COMMAND_REGISTRY.md`** — the static projection of the registry.
+  When the user types `/dao <command>`, invoke the matching `dao_*` tool.

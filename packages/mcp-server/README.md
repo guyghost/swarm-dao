@@ -4,6 +4,10 @@ Swarm DAO governance as an **MCP (Model Context Protocol)** stdio server.
 Exposes the full Swarm DAO toolset — propose, deliberate, control, execute,
 ship, rollback, audit — as MCP tools that any MCP-compatible host can call.
 
+> **Integrating a host?** Read [`docs/MCP_INTEGRATION.md`](../../docs/MCP_INTEGRATION.md)
+> — the canonical workflow, spawn patterns, and operating rules shared by all
+> adapters (Copilot, Claude Code, Codex, and this server).
+
 ## Install
 
 ```bash

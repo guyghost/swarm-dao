@@ -1,0 +1,89 @@
+{
+  "$schema": "./improvement-loop.graph.schema.json",
+  "id": "swarm-dao-improvement-loop",
+  "version": 1,
+  "scope": "self-improvement-cycle",
+  "proposalStateAuthority": "none",
+  "evidenceRoot": "evidence/improvement-cycles",
+  "owner": {
+    "id": "human-owner",
+    "kind": "human",
+    "authority": [
+      "owns_target",
+      "approves_reference_change",
+      "rejects_reference_change",
+      "owns_frozen_set",
+      "authorizes_retry",
+      "cancels"
+    ]
+  },
+  "nodes": [
+    {
+      "id": "sensor",
+      "kind": "ai_worker",
+      "authority": "signal_only",
+      "emits": ["METRIC_SAMPLED"]
+    },
+    {
+      "id": "counter-sensor",
+      "kind": "ai_worker",
+      "authority": "signal_only",
+      "emits": ["COUNTER_SAMPLED"]
+    },
+    {
+      "id": "sample-gate",
+      "kind": "deterministic",
+      "authority": "anchor",
+      "emits": ["SAMPLES_SEALED", "PERMISSION_DENIED"]
+    },
+    {
+      "id": "drift-auditor",
+      "kind": "ai_worker",
+      "authority": "signal_only",
+      "emits": ["DRIFT_ESTIMATE"]
+    },
+    {
+      "id": "arbitrator",
+      "kind": "deterministic",
+      "authority": "anchor",
+      "emits": ["ARBITRATION"]
+    },
+    {
+      "id": "anchor-verifier",
+      "kind": "deterministic",
+      "authority": "anchor",
+      "emits": ["ANCHOR_RECORDED", "PERMISSION_DENIED"]
+    }
+  ],
+  "edges": [
+    { "from": "sensor", "to": "sample-gate", "type": "feeds" },
+    { "from": "counter-sensor", "to": "sample-gate", "type": "feeds" },
+    { "from": "sample-gate", "to": "state-machine", "type": "validates" },
+    { "from": "state-machine", "to": "drift-auditor", "type": "authorizes" },
+    { "from": "drift-auditor", "to": "state-machine", "type": "feeds" },
+    { "from": "state-machine", "to": "arbitrator", "type": "authorizes" },
+    { "from": "arbitrator", "to": "state-machine", "type": "validates" },
+    { "from": "arbitrator", "to": "state-machine", "type": "vetoes" },
+    { "from": "state-machine", "to": "anchor-verifier", "type": "authorizes" },
+    { "from": "anchor-verifier", "to": "state-machine", "type": "validates" },
+    { "from": "anchor-verifier", "to": "state-machine", "type": "vetoes" },
+    { "from": "human-owner", "to": "state-machine", "type": "owns_target" }
+  ],
+  "requiredAnchors": [
+    "counter-metric-paired",
+    "drift-audit",
+    "arbitration-policy",
+    "anchor-reality",
+    "frozen-set-intact",
+    "regression"
+  ],
+  "anchorCommands": {
+    "counter-metric-paired": "bun run improvement:validate",
+    "drift-audit": "bun test packages/core/tests/improvement-loop.machine.test.ts",
+    "arbitration-policy": "bun test packages/core/tests/improvement-loop.arbitration.test.ts",
+    "anchor-reality": "bun run improvement:anchors",
+    "frozen-set-intact": "bun test packages/core/tests/improvement-loop.frozen.test.ts",
+    "regression": "bun run improvement:regression"
+  },
+  "maxRetries": 2
+}

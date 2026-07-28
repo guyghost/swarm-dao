@@ -11,10 +11,18 @@ export function synthesize(
   tally?: TallyResult,
 ): string {
   const approved = tally?.approved ?? false;
-  const forVotes = outputs.filter((o) => o.vote?.position === "for");
-  const againstVotes = outputs.filter((o) => o.vote?.position === "against");
-  const abstentions = outputs.filter((o) => o.vote?.position === "abstain" || !o.vote);
-  const errors = outputs.filter((o) => o.error);
+  // Single-pass partition of outputs into for/against/abstain/errors buckets.
+  const forVotes: AgentOutput[] = [];
+  const againstVotes: AgentOutput[] = [];
+  const abstentions: AgentOutput[] = [];
+  const errors: AgentOutput[] = [];
+  for (const o of outputs) {
+    if (o.error) errors.push(o);
+    const pos = o.vote?.position;
+    if (pos === "for") forVotes.push(o);
+    else if (pos === "against") againstVotes.push(o);
+    else abstentions.push(o); // includes "abstain" and missing vote
+  }
 
   let synthesis = `## Synthesis — Proposal #${proposal.id}\n\n`;
 

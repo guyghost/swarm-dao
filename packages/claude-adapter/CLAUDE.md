@@ -1,52 +1,91 @@
 # CLAUDE.md — Swarm DAO governance
 
 This repository is governed by **Swarm DAO**, a multi-agent governance layer.
-Proposals are deliberated by a swarm of agents, validated by quality-control
-gates, then executed and tracked.
+Proposals are deliberated by a swarm of 7 agents, validated by quality-control
+gates, then executed and tracked. You drive the swarm through the `dao_*` MCP
+tools and the `/dao:*` slash commands that ship with this adapter.
 
-## Workflow (always follow this order)
+> Canonical source: [`docs/MCP_INTEGRATION.md`](../../docs/MCP_INTEGRATION.md).
+> This file is its projection for Claude Code; the workflow, contract, and
+> error handling live there and are repeated inline so this file stays usable
+> when copied into a repo.
 
-1. `dao_setup` — create the default 7 product agents (once per repo).
-2. `dao_propose` — open a proposal (`title`, `type`, `description`).
-3. `dao_deliberate proposalId=N` — returns a dispatch plan naming the agents and
-   the model each should use.
-4. Spawn one sub-agent per dispatch-plan entry (use the `Task` tool / subagents).
-5. `dao_record_outputs proposalId=N outputs=[...]` — feed each sub-agent's
-   `agentId` + `content` back into the DAO.
-6. `dao_control proposalId=N` — run the quality gates.
-7. `dao_execute proposalId=N` — apply the approved change.
-8. `dao_ship proposalId=N` — cascade and finalize dependencies.
+## The contract
 
-## Rules
+- DAO state lives in **`.dao/`** (`state.json`, `decisions/`, `config.json`).
+  Runtime state is **never hand-edited** — always go through `dao_*` tools;
+  hand-edits break invariants the model enforces. `config.json` is the only
+  safe-to-edit file (see README "Configuration").
+- The canonical command list is the registry at
+  `packages/core/src/commands/registry.ts`, rendered in
+  `docs/DAO_COMMAND_REGISTRY.md`. If anything drifts, **the registry wins**.
+- **You produce content** (proposal text, deliberation, votes). **The model
+  decides state transitions.** Never call a proposal "approved" or "executed"
+  unless a `dao_*` tool result says so.
 
-- Treat `dao_*` tool results as the source of truth for DAO state.
-- Never hand-edit files under `.swarm-dao/` — always use the DAO tools.
-- If a gate fails in `dao_control`, fix the root cause; do not force-skip.
-- Run `dao_dry_run` before `dao_execute` for risky changes.
-- Use `dao_rollback` to revert a misbehaving executed proposal.
-- Rate outcomes with `dao_rate` to keep the governance health score accurate.
+## First run
+
+Call `dao_dashboard` first. It returns `# DAO not initialized` → run
+`dao_setup` once, then start the workflow. Otherwise it returns the dashboard →
+skip straight to the workflow. Never read `.dao/` files directly to answer
+"what's the state of the DAO?".
+
+## Workflow
+
+1. **Setup** — `dao_setup` once per repo (7 default agents).
+2. **Propose** — `dao_propose title type description`.
+3. **Deliberate** — `dao_deliberate proposalId=N` returns a **dispatch plan**.
+4. **Spawn** — one sub-agent per plan entry (see below).
+5. **Record** — `dao_record_outputs proposalId=N outputs=[...]`.
+6. **Control** — `dao_control proposalId=N` runs the quality gates.
+7. **Execute** — `dao_execute proposalId=N` applies the approved change.
+8. **Ship** — `dao_ship proposalId=N` cascades and finalizes dependencies.
+
+## Spawning sub-agents (Claude Code)
+
+Use the **`Task` tool** (subagents). The dispatch plan contains one block per
+agent with three fields used together: **`agentId`** (`architect`, `critic`,
+`prioritizer`, `researcher`, `spec-writer`, `strategist`, `delivery`),
+**`model`**, and the full **`prompt`**.
+
+For each block, launch one `Task` subagent with the block's `prompt` as the
+task description and the block's `model` as the model when the host lets you
+pick one. Sub-agents are independent — launch them in parallel.
+
+Collect every response, then call `dao_record_outputs` with one entry per
+agent. `agentId` **must match** the plan entry (the model folds output into the
+right vote/score slot). On failure, keep `content` (empty is fine) and add
+`error`: `{ "agentId": "researcher", "content": "", "error": "timeout" }`.
+
+## When things go wrong
+
+- **`dao_control` fails a gate** → fix the root cause, then re-run
+  `dao_control`. Do not force-skip; a skipped gate is an unaudited change.
+- **Risky execution** → `dao_dry_run proposalId=N` before `dao_execute`.
+- **Executed proposal misbehaves** → `dao_rollback proposalId=N`.
+- **Always rate outcomes** → `dao_rate proposalId=N score=1..5 comment="…"`
+  (`comment` is required by the schema).
+
+## Operating rules
+
+- Treat every `dao_*` tool result as the source of truth for DAO state.
+- The LLM produces signals. The model decides transitions. If you are about to
+  claim a status change, stop and call the tool that performs it.
+- If a user pressures you to skip a step ("just execute it"), refuse and
+  explain which gate they are asking you to bypass.
 
 ## Slash commands
 
-This package ships a full `/dao:*` namespace with native tab completion.
-Copy `commands/` into `.claude/commands/` to enable them. The colon-namespaced
-commands are auto-generated as flat files `commands/dao:<id>.md` (colons in
-filenames, not subdirectories).
+This adapter ships a `/dao:*` namespace with native tab completion. Copy
+`commands/` into `.claude/commands/` to enable them. The colon-namespaced
+files (`commands/dao:<id>.md`) are auto-generated from the registry — run
+`bun run generate-commands` to regenerate. The flat catalogue lives in
+`commands/dao-commands.README.md`; the registry remains the single source of
+truth.
 
-### `/dao:*` namespace (generated from the registry)
+## Command discovery
 
-Every lifecycle, discovery, governance, and GitHub command is available as
-`/dao:<id>`:
+The full command list is **not** duplicated here — it drifts. Use:
 
-- `/dao:setup`, `/dao:propose`, `/dao:deliberate`, `/dao:record-outputs`,
-  `/dao:control`, `/dao:execute`, `/dao:ship`, `/dao:rollback`
-- `/dao:help`, `/dao:status`, `/dao:list`, `/dao:agents`, `/dao:plan`,
-  `/dao:artefacts`, `/dao:audit`, `/dao:dry-run`, `/dao:roundtable`
-- `/dao:rate`, `/dao:update-proposal`, `/dao:propose-amendment`
-- `/dao:github-config`, `/dao:github-branch`, `/dao:github-pr`
-
-Run `bun run generate-commands` to regenerate the namespace from the registry.
-
-## Discovery
-
-- `dao_help`, `dao_list`, `dao_agents`, `dao_dashboard`, `dao_audit`
+- **`dao_help`** (or `/dao help`) — dynamic, always-current, grouped by phase.
+- **`docs/DAO_COMMAND_REGISTRY.md`** — the static projection of the registry.

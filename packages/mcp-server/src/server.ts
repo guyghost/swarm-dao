@@ -1,8 +1,8 @@
-import type { ProposalType, RecordOutputInput } from "@guyghost/swarm-dao-core";
+import type { DaoStateRepositoryPort, ProposalType, RecordOutputInput } from "@guyghost/swarm-dao-core";
 import {
   buildDaoHelpMessage,
   DAO_ONBOARDING_MESSAGE,
-  getOrCreateState,
+  FileDaoStateRepository,
   getState,
   handleDaoAgents,
   handleDaoArtefacts,
@@ -26,10 +26,8 @@ import {
   handleDaoSetup,
   handleDaoShip,
   handleDaoUpdateProposal,
-  initStorage,
-  loadState,
   PROPOSAL_TYPES,
-  setState,
+  setRepository,
 } from "@guyghost/swarm-dao-core";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
@@ -52,27 +50,26 @@ function parseProposalType(value: unknown): ProposalType {
   throw new Error(`Invalid proposal type: ${String(value)}. Valid types: ${PROPOSAL_TYPES.join(", ")}`);
 }
 
-function createToolContext(workDir: string) {
+function createToolContext(workDir: string, repository?: DaoStateRepositoryPort) {
   return {
     adapter: createMcpHostAdapter(workDir),
     workDir,
     deliberationMode: "manual" as const,
     controlToolName: "dao_control" as const,
     failOnGateFailure: false,
+    repository,
   };
 }
 
-export async function ensureDaoStorage(workDir: string): Promise<void> {
-  await initStorage(workDir);
-  const loaded = await loadState(workDir);
-  if (!loaded) {
-    setState(getOrCreateState(workDir));
-  }
+export async function ensureDaoStorage(workDir: string): Promise<DaoStateRepositoryPort> {
+  const repository = await FileDaoStateRepository.open(workDir);
+  setRepository(repository);
+  return repository;
 }
 
-export function createSwarmDaoMcpServer(workDir = resolveDaoRoot()): Server {
+export function createSwarmDaoMcpServer(workDir = resolveDaoRoot(), repository?: DaoStateRepositoryPort): Server {
   const server = new Server({ name: "swarm-dao", version: "0.1.0" }, { capabilities: { tools: {} } });
-  const ctx = createToolContext(workDir);
+  const ctx = createToolContext(workDir, repository);
   const controlTool = "dao_control";
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -285,17 +282,20 @@ export function createSwarmDaoMcpServer(workDir = resolveDaoRoot()): Server {
           return textResult(await handleDaoSetup(ctx, args.useDefaults !== false));
         case "dao_propose":
           return textResult(
-            await handleDaoPropose({
-              title: String(args.title),
-              type: parseProposalType(args.type),
-              description: String(args.description),
-              context: args.context !== undefined ? String(args.context) : undefined,
-              problemStatement: args.problemStatement !== undefined ? String(args.problemStatement) : undefined,
-              acceptanceCriteria: args.acceptanceCriteria as string[] | undefined,
-              successMetrics: args.successMetrics as string[] | undefined,
-              rollbackConditions: args.rollbackConditions as string[] | undefined,
-              affectedPaths: args.affectedPaths as string[] | undefined,
-            }),
+            await handleDaoPropose(
+              {
+                title: String(args.title),
+                type: parseProposalType(args.type),
+                description: String(args.description),
+                context: args.context !== undefined ? String(args.context) : undefined,
+                problemStatement: args.problemStatement !== undefined ? String(args.problemStatement) : undefined,
+                acceptanceCriteria: args.acceptanceCriteria as string[] | undefined,
+                successMetrics: args.successMetrics as string[] | undefined,
+                rollbackConditions: args.rollbackConditions as string[] | undefined,
+                affectedPaths: args.affectedPaths as string[] | undefined,
+              },
+              repository,
+            ),
           );
         case "dao_deliberate":
           return textResult(await handleDaoDeliberate(ctx, Number(args.proposalId)));
@@ -310,7 +310,7 @@ export function createSwarmDaoMcpServer(workDir = resolveDaoRoot()): Server {
         case "dao_control":
           return textResult(await handleDaoControl(ctx, Number(args.proposalId)));
         case "dao_execute":
-          return textResult(await handleDaoExecute(Number(args.proposalId)));
+          return textResult(await handleDaoExecute(Number(args.proposalId), repository));
         case "dao_ship":
           return textResult(
             await handleDaoShip(ctx, Number(args.proposalId), {
@@ -327,9 +327,9 @@ export function createSwarmDaoMcpServer(workDir = resolveDaoRoot()): Server {
         case "dao_artefacts":
           return textResult(await handleDaoArtefacts(Number(args.proposalId)));
         case "dao_dry_run":
-          return textResult(await handleDaoDryRun(Number(args.proposalId)));
+          return textResult(await handleDaoDryRun(Number(args.proposalId), repository));
         case "dao_rollback":
-          return textResult(await handleDaoRollback(Number(args.proposalId)));
+          return textResult(await handleDaoRollback(Number(args.proposalId), repository));
         case "dao_dashboard":
           return textResult(await handleDaoDashboard());
         case "dao_roundtable":
@@ -338,40 +338,52 @@ export function createSwarmDaoMcpServer(workDir = resolveDaoRoot()): Server {
           return textResult(await handleDaoAudit(args.proposalId !== undefined ? Number(args.proposalId) : undefined));
         case "dao_rate":
           return textResult(
-            await handleDaoRate(Number(args.proposalId), Number(args.score) as 1 | 2 | 3 | 4 | 5, String(args.comment)),
+            await handleDaoRate(
+              Number(args.proposalId),
+              Number(args.score) as 1 | 2 | 3 | 4 | 5,
+              String(args.comment),
+              repository,
+            ),
           );
         case "dao_update_proposal":
           return textResult(
-            await handleDaoUpdateProposal(Number(args.proposalId), {
-              problemStatement: args.problemStatement !== undefined ? String(args.problemStatement) : undefined,
-              acceptanceCriteria: args.acceptanceCriteria as string[] | undefined,
-              successMetrics: args.successMetrics as string[] | undefined,
-              rollbackConditions: args.rollbackConditions as string[] | undefined,
-            }),
+            await handleDaoUpdateProposal(
+              Number(args.proposalId),
+              {
+                problemStatement: args.problemStatement !== undefined ? String(args.problemStatement) : undefined,
+                acceptanceCriteria: args.acceptanceCriteria as string[] | undefined,
+                successMetrics: args.successMetrics as string[] | undefined,
+                rollbackConditions: args.rollbackConditions as string[] | undefined,
+              },
+              repository,
+            ),
           );
         case "dao_propose_amendment":
           return textResult(
-            await handleDaoProposeAmendment({
-              title: String(args.title),
-              description: String(args.description),
-              amendmentType: args.amendmentType as
-                | "agent-update"
-                | "agent-add"
-                | "agent-remove"
-                | "config-update"
-                | "quorum-update"
-                | "gate-update",
-              agentId: args.agentId !== undefined ? String(args.agentId) : undefined,
-              agentChanges: args.agentChanges !== undefined ? String(args.agentChanges) : undefined,
-              newAgentId: args.newAgentId !== undefined ? String(args.newAgentId) : undefined,
-              newAgentName: args.newAgentName !== undefined ? String(args.newAgentName) : undefined,
-              newAgentRole: args.newAgentRole !== undefined ? String(args.newAgentRole) : undefined,
-              newAgentWeight: args.newAgentWeight !== undefined ? Number(args.newAgentWeight) : undefined,
-              configChanges: args.configChanges !== undefined ? String(args.configChanges) : undefined,
-              quorumChanges: args.quorumChanges !== undefined ? String(args.quorumChanges) : undefined,
-              addGates: args.addGates as string[] | undefined,
-              removeGates: args.removeGates as string[] | undefined,
-            }),
+            await handleDaoProposeAmendment(
+              {
+                title: String(args.title),
+                description: String(args.description),
+                amendmentType: args.amendmentType as
+                  | "agent-update"
+                  | "agent-add"
+                  | "agent-remove"
+                  | "config-update"
+                  | "quorum-update"
+                  | "gate-update",
+                agentId: args.agentId !== undefined ? String(args.agentId) : undefined,
+                agentChanges: args.agentChanges !== undefined ? String(args.agentChanges) : undefined,
+                newAgentId: args.newAgentId !== undefined ? String(args.newAgentId) : undefined,
+                newAgentName: args.newAgentName !== undefined ? String(args.newAgentName) : undefined,
+                newAgentRole: args.newAgentRole !== undefined ? String(args.newAgentRole) : undefined,
+                newAgentWeight: args.newAgentWeight !== undefined ? Number(args.newAgentWeight) : undefined,
+                configChanges: args.configChanges !== undefined ? String(args.configChanges) : undefined,
+                quorumChanges: args.quorumChanges !== undefined ? String(args.quorumChanges) : undefined,
+                addGates: args.addGates as string[] | undefined,
+                removeGates: args.removeGates as string[] | undefined,
+              },
+              repository,
+            ),
           );
         case "dao_config_github":
           return textResult(
@@ -398,9 +410,9 @@ export function createSwarmDaoMcpServer(workDir = resolveDaoRoot()): Server {
 }
 
 export async function startSwarmDaoMcpServer(workDir = resolveDaoRoot()): Promise<void> {
-  await ensureDaoStorage(workDir);
+  const repository = await ensureDaoStorage(workDir);
   const { StdioServerTransport } = await import("@modelcontextprotocol/sdk/server/stdio.js");
-  const server = createSwarmDaoMcpServer(workDir);
+  const server = createSwarmDaoMcpServer(workDir, repository);
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }

@@ -1,6 +1,6 @@
 {
   "name": "@guyghost/swarm-dao-opencode-adapter",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Swarm DAO governance adapter for OpenCode — multi-agent deliberation, quality gates, and structured decision-making",
   "type": "module",
   "main": "./dist/index.js",
@@ -24,7 +24,7 @@
     "prepublishOnly": "bun run build"
   },
   "dependencies": {
-    "@guyghost/swarm-dao-core": "^0.3.0"
+    "@guyghost/swarm-dao-core": "^0.4.0"
   },
   "peerDependencies": {
     "@opencode-ai/plugin": ">=1.14.19"

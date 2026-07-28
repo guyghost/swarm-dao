@@ -96,6 +96,26 @@ describe("proposal state machine — nominal transitions", () => {
     expect(proposal.resolvedAt).toBeDefined();
   });
 
+  it("uses the injected clock for transition and resolution timestamps", () => {
+    const transitionTimes = [
+      "2030-01-01T10:00:00.000Z",
+      "2030-01-01T10:01:00.000Z",
+      "2030-01-01T10:02:00.000Z",
+      "2030-01-01T10:03:00.000Z",
+    ];
+    let index = 0;
+    const clock = { now: () => transitionTimes[index++] };
+
+    expect(dispatchProposalEvent(proposal, { type: "DELIBERATE" }, { clock }).ok).toBe(true);
+    expect(dispatchProposalEvent(proposal, { type: "APPROVE", tally: makeTally(true) }, { clock }).ok).toBe(true);
+    expect(dispatchProposalEvent(proposal, { type: "CONTROL_PASS", result: makeControl(true) }, { clock }).ok).toBe(
+      true,
+    );
+    expect(dispatchProposalEvent(proposal, { type: "EXECUTE_SUCCESS" }, { clock }).ok).toBe(true);
+
+    expect(proposal.resolvedAt).toBe("2030-01-01T10:03:00.000Z");
+  });
+
   it("rejects from deliberating", () => {
     dispatchProposalEvent(proposal, { type: "DELIBERATE" });
     expect(dispatchProposalEvent(proposal, { type: "REJECT" }).ok).toBe(true);

@@ -2,7 +2,10 @@
 // Swarm DAO Core — Swarm Dispatch
 // ============================================================
 
-import type { AgentOutput, DAOAgent, HostAdapter, Proposal } from "../types/index.js";
+import { clearProposalCoordinators, registerProposalCoordinators } from "../governance/delegation.utils.js";
+import type { AgentWorkerPort } from "../ports/host.js";
+import type { AgentOutput, DAOAgent, DAOConfig, Proposal } from "../types/index.js";
+import { drainDelegations, runDelegations } from "./delegation.js";
 import {
   buildModelResolutionContext,
   describeModelResolution,
@@ -82,7 +85,7 @@ ${instructions
 
 Spawn this sub-agent with the following task (use \`task\` with \`model="${inst.model}"\` when available):
 \`\`\`
-${inst.prompt.slice(0, 500)}${inst.prompt.length > 500 ? "..." : ""}
+${inst.prompt}
 \`\`\`
 `,
   )
@@ -94,7 +97,7 @@ After collecting all outputs, call \`dao_record_outputs\` with the collected res
 
 export function createDispatchModelContext(
   configDefaultModel: string,
-  adapter: HostAdapter,
+  adapter: AgentWorkerPort,
   options?: { hostDefaultModel?: string; parentSessionModel?: string },
 ): ModelResolutionContext {
   return buildModelResolutionContext(configDefaultModel, {
@@ -106,77 +109,123 @@ export function createDispatchModelContext(
 /**
  * Dispatch swarm via a host adapter.
  * This is the host-agnostic version — adapters implement the actual spawning.
+ *
+ * Delegation (DFI) is opt-in: pass `delegation?.config` with
+ * `config.delegation.enabled === true` to activate. When active, after each
+ * parent agent produces an output, declared facets are investigated by child
+ * agents and folded into the parent's reasoning (INV-6: votes untouched). Live
+ * coordinators are registered for the `delegation-closed` gate (INV-8) and
+ * drained on completion.
  */
 export async function dispatchSwarm(
   proposal: Proposal,
   agents: DAOAgent[],
-  adapter: HostAdapter,
+  adapter: AgentWorkerPort,
   maxConcurrent: number,
   modelContext: ModelResolutionContext,
   onUpdate?: (update: SwarmProgressUpdate) => void,
+  delegation?: { config: DAOConfig },
 ): Promise<AgentOutput[]> {
   const instructions = buildDispatchInstructions(proposal, agents, modelContext);
   const outputs: AgentOutput[] = [];
   const agentById = new Map(agents.map((a) => [a.id, a]));
+  const delegationEnabled = delegation?.config?.delegation?.enabled === true;
+  const allCoordinators: import("../governance/delegation.utils.js").DelegationCoordinatorState[] = [];
+  const allRequests: import("../governance/delegation.utils.js").DelegationRequestState[] = [];
 
-  // Process in batches based on maxConcurrent
-  for (let i = 0; i < instructions.length; i += maxConcurrent) {
-    const batch = instructions.slice(i, i + maxConcurrent);
+  // Register the mutable coordinators array up-front so the delegation-closed
+  // gate can observe in-flight coordinators as they are pushed during dispatch.
+  if (delegationEnabled) {
+    registerProposalCoordinators(proposal.id, allCoordinators);
+  }
 
-    const batchPromises = batch.map(async (inst) => {
-      const agent = agentById.get(inst.agentId);
-      if (!agent) throw new Error(`Agent ${inst.agentId} not found`);
+  try {
+    // Process in batches based on maxConcurrent
+    for (let i = 0; i < instructions.length; i += maxConcurrent) {
+      const batch = instructions.slice(i, i + maxConcurrent);
 
-      onUpdate?.({
-        agentId: inst.agentId,
-        agentName: inst.agentName,
-        phase: "started",
+      const batchPromises = batch.map(async (inst) => {
+        const agent = agentById.get(inst.agentId);
+        try {
+          if (!agent) throw new Error(`Agent ${inst.agentId} not found`);
+
+          onUpdate?.({
+            agentId: inst.agentId,
+            agentName: inst.agentName,
+            phase: "started",
+          });
+
+          const output = await adapter.spawnAgent({
+            agent,
+            proposal,
+            systemPrompt: inst.prompt,
+            model: inst.model,
+            timeoutMs: inst.timeoutMs,
+          });
+
+          // DFI hook: fold declared delegations into the parent reasoning.
+          if (delegationEnabled && delegation && !output.error) {
+            const result = await runDelegations({
+              parent: agent,
+              parentOutput: output,
+              proposal,
+              adapter,
+              config: delegation.config,
+              parentModelContext: modelContext,
+              onCoordinatorCreated: (coordinator) => {
+                allCoordinators.push(coordinator);
+              },
+            });
+            allRequests.push(...result.requests);
+            if (result.delegated) output.content = result.foldedContent;
+          }
+
+          outputs.push(output);
+
+          onUpdate?.({
+            agentId: inst.agentId,
+            agentName: inst.agentName,
+            phase: output.error ? "error" : "completed",
+            output,
+          });
+
+          return output;
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : "Unknown error";
+          const errorOutput: AgentOutput = {
+            agentId: inst.agentId,
+            agentName: inst.agentName,
+            role: agent?.role ?? "unknown",
+            content: "",
+            durationMs: 0,
+            error: message,
+          };
+          outputs.push(errorOutput);
+
+          onUpdate?.({
+            agentId: inst.agentId,
+            agentName: inst.agentName,
+            phase: "error",
+            output: errorOutput,
+          });
+
+          return errorOutput;
+        }
       });
 
-      try {
-        const output = await adapter.spawnAgent({
-          agent,
-          proposal,
-          systemPrompt: inst.prompt,
-          model: inst.model,
-          timeoutMs: inst.timeoutMs,
-        });
-
-        outputs.push(output);
-
-        onUpdate?.({
-          agentId: inst.agentId,
-          agentName: inst.agentName,
-          phase: output.error ? "error" : "completed",
-          output,
-        });
-
-        return output;
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : "Unknown error";
-        const errorOutput: AgentOutput = {
-          agentId: inst.agentId,
-          agentName: inst.agentName,
-          role: agent.role,
-          content: "",
-          durationMs: 0,
-          error: message,
-        };
-        outputs.push(errorOutput);
-
-        onUpdate?.({
-          agentId: inst.agentId,
-          agentName: inst.agentName,
-          phase: "error",
-          output: errorOutput,
-        });
-
-        return errorOutput;
-      }
-    });
-
-    await Promise.all(batchPromises);
+      await Promise.all(batchPromises);
+    }
+  } finally {
+    if (delegationEnabled) {
+      drainDelegations(allCoordinators, allRequests);
+      clearProposalCoordinators(proposal.id);
+    }
   }
 
   return outputs;
+}
+
+/** Clear the coordinator registry for a proposal once deliberation is over. */
+export function resetDelegationRegistry(proposalId: number): void {
+  clearProposalCoordinators(proposalId);
 }

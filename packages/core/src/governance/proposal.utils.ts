@@ -10,13 +10,15 @@
 // ============================================================
 
 import { createActor } from "xstate";
-import type { Proposal, ProposalStatus } from "../types/index.js";
 import {
   createProposalMachine,
   isProposalFinal,
   type ProposalEvent,
   type ProposalMachineInput,
-} from "./proposal.machine.js";
+} from "../models/proposal.machine.js";
+import type { ClockPort } from "../ports/clock.js";
+import { systemClock } from "../ports/clock.js";
+import type { Proposal, ProposalStatus } from "../types/index.js";
 
 export type DispatchResult = { ok: true; status: ProposalStatus } | { ok: false; error: string };
 
@@ -29,7 +31,11 @@ export type DispatchResult = { ok: true; status: ProposalStatus } | { ok: false;
  * from the current status — the caller must surface that error and
  * MUST NOT mutate the status itself.
  */
-export function dispatchProposalEvent(proposal: Proposal, event: ProposalEvent): DispatchResult {
+export function dispatchProposalEvent(
+  proposal: Proposal,
+  event: ProposalEvent,
+  options: { clock?: ClockPort } = {},
+): DispatchResult {
   // Terminal states are final: no event may leave them. This guard
   // makes the invariant explicit rather than relying on the actor's
   // "done" status, so the model stays correct regardless of how the
@@ -41,11 +47,13 @@ export function dispatchProposalEvent(proposal: Proposal, event: ProposalEvent):
     };
   }
 
+  const transitionTime = (options.clock ?? systemClock).now();
   const machine = createProposalMachine(proposal.status);
   const actor = createActor(machine, {
     input: {
       proposal,
-      lastTransitionTime: new Date().toISOString(),
+      transitionTime,
+      lastTransitionTime: transitionTime,
     } satisfies ProposalMachineInput,
   });
   actor.start();
@@ -63,7 +71,7 @@ export function dispatchProposalEvent(proposal: Proposal, event: ProposalEvent):
 
   proposal.status = status;
   if (isProposalFinal(status) && !proposal.resolvedAt) {
-    proposal.resolvedAt = new Date().toISOString();
+    proposal.resolvedAt = transitionTime;
   }
 
   return { ok: true, status };
