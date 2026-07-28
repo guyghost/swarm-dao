@@ -122,7 +122,7 @@ const SAFE_PI_MODEL = /^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$/;
 
 export function assertSafePiModel(model: string): void {
   if (!SAFE_PI_MODEL.test(model)) {
-    throw new Error(`Invalid pi model identifier: ${model}`);
+    throw new Error(`Invalid pi model identifier: ${JSON.stringify(model)}`);
   }
 }
 
