@@ -94,11 +94,19 @@ function extractPiJsonContent(stdout: string): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
-const SAFE_PI_MODEL = /^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$/;
-
 export function assertSafePiModel(model: string): void {
-  if (!SAFE_PI_MODEL.test(model)) {
+  // Reject empty values, null bytes (cannot be represented in argv), and values
+  // that look like command-line options (start with a dash). Allow any other
+  // characters so provider-defined identifiers (including @, +, Unicode, etc.)
+  // are accepted when spawn is invoked with an argv array and shell: false.
+  if (typeof model !== "string" || model.length === 0) {
     throw new Error(`Invalid pi model identifier: ${JSON.stringify(model)}`);
+  }
+  if (model.includes("\0")) {
+    throw new Error("Invalid pi model identifier: null bytes are not allowed");
+  }
+  if (model.startsWith("-")) {
+    throw new Error(`Invalid pi model identifier: ${JSON.stringify(model)} (must not start with '-')`);
   }
 }
 
