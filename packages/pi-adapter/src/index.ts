@@ -108,6 +108,11 @@ export function assertSafePiModel(model: string): void {
   if (model.startsWith("-")) {
     throw new Error(`Invalid pi model identifier: ${JSON.stringify(model)} (must not start with '-')`);
   }
+  // Reject characters that could enable shell injection when invoked in a shell.
+  // Semicolons and other control characters are not allowed in model identifiers.
+  if (/[;&|$`<>]/.test(model)) {
+    throw new Error(`Invalid pi model identifier: ${JSON.stringify(model)}`);
+  }
 }
 
 export function assertSafePiPrompt(prompt: string): void {
