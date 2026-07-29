@@ -1,0 +1,9 @@
+{
+  "run_id": 30474059653,
+  "job_id": 90651198070,
+  "classification": "pr-caused",
+  "changed_files": ["packages/pi-adapter/src/index.ts"],
+  "commit_sha": "74d19b4",
+  "pushed": true,
+  "notes": "Added rejection for shell-control characters in assertSafePiModel. Could not run tsc locally (tsc not installed); validated logic with a JS mirror test. Please re-run CI. Logs saved to ./ci-artifacts/ci-run-30474059653.log"
+}

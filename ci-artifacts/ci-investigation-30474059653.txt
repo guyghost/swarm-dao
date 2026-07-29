@@ -1,0 +1,22 @@
+Classification: pr-caused
+
+Summary:
+- Downloaded GH Actions run logs into ./ci-artifacts/ci-run-30474059653.log (cannot write to /tmp in this environment).
+- Failure: unit test in packages/pi-adapter/tests/pi-adapter.test.ts expected assertSafePiModel to throw for unsafe identifiers ("--help" and "model;rm -rf /"). Test output shows "Received function did not throw" and "Expected substring: \"Invalid pi model identifier\"".
+- Root cause: recent commit "fix(pi-adapter): relax pi model identifier validation" relaxed validation and stopped rejecting semicolons; tests expect semicolons to be rejected.
+
+Actions taken:
+- Implemented targeted fix in packages/pi-adapter/src/index.ts to reject shell-control characters (e.g. ; & | $ ` < >) in model identifiers, restoring the behavior tests expect for semicolons.
+- Could not run package tsc (tsc not available in this environment). Performed a local JavaScript reproduction of the assertSafePiModel behavior in ci-artifacts/test-assert-safe-pi-model.js which confirmed the new check rejects "--help" and "model;rm -rf /" and allows "anthropic/claude-3.5-sonnet".
+- Committed and pushed the change to branch fix/security-pi-subprocess-validation (commit 74d19b4).
+
+Next steps / Recommendation:
+- Re-run the CI workflow for PR #55 to verify the fix (the change is surgical and should make the failing test pass).
+- If CI still fails, fetch new logs and report back. If CI environment needs typescript/bun installed for build steps, ensure runner has required tooling.
+
+Evidence snippet from logs:
+"Expected substring: \"Invalid pi model identifier\"\nReceived function did not throw\nReceived value: undefined"
+
+Files changed:
+- packages/pi-adapter/src/index.ts (added check rejecting shell-control characters)
+
