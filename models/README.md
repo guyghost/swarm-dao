@@ -93,6 +93,37 @@ verifier decide outcomes.
 | `bun test packages/core/tests/improvement-loop.frozen.test.ts` | frozen-set-intact |
 | `bun run improvement:regression` | regression |
 
+## Product loop (continuous product-loop)
+
+`product-loop.md` and `product-loop.graph.json` define the continuous
+product-loop workflow that evolves proposals/tasks/voting from human-triggered
+steps into a controlled automatic loop. Its executable XState model lives in
+`packages/core/src/models/product-loop.machine.ts`.
+
+The loop runs Exploration → Proposition → Qualification → Vote → Adopted →
+Execution → Verification → Ship → Observation → Validated, with deterministic
+detours to Rejected (vote expiry), BudgetBlocked → Review (budget exhaustion),
+Rollback (consecutive-measurement degradation), and Review (sensitive, failed,
+or incomplete verification). Auto-ship applies only to allowed reversible
+technical improvements; security proposals that touch permissions, secrets,
+payments, or sensitive data are auto-qualified and auto-voted but require human
+Review before deployment. Every transition is decided by the model — AI workers
+(explorer, feedback-aggregator, proposer) produce signals and drafts only. The
+human owner is the sole authority for budget expansion, scope reduction,
+abandonment, verification retry, contact-relay authorization, and cancellation.
+
+| command | anchor |
+|---|---|
+| `bun run product:validate` | qualification-passed |
+| `bun test packages/core/tests/product-loop.regression.test.ts` | vote-quorum |
+| `bun test packages/core/tests/product-loop.regression.test.ts` | budget-envelope |
+| `bun test packages/core/tests/product-loop.machine.test.ts` | controls-passed |
+| `bun test packages/core/tests/product-loop.regression.test.ts` | auto-ship-policy |
+| `bun test packages/core/tests/product-loop.regression.test.ts` | observation-window |
+| `bun run product:anchors` | rollback-path-exists |
+| `bun test packages/core/tests/product-loop.frozen.test.ts` | frozen-set-intact |
+| `bun run product:regression` | regression |
+
 
 ## Review checklist
 
