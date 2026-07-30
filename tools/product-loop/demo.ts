@@ -56,10 +56,22 @@ await submit(
 );
 await submit(makeSignal("OPEN_PROPOSITION", "tool", "proposition-gate"));
 
-// 2. Proposition → Qualification → Vote. Qualification is a deterministic
-//    always-transition: the machine itself validates scope, category,
-//    dependencies, budget, and seals the qualification-passed anchor.
-await submit(makeSignal("QUALIFICATION_RUN", "tool", "qualifier"));
+// 2. Proposition → Qualification → Vote. Qualification carries an affirmative,
+//    evidence-backed permission clearance — it never passes on the mere absence
+//    of a denial. The machine validates scope, category, dependencies, budget,
+//    and explicit permission before sealing the qualification-passed anchor.
+await submit(
+  makeSignal(
+    "QUALIFICATION_RUN",
+    "tool",
+    "qualifier",
+    {
+      permissionCleared: true,
+      permissionEvidence: "permissions: none required (performance category, no sensitive data)",
+    },
+    ["permissions: none required (performance category, no sensitive data)"],
+  ),
+);
 
 // 3. Vote. The vote-tally tool opens the vote with a quorum and records
 //    favorable votes. The runner (system) then evaluates the quorum
@@ -85,9 +97,12 @@ await submit(
 );
 await submit(makeSignal("EXECUTION_DONE", "tool", "budget-ledger"));
 
-// 5. Verification. The verifier records a passing control. The two external
-//    anchors (frozen-set-intact, regression) must be recorded by the tool
-//    before the runner evaluates — they are never auto-sealed by the machine.
+// 5. Verification. The verifier records a passing control. The three external
+//    anchors (frozen-set-intact, regression, rollback-path-exists) must be
+//    recorded by the tool before the runner evaluates — they are never
+//    auto-sealed by the machine. `rollback-path-exists` is a ship-gate
+//    prerequisite: the verifier confirms the rollback artifact is genuine
+//    before VERIFY_EVALUATE can pass the canShip guard.
 await submit(
   makeSignal(
     "VERIFY_RUN",
@@ -107,11 +122,21 @@ await submit(
     "regression suite green",
   ]),
 );
+await submit(
+  makeSignal(
+    "ANCHOR_RECORDED",
+    "tool",
+    "verifier",
+    { anchor: "rollback-path-exists", status: "passed" },
+    ["rollback artifact confirmed genuine: evidence/rollback/digest-cache-revert.patch"],
+  ),
+);
 await submit(makeSignal("VERIFY_EVALUATE", "system", "product-runner"));
 
 // 6. Ship → Observation. Auto-ship is allowed only for reversible, allowed-
 //    category improvements with a rollback path and remaining budget. The
 //    observation-gate records non-degrading samples; the runner evaluates.
+//    The observationClean guard requires ≥ 3 clean samples and windowElapsed.
 await submit(
   makeSignal(
     "OBSERVATION_SAMPLE",
@@ -128,6 +153,17 @@ await submit(
     "observation-gate",
     { sample: { metric: "aiCost", value: 5, threshold: 20, exceeded: false, evidence: "ai cost within budget" } },
     ["ai cost within budget"],
+  ),
+);
+await submit(
+  makeSignal(
+    "OBSERVATION_SAMPLE",
+    "tool",
+    "observation-gate",
+    {
+      sample: { metric: "latency", value: 8, threshold: 50, exceeded: false, evidence: "latency within threshold" },
+    },
+    ["latency within threshold"],
   ),
 );
 await submit(makeSignal("OBSERVATION_EVALUATE", "system", "product-runner", { windowElapsed: true }));
