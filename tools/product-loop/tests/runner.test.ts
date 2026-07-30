@@ -162,7 +162,7 @@ describe("product runner — nominal path (scenario 1)", () => {
     }
   });
 
-  it("rejects VERIFY_EVALUATE (canShip) when rollback-path-exists anchor is missing", async () => {
+  it("routes to review (not ship) when rollback-path-exists anchor is missing at VERIFY_EVALUATE", async () => {
     const evidenceRoot = await mkdtemp(join(tmpdir(), "product-runner-rollback-anchor-"));
     const runId = "product-runner-rollback-anchor";
     try {
@@ -210,12 +210,15 @@ describe("product runner — nominal path (scenario 1)", () => {
       await sub("ANCHOR_RECORDED", "tool", "verifier", { anchor: "regression", status: "passed" }, [
         "regression green",
       ]);
-      // rollback-path-exists NOT recorded here — ship gate must fail.
+      // rollback-path-exists NOT recorded here.
+      // The ship gate (canShip) requires shipGateAnchorsPassed which includes
+      // rollback-path-exists. Without it, the machine falls through to the
+      // isSystemVerifyEvaluate fallback and routes to review instead of ship.
 
       const evalResult = await runner.submit(signal(runId, "VERIFY_EVALUATE", "system", "product-runner"));
-      expect(evalResult.accepted).toBe(false);
-      // Machine stays in verification.
-      expect(runner.snapshot().state).toBe("verification");
+      expect(evalResult.accepted).toBe(true);
+      // Machine routes to review, not ship — rollback-path-exists is mandatory.
+      expect(runner.snapshot().state).toBe("review");
     } finally {
       await rm(evidenceRoot, { recursive: true, force: true });
     }
@@ -231,8 +234,8 @@ describe("product runner — observation rollback scenario (scenario 2)", () => 
       await driveNominalPath(runner, runId);
       expect(runner.snapshot().state).toBe("observation");
 
-      // Single degraded sample: not enough to confirm rollback.
-      await runner.submit(
+      // Single degraded sample is accepted (changes context).
+      const sampleResult = await runner.submit(
         signal(
           runId,
           "OBSERVATION_SAMPLE",
@@ -250,13 +253,16 @@ describe("product runner — observation rollback scenario (scenario 2)", () => 
           ["spike: 150 errors in window"],
         ),
       );
+      expect(sampleResult.accepted).toBe(true);
+
+      // OBSERVATION_EVALUATE with one degraded sample: neither observationDegraded
+      // (needs 3 consecutive) nor observationClean (needs ≥ 3 clean, windowElapsed)
+      // guard fires. No state or context change → runner treats as not accepted
+      // (no snapshot change), but the machine stays in observation.
       const evalResult = await runner.submit(
         signal(runId, "OBSERVATION_EVALUATE", "system", "product-runner", { windowElapsed: true }),
       );
-
-      // A single degraded sample neither triggers rollback (needs 3 consecutive)
-      // nor validates (needs ≥ 3 clean samples). Machine stays under observation.
-      expect(evalResult.accepted).toBe(true);
+      expect(evalResult.accepted).toBe(false);
       expect(runner.snapshot().state).toBe("observation");
     } finally {
       await rm(evidenceRoot, { recursive: true, force: true });
@@ -334,10 +340,13 @@ describe("product runner — observation rollback scenario (scenario 2)", () => 
           ),
         );
       }
+      // With 2 samples, observationClean requires ≥ 3 — guard fails. Neither
+      // observationDegraded fires (all clean). No transition or context change →
+      // runner marks evaluate as not accepted, machine stays in observation.
       const twoSampleEval = await runner.submit(
         signal(runId, "OBSERVATION_EVALUATE", "system", "product-runner", { windowElapsed: true }),
       );
-      expect(twoSampleEval.accepted).toBe(true);
+      expect(twoSampleEval.accepted).toBe(false);
       expect(runner.snapshot().state).toBe("observation");
 
       // A third clean sample satisfies the minimum and validates the window.
