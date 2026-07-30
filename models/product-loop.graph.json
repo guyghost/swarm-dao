@@ -1,0 +1,265 @@
+{
+  "$schema": "./product-loop.graph.schema.json",
+  "id": "swarm-dao-product-loop",
+  "version": 1,
+  "scope": "continuous-product-loop",
+  "proposalStateAuthority": "none",
+  "evidenceRoot": "evidence/product-loops",
+  "owner": {
+    "id": "human-owner",
+    "kind": "human",
+    "authority": [
+      "owns_target",
+      "resolves_review",
+      "expands_budget",
+      "reduces_scope",
+      "abandons_task",
+      "authorizes_verification_retry",
+      "authorizes_contact_relay",
+      "cancels"
+    ]
+  },
+  "nodes": [
+    {
+      "id": "explorer",
+      "kind": "ai_worker",
+      "authority": "signal_only",
+      "emits": [
+        "AGENT_SIGNAL",
+        "FEEDBACK_AGGREGATED",
+        "PROPOSAL_DRAFTED"
+      ]
+    },
+    {
+      "id": "feedback-aggregator",
+      "kind": "ai_worker",
+      "authority": "signal_only",
+      "emits": [
+        "FEEDBACK_AGGREGATED"
+      ]
+    },
+    {
+      "id": "proposer",
+      "kind": "ai_worker",
+      "authority": "signal_only",
+      "emits": [
+        "PROPOSAL_DRAFTED"
+      ]
+    },
+    {
+      "id": "proposition-gate",
+      "kind": "deterministic",
+      "authority": "anchor",
+      "emits": [
+        "OPEN_PROPOSITION"
+      ]
+    },
+    {
+      "id": "qualifier",
+      "kind": "deterministic",
+      "authority": "anchor",
+      "emits": [
+        "QUALIFICATION_RUN",
+        "PERMISSION_DENIED"
+      ]
+    },
+    {
+      "id": "vote-tally",
+      "kind": "deterministic",
+      "authority": "anchor",
+      "emits": [
+        "VOTE_OPENED",
+        "VOTE_CAST",
+        "VOTE_EXPIRED"
+      ]
+    },
+    {
+      "id": "budget-ledger",
+      "kind": "deterministic",
+      "authority": "anchor",
+      "emits": [
+        "BUDGET_CHARGE",
+        "EXECUTION_DONE"
+      ]
+    },
+    {
+      "id": "verifier",
+      "kind": "deterministic",
+      "authority": "anchor",
+      "emits": [
+        "VERIFY_RUN",
+        "ANCHOR_RECORDED",
+        "PERMISSION_DENIED"
+      ]
+    },
+    {
+      "id": "observation-gate",
+      "kind": "deterministic",
+      "authority": "anchor",
+      "emits": [
+        "OBSERVATION_SAMPLE"
+      ]
+    },
+    {
+      "id": "rollback-opener",
+      "kind": "deterministic",
+      "authority": "anchor",
+      "emits": [
+        "CORRECTIVE_PROPOSITION_OPENED"
+      ]
+    },
+    {
+      "id": "contact-relay",
+      "kind": "deterministic",
+      "authority": "anchor",
+      "emits": [
+        "CONTACT_VOTE_OPENED"
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "from": "explorer",
+      "to": "state-machine",
+      "type": "feeds"
+    },
+    {
+      "from": "feedback-aggregator",
+      "to": "state-machine",
+      "type": "feeds"
+    },
+    {
+      "from": "proposer",
+      "to": "state-machine",
+      "type": "feeds"
+    },
+    {
+      "from": "state-machine",
+      "type": "authorizes",
+      "to": "proposition-gate"
+    },
+    {
+      "from": "proposition-gate",
+      "type": "validates",
+      "to": "state-machine"
+    },
+    {
+      "from": "state-machine",
+      "to": "qualifier",
+      "type": "authorizes"
+    },
+    {
+      "from": "qualifier",
+      "to": "state-machine",
+      "type": "validates"
+    },
+    {
+      "from": "qualifier",
+      "to": "state-machine",
+      "type": "vetoes"
+    },
+    {
+      "from": "state-machine",
+      "to": "vote-tally",
+      "type": "authorizes"
+    },
+    {
+      "from": "vote-tally",
+      "to": "state-machine",
+      "type": "validates"
+    },
+    {
+      "from": "vote-tally",
+      "to": "state-machine",
+      "type": "vetoes"
+    },
+    {
+      "from": "state-machine",
+      "to": "budget-ledger",
+      "type": "authorizes"
+    },
+    {
+      "from": "budget-ledger",
+      "to": "state-machine",
+      "type": "validates"
+    },
+    {
+      "from": "budget-ledger",
+      "to": "state-machine",
+      "type": "vetoes"
+    },
+    {
+      "from": "state-machine",
+      "to": "verifier",
+      "type": "authorizes"
+    },
+    {
+      "from": "verifier",
+      "to": "state-machine",
+      "type": "validates"
+    },
+    {
+      "from": "verifier",
+      "to": "state-machine",
+      "type": "vetoes"
+    },
+    {
+      "from": "state-machine",
+      "to": "observation-gate",
+      "type": "authorizes"
+    },
+    {
+      "from": "observation-gate",
+      "to": "state-machine",
+      "type": "validates"
+    },
+    {
+      "from": "observation-gate",
+      "to": "state-machine",
+      "type": "vetoes"
+    },
+    {
+      "from": "rollback-opener",
+      "to": "state-machine",
+      "type": "validates"
+    },
+    {
+      "from": "contact-relay",
+      "to": "state-machine",
+      "type": "validates"
+    },
+    {
+      "from": "human-owner",
+      "to": "state-machine",
+      "type": "owns_target"
+    }
+  ],
+  "requiredAnchors": [
+    "qualification-passed",
+    "vote-quorum",
+    "budget-envelope",
+    "controls-passed",
+    "auto-ship-policy",
+    "observation-window",
+    "rollback-path-exists",
+    "frozen-set-intact",
+    "regression"
+  ],
+  "anchorCommands": {
+    "qualification-passed": "bun run product:validate",
+    "vote-quorum": "bun test packages/core/tests/product-loop.regression.test.ts",
+    "budget-envelope": "bun test packages/core/tests/product-loop.regression.test.ts",
+    "controls-passed": "bun test packages/core/tests/product-loop.machine.test.ts",
+    "auto-ship-policy": "bun test packages/core/tests/product-loop.regression.test.ts",
+    "observation-window": "bun test packages/core/tests/product-loop.regression.test.ts",
+    "rollback-path-exists": "bun run product:anchors",
+    "frozen-set-intact": "bun test packages/core/tests/product-loop.frozen.test.ts",
+    "regression": "bun run product:regression"
+  },
+  "voteExpiryHours": {
+    "standard": 72,
+    "criticalSecurity": 12
+  },
+  "observationConsecutiveMeasurements": 3,
+  "memberQuotaRenewalMinutes": 300
+}

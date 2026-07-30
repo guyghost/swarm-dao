@@ -1,0 +1,133 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "product-loop.graph.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "version",
+    "scope",
+    "proposalStateAuthority",
+    "evidenceRoot",
+    "owner",
+    "nodes",
+    "edges",
+    "requiredAnchors",
+    "anchorCommands",
+    "voteExpiryHours",
+    "observationConsecutiveMeasurements",
+    "memberQuotaRenewalMinutes"
+  ],
+  "properties": {
+    "$schema": { "const": "./product-loop.graph.schema.json" },
+    "id": { "const": "swarm-dao-product-loop" },
+    "version": { "const": 1 },
+    "scope": { "const": "continuous-product-loop" },
+    "proposalStateAuthority": { "const": "none" },
+    "evidenceRoot": { "const": "evidence/product-loops" },
+    "owner": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "authority"],
+      "properties": {
+        "id": { "const": "human-owner" },
+        "kind": { "const": "human" },
+        "authority": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "owns_target",
+              "resolves_review",
+              "expands_budget",
+              "reduces_scope",
+              "abandons_task",
+              "authorizes_verification_retry",
+              "authorizes_contact_relay",
+              "cancels"
+            ]
+          }
+        }
+      }
+    },
+    "nodes": {
+      "type": "array",
+      "minItems": 10,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "kind", "authority", "emits"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "kind": { "enum": ["ai_worker", "deterministic"] },
+          "authority": { "enum": ["signal_only", "anchor"] },
+          "emits": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+        }
+      }
+    },
+    "edges": {
+      "type": "array",
+      "minItems": 20,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["from", "to", "type"],
+        "properties": {
+          "from": { "type": "string", "minLength": 1 },
+          "to": { "type": "string", "minLength": 1 },
+          "type": { "enum": ["feeds", "validates", "owns_target", "authorizes", "vetoes"] }
+        }
+      }
+    },
+    "requiredAnchors": {
+      "const": [
+        "qualification-passed",
+        "vote-quorum",
+        "budget-envelope",
+        "controls-passed",
+        "auto-ship-policy",
+        "observation-window",
+        "rollback-path-exists",
+        "frozen-set-intact",
+        "regression"
+      ]
+    },
+    "anchorCommands": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "qualification-passed",
+        "vote-quorum",
+        "budget-envelope",
+        "controls-passed",
+        "auto-ship-policy",
+        "observation-window",
+        "rollback-path-exists",
+        "frozen-set-intact",
+        "regression"
+      ],
+      "properties": {
+        "qualification-passed": { "const": "bun run product:validate" },
+        "vote-quorum": { "const": "bun test packages/core/tests/product-loop.policy.test.ts" },
+        "budget-envelope": { "const": "bun test packages/core/tests/product-loop.policy.test.ts" },
+        "controls-passed": { "const": "bun test packages/core/tests/product-loop.machine.test.ts" },
+        "auto-ship-policy": { "const": "bun test packages/core/tests/product-loop.policy.test.ts" },
+        "observation-window": { "const": "bun test packages/core/tests/product-loop.policy.test.ts" },
+        "rollback-path-exists": { "const": "bun run product:anchors" },
+        "frozen-set-intact": { "const": "bun test packages/core/tests/product-loop.frozen.test.ts" },
+        "regression": { "const": "bun run product:regression" }
+      }
+    },
+    "voteExpiryHours": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["standard", "criticalSecurity"],
+      "properties": {
+        "standard": { "const": 72 },
+        "criticalSecurity": { "const": 12 }
+      }
+    },
+    "observationConsecutiveMeasurements": { "const": 3 },
+    "memberQuotaRenewalMinutes": { "const": 300 }
+  }
+}
