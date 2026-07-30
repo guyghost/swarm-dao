@@ -3,6 +3,7 @@ import {
   type BudgetEnvelope,
   type ControlResult,
   canAutoShip,
+  canHumanAuthorizeSensitiveDeploy,
   createProductActor,
   evaluateObservation,
   type ObservationMetric,
@@ -71,6 +72,10 @@ describe("product-loop — architectural regression invariants", () => {
   });
 
   it("splits anchors into auto-sealed vs tool-recorded", () => {
+    // `rollback-path-exists` is EXTERNALLY recorded by the verifier tool
+    // (product:anchors) after confirming the rollback artifact is genuine; it is
+    // not auto-sealed by the ship action. This makes the rollback path a real
+    // ground-contact check, not a self-assertion.
     expect([...PRODUCT_AUTO_SEALED_ANCHORS]).toEqual([
       "qualification-passed",
       "vote-quorum",
@@ -78,9 +83,8 @@ describe("product-loop — architectural regression invariants", () => {
       "controls-passed",
       "auto-ship-policy",
       "observation-window",
-      "rollback-path-exists",
     ]);
-    expect([...PRODUCT_EXTERNAL_ANCHORS]).toEqual(["frozen-set-intact", "regression"]);
+    expect([...PRODUCT_EXTERNAL_ANCHORS]).toEqual(["frozen-set-intact", "regression", "rollback-path-exists"]);
   });
 
   it("the only declared terminal states are explicit honest outcomes", () => {
@@ -88,17 +92,20 @@ describe("product-loop — architectural regression invariants", () => {
   });
 
   it("exposes the ship-gate anchor subset (must hold before VERIFY_EVALUATE can ship)", () => {
+    // `rollback-path-exists` IS a ship-gate prerequisite because it is now an
+    // external anchor recorded before VERIFY_EVALUATE, not sealed by the ship
+    // action itself.
     expect([...PRODUCT_SHIP_GATE_ANCHORS]).toEqual([
       "qualification-passed",
       "vote-quorum",
       "budget-envelope",
       "frozen-set-intact",
       "regression",
+      "rollback-path-exists",
     ]);
     // Anchors sealed AFTER the gate passes are excluded to avoid chicken-and-egg.
     expect(PRODUCT_SHIP_GATE_ANCHORS).not.toContain("controls-passed");
     expect(PRODUCT_SHIP_GATE_ANCHORS).not.toContain("auto-ship-policy");
-    expect(PRODUCT_SHIP_GATE_ANCHORS).not.toContain("rollback-path-exists");
     expect(PRODUCT_SHIP_GATE_ANCHORS).not.toContain("observation-window");
   });
 
@@ -147,7 +154,12 @@ describe("product-loop — architectural regression invariants", () => {
     const actor = startActor("terminal-lock");
     actor.send({ type: "PROPOSAL_DRAFTED", source: "ai", draft: draft() });
     actor.send({ type: "OPEN_PROPOSITION", source: "tool" });
-    actor.send({ type: "QUALIFICATION_RUN", source: "tool" });
+    actor.send({
+      type: "QUALIFICATION_RUN",
+      source: "tool",
+      permissionCleared: true,
+      permissionEvidence: "permissions: none required",
+    });
     actor.send({ type: "VOTE_OPENED", source: "tool", config: { quorum: 1, kind: "standard", expiryHours: 72 } });
     actor.send({ type: "VOTE_EXPIRED", source: "tool" });
     expect(actor.getSnapshot().value).toBe("rejected");
@@ -206,5 +218,33 @@ describe("product-loop — pure policy edge cases", () => {
   it("declares the allowed auto-ship categories including security (auto-votable, not auto-shippable)", () => {
     expect([...PRODUCT_ALLOWED_CATEGORIES]).toContain("performance");
     expect([...PRODUCT_ALLOWED_CATEGORIES]).toContain("security");
+  });
+
+  it("canHumanAuthorizeSensitiveDeploy only applies to sensitive, fully-verified changes", () => {
+    const passedAnchors = Object.fromEntries(
+      PRODUCT_SHIP_GATE_ANCHORS.map((a) => [a, { status: "passed" as const, evidence: `${a}-ok` }]),
+    );
+    const baseSensitive = {
+      draft: draft({ category: "security", touchesSensitive: true }),
+      controls: { unit: passedControl() },
+      budget: budget(90),
+      anchors: passedAnchors,
+    };
+    // A sensitive, verified change with all ship-gate anchors and budget can be
+    // human-authorized for deploy.
+    expect(canHumanAuthorizeSensitiveDeploy(baseSensitive).allowed).toBe(true);
+    // A non-sensitive (auto-shippable) change must NOT use the deploy-authorized path.
+    expect(canHumanAuthorizeSensitiveDeploy({ ...baseSensitive, draft: draft() }).allowed).toBe(false);
+    // A failing control blocks human deploy too.
+    expect(
+      canHumanAuthorizeSensitiveDeploy({
+        ...baseSensitive,
+        controls: { unit: { ...passedControl(), status: "failed" } },
+      }).allowed,
+    ).toBe(false);
+    // No budget, no deploy.
+    expect(canHumanAuthorizeSensitiveDeploy({ ...baseSensitive, budget: budget(0) }).allowed).toBe(false);
+    // Missing ship-gate anchors (e.g. rollback-path-exists not yet recorded) blocks deploy.
+    expect(canHumanAuthorizeSensitiveDeploy({ ...baseSensitive, anchors: {} }).allowed).toBe(false);
   });
 });

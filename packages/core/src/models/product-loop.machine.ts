@@ -21,6 +21,10 @@ export const PRODUCT_MEMBER_QUOTA_RENEWAL_MINUTES = 300;
 export const PRODUCT_ALLOWED_CATEGORIES = ["performance", "refactor", "tooling", "docs", "security"] as const;
 
 // Anchors auto-sealed by machine actions (the tool never records these).
+// `rollback-path-exists` is NOT auto-sealed: it is an external, tool-recorded
+// anchor so the ship gate trusts a verified artifact rather than a bare draft
+// string (the verifier records it via ANCHOR_RECORDED only after the rollback
+// command confirms the artifact is genuine).
 export const PRODUCT_AUTO_SEALED_ANCHORS = [
   "qualification-passed",
   "vote-quorum",
@@ -28,20 +32,20 @@ export const PRODUCT_AUTO_SEALED_ANCHORS = [
   "controls-passed",
   "auto-ship-policy",
   "observation-window",
-  "rollback-path-exists",
 ] as const;
 
 // Anchors the tool records via ANCHOR_RECORDED (the machine never auto-seals these).
-export const PRODUCT_EXTERNAL_ANCHORS = ["frozen-set-intact", "regression"] as const;
+export const PRODUCT_EXTERNAL_ANCHORS = ["frozen-set-intact", "regression", "rollback-path-exists"] as const;
 
 /**
  * Subset of required anchors that must ALREADY be passed at the VERIFY_EVALUATE
  * ship gate. It deliberately EXCLUDES `observation-window` (sealed only when the
  * observation window completes) and the anchors `sealVerificationAnchors` itself
- * seals when it transitions to `ship` (`controls-passed`, `auto-ship-policy`,
- * `rollback-path-exists`) — those decisions are re-derived from draft/controls/
- * budget by `canAutoShip`, never read back as their own gate. This avoids a
- * chicken-and-egg where a guard depends on an anchor its own action sets.
+ * seals when it transitions to `ship` (`controls-passed`, `auto-ship-policy`) —
+ * those decisions are re-derived from draft/controls/budget by `canAutoShip`,
+ * never read back as their own gate. `rollback-path-exists` IS included because
+ * it is now an external, tool-recorded anchor (not sealed by the ship action),
+ * so there is no chicken-and-egg: the verifier must have already recorded it.
  */
 export const PRODUCT_SHIP_GATE_ANCHORS = [
   "qualification-passed",
@@ -49,6 +53,7 @@ export const PRODUCT_SHIP_GATE_ANCHORS = [
   "budget-envelope",
   "frozen-set-intact",
   "regression",
+  "rollback-path-exists",
 ] as const;
 
 export type ProductAnchorName = (typeof REQUIRED_PRODUCT_ANCHORS)[number];
@@ -57,7 +62,7 @@ export type ProductAnchorStatus = "passed" | "failed";
 export type ProductCategory = (typeof PRODUCT_ALLOWED_CATEGORIES)[number];
 export type VoteKind = "standard" | "criticalSecurity";
 export type ObservationMetric = "errors" | "aiCost" | "latency" | "satisfaction";
-export type ReviewResolution = "scope-reduced" | "budget-expanded" | "abandoned";
+export type ReviewResolution = "scope-reduced" | "budget-expanded" | "abandoned" | "deploy-authorized";
 
 export type ProposalDraft = Readonly<{
   scope: string;
@@ -120,6 +125,9 @@ export type ProductContext = {
   contactVoteQuorumReached: boolean;
   contactRelayAuthorized: boolean;
   reviewReason: string | null;
+  permissionsCleared: boolean;
+  permissionEvidence: string | null;
+  signalLog: readonly string[];
   anchors: Partial<Record<ProductAnchorName, ProductAnchorResult>>;
   terminalReason: string | null;
 };
@@ -129,7 +137,12 @@ export type ProductEvent =
   | { type: "FEEDBACK_AGGREGATED"; source: ProductSignalSource; summary: string }
   | { type: "PROPOSAL_DRAFTED"; source: ProductSignalSource; draft: ProposalDraft }
   | { type: "OPEN_PROPOSITION"; source: ProductSignalSource }
-  | { type: "QUALIFICATION_RUN"; source: ProductSignalSource }
+  | {
+      type: "QUALIFICATION_RUN";
+      source: ProductSignalSource;
+      permissionCleared: boolean;
+      permissionEvidence: string;
+    }
   | { type: "VOTE_OPENED"; source: ProductSignalSource; config: VoteConfig }
   | { type: "VOTE_CAST"; source: ProductSignalSource; favorable: number }
   | { type: "VOTE_EVALUATE"; source: ProductSignalSource }
@@ -183,11 +196,16 @@ export const isRequiredProductAnchor = (value: unknown): value is ProductAnchorN
 // --- Deterministic policies. Pure. The model — not the tool adapter — decides. ---
 
 /**
- * Qualification: scope, dependencies, allowed category (implicit permission
- * gate), budget presence, and rollback artifact. Sensitive security work may
- * pass (it is auto-votable) but is flagged, which later forbids auto-ship.
+ * Qualification: scope, dependencies, allowed category, affirmative permission
+ * clearance, budget presence, and rollback artifact. Permission clearance is an
+ * explicit, evidence-backed boolean carried by QUALIFICATION_RUN — qualification
+ * never passes on the mere absence of a denial. Sensitive security work may pass
+ * (it is auto-votable) but is flagged, which later forbids auto-ship.
  */
-export const qualifyProposal = (draft: ProposalDraft | null): { qualified: boolean; reason: string } => {
+export const qualifyProposal = (
+  draft: ProposalDraft | null,
+  permissionsCleared: boolean,
+): { qualified: boolean; reason: string } => {
   if (!draft) return { qualified: false, reason: "missing draft" };
   if (!isNonEmpty(draft.scope)) return { qualified: false, reason: "empty scope" };
   if (!(PRODUCT_ALLOWED_CATEGORIES as readonly string[]).includes(draft.category)) {
@@ -196,9 +214,10 @@ export const qualifyProposal = (draft: ProposalDraft | null): { qualified: boole
   if (!Array.isArray(draft.dependencies) || draft.dependencies.some((dep) => !isNonEmpty(dep))) {
     return { qualified: false, reason: "unresolvable dependencies" };
   }
+  if (!permissionsCleared) return { qualified: false, reason: "permissions not cleared" };
   if (draft.budgetAllocation <= 0) return { qualified: false, reason: "no budget allocated" };
   if (!isNonEmpty(draft.rollbackArtifact)) return { qualified: false, reason: "no rollback artifact" };
-  return { qualified: true, reason: "scope, dependencies, category, and budget validated" };
+  return { qualified: true, reason: "scope, dependencies, category, permissions, and budget validated" };
 };
 
 /** Vote tally: quorum is a minimum favorable-vote threshold, not participation. */
@@ -247,6 +266,35 @@ export const canAutoShip = (context: {
   if (!isNonEmpty(draft.rollbackArtifact)) return { allowed: false, reason: "no rollback artifact" };
   if (budgetRemaining(budget) <= 0) return { allowed: false, reason: "budget exhausted" };
   return { allowed: true, reason: "reversible, allowed, rollback exists, budget remains, not sensitive" };
+};
+
+const isSensitiveDraft = (draft: ProposalDraft | null): boolean =>
+  draft !== null && (draft.category === "security" || draft.touchesSensitive === true);
+
+/**
+ * Human deploy-authorization gate for SENSITIVE changes only. Auto-ship forbids
+ * sensitive work; such a change that otherwise passes verification routes to
+ * Review, where the human owner may authorize deployment. This gate requires:
+ * the draft is sensitive, every control passed, budget remains, and the
+ * ship-gate anchors (including the externally verified rollback path) hold.
+ * It can never be exercised by an AI source — REVIEW_RESOLVED is human-only.
+ */
+export const canHumanAuthorizeSensitiveDeploy = (context: {
+  draft: ProposalDraft | null;
+  controls: Record<string, ControlResult>;
+  budget: BudgetEnvelope | null;
+  anchors: Partial<Record<ProductAnchorName, ProductAnchorResult>>;
+}): { allowed: boolean; reason: string } => {
+  const { draft, controls, budget, anchors } = context;
+  if (!draft) return { allowed: false, reason: "missing draft" };
+  if (!isSensitiveDraft(draft)) return { allowed: false, reason: "deploy-authorized is only for sensitive changes" };
+  const controlValues = Object.values(controls);
+  if (controlValues.length === 0 || controlValues.some((c) => c.status !== "passed")) {
+    return { allowed: false, reason: "every control must pass before deploy" };
+  }
+  if (budgetRemaining(budget) <= 0) return { allowed: false, reason: "budget exhausted" };
+  if (!shipGateAnchorsPassed(anchors)) return { allowed: false, reason: "ship-gate anchors not passed" };
+  return { allowed: true, reason: "human-authorized deploy of sensitive, verified, reversible change" };
 };
 
 /**
@@ -301,6 +349,9 @@ const initialContext = (input: ProductMachineInput): ProductContext => ({
   contactVoteQuorumReached: false,
   contactRelayAuthorized: false,
   reviewReason: null,
+  permissionsCleared: false,
+  permissionEvidence: null,
+  signalLog: [],
   anchors: {},
   terminalReason: null,
 });
@@ -319,19 +370,31 @@ const productSetup = setup({
       event.type === "PROPOSAL_DRAFTED" && event.source === "ai" && isProposalDraft(event.draft),
     isToolOpenProposition: ({ context, event }) =>
       event.type === "OPEN_PROPOSITION" && event.source === "tool" && context.draft !== null,
-    isToolQualificationRun: ({ event }) => event.type === "QUALIFICATION_RUN" && event.source === "tool",
+    isToolQualificationRun: ({ event }) =>
+      event.type === "QUALIFICATION_RUN" &&
+      event.source === "tool" &&
+      event.permissionCleared === true &&
+      isNonEmpty(event.permissionEvidence),
+    isToolVoteOpenedFirstTime: ({ context }) => context.voteConfig === null,
     isToolVoteOpened: ({ event }) =>
       event.type === "VOTE_OPENED" &&
       event.source === "tool" &&
       event.config.quorum > 0 &&
       (event.config.kind === "standard" || event.config.kind === "criticalSecurity") &&
-      event.config.expiryHours > 0,
+      event.config.expiryHours === PRODUCT_VOTE_EXPIRY_HOURS[event.config.kind],
     isToolVoteCast: ({ event }) => event.type === "VOTE_CAST" && event.source === "tool" && event.favorable > 0,
     isSystemVoteEvaluateWithQuorum: ({ context, event }) =>
       event.type === "VOTE_EVALUATE" &&
       event.source === "system" &&
       tallyProductVotes(context.favorableVotes, context.voteConfig).quorumReached,
-    isToolVoteExpired: ({ event }) => event.type === "VOTE_EXPIRED" && event.source === "tool",
+    isToolVoteExpiredWithQuorum: ({ context, event }) =>
+      event.type === "VOTE_EXPIRED" &&
+      event.source === "tool" &&
+      tallyProductVotes(context.favorableVotes, context.voteConfig).quorumReached,
+    isToolVoteExpiredWithoutQuorum: ({ context, event }) =>
+      event.type === "VOTE_EXPIRED" &&
+      event.source === "tool" &&
+      !tallyProductVotes(context.favorableVotes, context.voteConfig).quorumReached,
     isToolBudgetCharge: ({ event }) =>
       event.type === "BUDGET_CHARGE" &&
       event.source === "tool" &&
@@ -367,6 +430,7 @@ const productSetup = setup({
       evaluateObservation(context.observationSamples, event.windowElapsed).confirmed,
     observationClean: ({ context, event }) =>
       event.type === "OBSERVATION_EVALUATE" &&
+      context.observationSamples.length >= PRODUCT_OBSERVATION_CONSECUTIVE_MEASUREMENTS &&
       !evaluateObservation(context.observationSamples, event.windowElapsed).confirmed &&
       event.windowElapsed,
     isValidExternalAnchor: ({ event }) =>
@@ -383,6 +447,16 @@ const productSetup = setup({
       (event.resolution === "scope-reduced" ||
         event.resolution === "budget-expanded" ||
         event.resolution === "abandoned"),
+    isHumanDeployAuthorized: ({ context, event }) =>
+      event.type === "REVIEW_RESOLVED" &&
+      event.source === "human" &&
+      event.resolution === "deploy-authorized" &&
+      canHumanAuthorizeSensitiveDeploy({
+        draft: context.draft,
+        controls: context.controls,
+        budget: context.budget,
+        anchors: context.anchors,
+      }).allowed,
     isHumanRetryVerification: ({ event }) => event.type === "RETRY_VERIFICATION_AUTHORIZED" && event.source === "human",
     isToolContactVoteOpened: ({ event }) => event.type === "CONTACT_VOTE_OPENED" && event.source === "tool",
     isToolContactVoteQuorum: ({ event }) =>
@@ -399,13 +473,33 @@ const productSetup = setup({
     recordDraft: assign(({ context, event }) =>
       event.type === "PROPOSAL_DRAFTED" ? { ...context, draft: event.draft } : context,
     ),
+    recordSignal: assign(({ context, event }) => {
+      // Signal-only events (AGENT_SIGNAL, FEEDBACK_AGGREGATED) carry no state
+      // target; they are recorded as traceable product signal evidence so the
+      // persisted snapshot reflects that the machine accepted them. This keeps
+      // feedback/signal history queryable and makes acceptance observable to the
+      // journal-based runner without coupling it to guard internals.
+      if (event.type !== "AGENT_SIGNAL" && event.type !== "FEEDBACK_AGGREGATED") return context;
+      const entry =
+        event.type === "AGENT_SIGNAL" ? `agent-signal: ${event.note}` : `feedback-aggregated: ${event.summary}`;
+      return { ...context, signalLog: [...context.signalLog, entry] };
+    }),
+    recordPermission: assign(({ context, event }) =>
+      event.type === "QUALIFICATION_RUN"
+        ? {
+            ...context,
+            permissionsCleared: event.permissionCleared,
+            permissionEvidence: event.permissionEvidence,
+          }
+        : context,
+    ),
     sealQualificationPassed: assign(({ context }) => ({
       ...context,
       anchors: {
         ...context.anchors,
         "qualification-passed": {
           status: "passed",
-          evidence: "qualifier: scope, dependencies, category, budget validated",
+          evidence: `qualifier: scope, dependencies, category, permissions, budget validated (${context.permissionEvidence ?? "none"})`,
         },
       },
     })),
@@ -458,13 +552,26 @@ const productSetup = setup({
             status: decision.allowed ? "passed" : "failed",
             evidence: decision.reason,
           },
-          "rollback-path-exists": {
-            status: "passed",
-            evidence: context.draft?.rollbackArtifact ?? "rollback artifact sealed",
-          },
+          // NOTE: `rollback-path-exists` is NOT sealed here. It is an external
+          // anchor recorded by the verifier tool (product:anchors) via
+          // ANCHOR_RECORDED after the rollback artifact is confirmed genuine.
         },
       };
     }),
+    sealHumanAuthorizedDeploy: assign(({ context }) => ({
+      ...context,
+      anchors: {
+        ...context.anchors,
+        "controls-passed": {
+          status: "passed",
+          evidence: `${Object.keys(context.controls).length} controls passed (human deploy review)`,
+        },
+        "auto-ship-policy": {
+          status: "passed",
+          evidence: "sensitive change deploy authorized by human owner review; auto-ship does not apply",
+        },
+      },
+    })),
     recordObservationSample: assign(({ context, event }) => {
       if (event.type !== "OBSERVATION_SAMPLE") return context;
       // Satisfaction is recorded as signal only; it can never confirm degradation.
@@ -555,26 +662,38 @@ export const productMachine = productSetup.createMachine({
       guard: "isHumanContactRelayAuthorized",
       actions: "recordContactRelay",
     },
-    ANCHOR_RECORDED: { guard: "isValidExternalAnchor", actions: "recordExternalAnchorOnce" },
+    // NOTE: ANCHOR_RECORDED is intentionally NOT global. External anchors
+    // (frozen-set-intact, regression, rollback-path-exists) are only meaningful
+    // and only accepted while the machine is in the `verification` state, where
+    // the verifier tool records them. Accepting them globally would let a
+    // verifier seal regression/frozen-set before any implementation exists.
   },
   states: {
     exploration: {
       on: {
-        AGENT_SIGNAL: { guard: "isAiAgentSignal" },
-        FEEDBACK_AGGREGATED: { guard: "isAiFeedbackAggregated" },
+        AGENT_SIGNAL: { guard: "isAiAgentSignal", actions: "recordSignal" },
+        FEEDBACK_AGGREGATED: { guard: "isAiFeedbackAggregated", actions: "recordSignal" },
         PROPOSAL_DRAFTED: { guard: "isAiProposalDrafted", actions: "recordDraft" },
         OPEN_PROPOSITION: { guard: "isToolOpenProposition", target: "proposition" },
       },
     },
     proposition: {
       on: {
-        QUALIFICATION_RUN: { guard: "isToolQualificationRun", target: "qualification" },
+        // A corrective/re-scope flow clears the draft on entry to proposition
+        // (prepareCorrectiveProposition). The replacement draft must be recorded
+        // here before qualification can run, exactly as in exploration.
+        PROPOSAL_DRAFTED: { guard: "isAiProposalDrafted", actions: "recordDraft" },
+        QUALIFICATION_RUN: {
+          guard: "isToolQualificationRun",
+          target: "qualification",
+          actions: "recordPermission",
+        },
       },
     },
     qualification: {
       always: [
         {
-          guard: ({ context }) => qualifyProposal(context.draft).qualified,
+          guard: ({ context }) => qualifyProposal(context.draft, context.permissionsCleared).qualified,
           target: "vote",
           actions: "sealQualificationPassed",
         },
@@ -583,14 +702,38 @@ export const productMachine = productSetup.createMachine({
     },
     vote: {
       on: {
-        VOTE_OPENED: { guard: "isToolVoteOpened", actions: "recordVoteConfig" },
+        VOTE_OPENED: {
+          guard: ({ context, event }) =>
+            context.voteConfig === null &&
+            event.type === "VOTE_OPENED" &&
+            event.source === "tool" &&
+            event.config.quorum > 0 &&
+            (event.config.kind === "standard" || event.config.kind === "criticalSecurity") &&
+            event.config.expiryHours === PRODUCT_VOTE_EXPIRY_HOURS[event.config.kind],
+          actions: "recordVoteConfig",
+        },
         VOTE_CAST: { guard: "isToolVoteCast", actions: "recordVote" },
         VOTE_EVALUATE: {
           guard: "isSystemVoteEvaluateWithQuorum",
           target: "adopted",
           actions: "sealVoteQuorum",
         },
-        VOTE_EXPIRED: { guard: "isToolVoteExpired", target: "rejected", actions: "recordTerminalRejected" },
+        // Expiry is deterministic: if quorum was already reached when the expiry
+        // event arrives, the task is adopted (and the quorum anchor sealed); only
+        // expiry WITHOUT quorum rejects. This prevents a late expiry from killing
+        // an already-quorate task whose EVALUATE had not yet been emitted.
+        VOTE_EXPIRED: [
+          {
+            guard: "isToolVoteExpiredWithQuorum",
+            target: "adopted",
+            actions: "sealVoteQuorum",
+          },
+          {
+            guard: "isToolVoteExpiredWithoutQuorum",
+            target: "rejected",
+            actions: "recordTerminalRejected",
+          },
+        ],
       },
     },
     adopted: {
@@ -621,6 +764,11 @@ export const productMachine = productSetup.createMachine({
     verification: {
       on: {
         VERIFY_RUN: { guard: "isToolVerifyRun", actions: "recordControl" },
+        // External anchors (frozen-set-intact, regression, rollback-path-exists)
+        // are recorded ONLY in verification by the verifier tool. `rollback-path-
+        // exists` is a ship-gate prerequisite, so it must be recorded before
+        // VERIFY_EVALUATE selects ship.
+        ANCHOR_RECORDED: { guard: "isValidExternalAnchor", actions: "recordExternalAnchorOnce" },
         VERIFY_EVALUATE: [
           {
             guard: ({ context, event }) =>
@@ -677,19 +825,35 @@ export const productMachine = productSetup.createMachine({
             actions: "prepareCorrectiveProposition",
           },
           {
-            // Budget expansion is the ONLY escape from BudgetBlocked. The
-            // human review must declare a strictly larger envelope than what
-            // has already been consumed; otherwise the task would immediately
+            // Budget expansion is the ONLY escape from BudgetBlocked, and only
+            // when the review was actually entered because of budget exhaustion.
+            // This prevents any other review cause (qualification failure,
+            // permission denial, verification failure) from using budget-expanded
+            // to jump straight to execution, bypassing qualification and vote. The
+            // human review must declare a strictly larger envelope than what has
+            // already been consumed; otherwise the task would immediately
             // re-block. Consumed spend and history are preserved.
             guard: ({ context, event }) =>
               event.type === "REVIEW_RESOLVED" &&
               event.source === "human" &&
               event.resolution === "budget-expanded" &&
+              context.reviewReason === "budget-exhausted" &&
               typeof event.expandedBudget === "number" &&
               Number.isFinite(event.expandedBudget) &&
               event.expandedBudget > (context.budget?.consumed ?? 0),
             target: "execution",
             actions: "expandBudget",
+          },
+          {
+            // Human deploy-authorization: the ONLY path to ship for sensitive
+            // changes (security/permissions/secrets/payments/sensitive-data) that
+            // passed verification but are forbidden from auto-ship. The
+            // isHumanDeployAuthorized guard re-checks controls, budget, and the
+            // ship-gate anchors (including the externally verified rollback
+            // path). No AI source may emit this.
+            guard: "isHumanDeployAuthorized",
+            target: "ship",
+            actions: "sealHumanAuthorizedDeploy",
           },
           {
             guard: ({ event }) =>

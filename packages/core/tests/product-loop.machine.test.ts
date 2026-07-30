@@ -31,7 +31,12 @@ const reachVote = (runId = "machine-nominal", draft: ProposalDraft = baseDraft):
   const actor = createProductActor({ runId });
   actor.send({ type: "PROPOSAL_DRAFTED", source: "ai", draft });
   actor.send({ type: "OPEN_PROPOSITION", source: "tool" });
-  actor.send({ type: "QUALIFICATION_RUN", source: "tool" });
+  actor.send({
+    type: "QUALIFICATION_RUN",
+    source: "tool",
+    permissionCleared: true,
+    permissionEvidence: "permissions: none required (performance category)",
+  });
   actor.send({ type: "VOTE_OPENED", source: "tool", config: standardVote });
   return actor;
 };
@@ -144,10 +149,27 @@ describe("product-loop machine — nominal transitions", () => {
     actor.stop();
   });
 
-  it("does not roll back on a single degraded measurement", () => {
+  it("does not roll back (or validate) on a single degraded measurement — needs 3 consecutive", () => {
     const actor = reachVote("single-sample");
     driveToObservation(actor);
     actor.send({ type: "OBSERVATION_SAMPLE", source: "tool", sample: sample("errors", true) });
+    actor.send({ type: "OBSERVATION_EVALUATE", source: "system", windowElapsed: true });
+    // A single sample neither confirms degradation (needs 3 consecutive) nor
+    // validates (needs >= 3 samples). The machine stays under observation.
+    expect(actor.getSnapshot().value).toBe("observation");
+    actor.stop();
+  });
+
+  it("requires at least 3 clean samples to validate the observation window", () => {
+    const actor = reachVote("obs-min-samples");
+    driveToObservation(actor);
+    // Two clean samples are not enough to validate.
+    actor.send({ type: "OBSERVATION_SAMPLE", source: "tool", sample: sample("errors", false) });
+    actor.send({ type: "OBSERVATION_SAMPLE", source: "tool", sample: sample("aiCost", false) });
+    actor.send({ type: "OBSERVATION_EVALUATE", source: "system", windowElapsed: true });
+    expect(actor.getSnapshot().value).toBe("observation");
+    // A third clean sample lets the window validate.
+    actor.send({ type: "OBSERVATION_SAMPLE", source: "tool", sample: sample("latency", false) });
     actor.send({ type: "OBSERVATION_EVALUATE", source: "system", windowElapsed: true });
     expect(actor.getSnapshot().value).toBe("validated");
     actor.stop();
@@ -171,6 +193,73 @@ describe("product-loop machine — nominal transitions", () => {
     passExternalAnchors(actor);
     actor.send({ type: "VERIFY_EVALUATE", source: "system" });
     expect(actor.getSnapshot().value).toBe("review");
+    actor.stop();
+  });
+
+  it("lets a human authorize deploy of a sensitive change from review (auto-ship stays blocked)", () => {
+    const actor = reachVote("sensitive-deploy", {
+      ...baseDraft,
+      category: "security",
+      touchesSensitive: true,
+    });
+    actor.send({ type: "VOTE_CAST", source: "tool", favorable: 1 });
+    actor.send({ type: "VOTE_EVALUATE", source: "system" });
+    actor.send({
+      type: "BUDGET_CHARGE",
+      source: "tool",
+      action: { amount: 1, description: "impl", evidence: "evidence/diff/sec.md" },
+    });
+    actor.send({ type: "EXECUTION_DONE", source: "tool" });
+    actor.send({ type: "VERIFY_RUN", source: "tool", control: passedControl() });
+    passExternalAnchors(actor);
+    actor.send({ type: "VERIFY_EVALUATE", source: "system" });
+    expect(actor.getSnapshot().value).toBe("review");
+    // AI cannot self-authorize a sensitive deploy.
+    actor.send({ type: "REVIEW_RESOLVED", source: "ai", resolution: "deploy-authorized" });
+    expect(actor.getSnapshot().value).toBe("review");
+    // Human authorizes deploy; controls + rollback anchor + budget all hold.
+    actor.send({ type: "REVIEW_RESOLVED", source: "human", resolution: "deploy-authorized" });
+    expect(actor.getSnapshot().value).toBe("observation");
+    actor.stop();
+  });
+
+  it("adoptes on vote expiry if quorum was already reached (expiry never kills a quorate task)", () => {
+    const actor = reachVote("expiry-with-quorum");
+    actor.send({ type: "VOTE_CAST", source: "tool", favorable: 1 });
+    // Quorum reached but no EVALUATE emitted yet; expiry arrives late. The task
+    // is adopted (and immediately enters execution) rather than rejected.
+    actor.send({ type: "VOTE_EXPIRED", source: "tool" });
+    const snap = actor.getSnapshot();
+    expect(snap.value).toBe("execution");
+    expect(snap.context.anchors["vote-quorum"]?.status).toBe("passed");
+    actor.stop();
+  });
+
+  it("rejects on vote expiry when quorum was not reached", () => {
+    const actor = reachVote("expiry-no-quorum");
+    actor.send({ type: "VOTE_EXPIRED", source: "tool" });
+    expect(actor.getSnapshot().value).toBe("rejected");
+    actor.stop();
+  });
+
+  it("does not accept qualification without explicit permission clearance", () => {
+    const actor = createProductActor({ runId: "perm-required" });
+    actor.send({ type: "PROPOSAL_DRAFTED", source: "ai", draft: baseDraft });
+    actor.send({ type: "OPEN_PROPOSITION", source: "tool" });
+    // QUALIFICATION_RUN without permission fields is rejected by the guard.
+    actor.send({ type: "QUALIFICATION_RUN", source: "tool" as const });
+    expect(actor.getSnapshot().value).toBe("proposition");
+    actor.stop();
+  });
+
+  it("does not re-open a vote that has already been configured (prevents tally reset)", () => {
+    const actor = reachVote("vote-reopen");
+    actor.send({ type: "VOTE_CAST", source: "tool", favorable: 1 });
+    // A duplicate VOTE_OPENED must NOT reset favorableVotes back to 0. The task
+    // still reaches adoption (transient → execution) because the tally persisted.
+    actor.send({ type: "VOTE_OPENED", source: "tool", config: standardVote });
+    actor.send({ type: "VOTE_EVALUATE", source: "system" });
+    expect(actor.getSnapshot().value).toBe("execution");
     actor.stop();
   });
 

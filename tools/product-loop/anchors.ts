@@ -45,7 +45,7 @@ const main = async (): Promise<void> => {
   if (!contract.valid) {
     process.stdout.write(
       JSON.stringify(
-        { anchor: "anchor-reality", passed: false, reason: "contract drifted", issues: contract.issues },
+        { anchor: "rollback-path-exists", passed: false, reason: "contract drifted", issues: contract.issues },
         null,
         2,
       ),
@@ -59,7 +59,7 @@ const main = async (): Promise<void> => {
   process.stdout.write(
     `${JSON.stringify(
       {
-        anchor: "anchor-reality",
+        anchor: "rollback-path-exists",
         passed,
         modelHash: contract.modelHash,
         regressionExitCode: regression.code,

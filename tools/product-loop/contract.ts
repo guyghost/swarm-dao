@@ -79,6 +79,7 @@ const EXPECTED_OWNER_AUTHORITY = [
   "reduces_scope",
   "abandons_task",
   "authorizes_verification_retry",
+  "authorizes_sensitive_deploy",
   "authorizes_contact_relay",
   "cancels",
 ];

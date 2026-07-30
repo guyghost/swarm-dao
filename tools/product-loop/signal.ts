@@ -74,13 +74,12 @@ const PRODUCER_EMISSIONS: Readonly<
   verifier: { source: "tool", emits: new Set(["VERIFY_RUN", "ANCHOR_RECORDED", "PERMISSION_DENIED"]) },
   "observation-gate": { source: "tool", emits: new Set(["OBSERVATION_SAMPLE"]) },
   "rollback-opener": { source: "tool", emits: new Set(["CORRECTIVE_PROPOSITION_OPENED"]) },
-  "contact-relay": { source: "tool", emits: new Set(["CONTACT_VOTE_OPENED"]) },
+  "contact-relay": { source: "tool", emits: new Set(["CONTACT_VOTE_OPENED", "CONTACT_VOTE_QUORUM"]) },
   "human-owner": {
     source: "human",
     emits: new Set([
       "REVIEW_RESOLVED",
       "RETRY_VERIFICATION_AUTHORIZED",
-      "CONTACT_VOTE_QUORUM",
       "CONTACT_RELAY_AUTHORIZED",
       "CANCEL",
     ]),
@@ -165,13 +164,19 @@ const buildEvent = (
         issues.push("payload.draft must be a ProposalDraft object");
         return { type, source, draft: emptyDraft() };
       }
+      // touchesSensitive MUST be an explicit boolean. Defaulting silently to
+      // false would let a malformed sensitive draft bypass human deploy review.
+      const touchesSensitive = draft.touchesSensitive;
+      if (typeof touchesSensitive !== "boolean") {
+        issues.push("payload.draft.touchesSensitive must be an explicit boolean");
+      }
       return {
         type,
         source,
         draft: {
           scope: requiredString(draft, "scope", issues),
           category: asCategory(draft.category, issues, "payload.draft.category"),
-          touchesSensitive: typeof draft.touchesSensitive === "boolean" ? draft.touchesSensitive : false,
+          touchesSensitive: typeof touchesSensitive === "boolean" ? touchesSensitive : false,
           dependencies: Array.isArray(draft.dependencies)
             ? draft.dependencies.filter((d): d is string => nonEmptyString(d))
             : [],
@@ -183,8 +188,24 @@ const buildEvent = (
     }
     case "OPEN_PROPOSITION":
       return { type, source };
-    case "QUALIFICATION_RUN":
-      return { type, source };
+    case "QUALIFICATION_RUN": {
+      // Qualification carries an affirmative, evidence-backed permission
+      // clearance. It never passes on the mere absence of a denial.
+      const permissionCleared = payload.permissionCleared;
+      const permissionEvidence = payload.permissionEvidence;
+      if (typeof permissionCleared !== "boolean") {
+        issues.push("payload.permissionCleared must be a boolean");
+      }
+      if (typeof permissionEvidence !== "string" || permissionEvidence.trim() === "") {
+        issues.push("payload.permissionEvidence must be a non-empty string");
+      }
+      return {
+        type,
+        source,
+        permissionCleared: permissionCleared === true,
+        permissionEvidence: typeof permissionEvidence === "string" ? permissionEvidence : "",
+      };
+    }
     case "VOTE_OPENED": {
       const config = payload.config;
       if (!isRecord(config)) {

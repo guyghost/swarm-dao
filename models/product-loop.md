@@ -110,7 +110,7 @@ separate budget-opened event.
 | `OBSERVATION_SAMPLE` | `tool` | `ship`/`observation` | Record one measurement (errors, aiCost, latency, satisfaction) |
 | `OBSERVATION_EVALUATE` | `system` | `observation` | `validated` at end of window without confirmed degradation; `rollback` on confirmed degradation |
 | `CORRECTIVE_PROPOSITION_OPENED` | `tool` | `rollback` | `proposition`; auto-open the corrective proposal |
-| `REVIEW_RESOLVED` | `human` | `review` | `proposition` (scope-reduced), `execution` (budget-expanded; must carry `expandedBudget > consumed`), or terminal `rejected` (abandoned) per the resolution kind |
+| `REVIEW_RESOLVED` | `human` | `review` | `proposition` (scope-reduced), `execution` (budget-expanded; ONLY when `reviewReason === "budget-exhausted"` and must carry `expandedBudget > consumed`), `ship` (deploy-authorized; ONLY for sensitive changes that passed verification with all ship-gate anchors and budget holding), or terminal `rejected` (abandoned) per the resolution kind |
 | `RETRY_VERIFICATION_AUTHORIZED` | `human` | `review` | `verification`; re-run controls after a human decision |
 | `CONTACT_VOTE_OPENED` | `tool` | any active state | Open a dedicated contact-permission vote (normal quorum) |
 | `CONTACT_RELAY_AUTHORIZED` | `human` | any active state | Relay contact only after the contact vote reached quorum AND final member consent |
@@ -122,9 +122,11 @@ Free-form text is never parsed into a human event.
 
 ### Deterministic policies (live in the machine; called by the tool adapter)
 
-1. **Qualification** — `qualifyProposal(draft)`:
+1. **Qualification** — `qualifyProposal(draft, permissionsCleared)`:
    passes iff `scope` non-empty, `category ∈ allowedCategories`,
-   `dependencies` resolvable, `permissions` present, and `budget` allocated.
+   `dependencies` resolvable, `permissionsCleared === true` (an explicit,
+   evidence-backed boolean carried by `QUALIFICATION_RUN` — qualification never
+   passes on the mere absence of a denial), and `budget` allocated.
    Sensitive security proposals may pass qualification (they are auto-votable)
    but are flagged `touchesSensitive`, which later forbids auto-ship.
 
@@ -144,16 +146,19 @@ Free-form text is never parsed into a human event.
 
 4. **Auto-ship gate** — `canAutoShip(context)`:
    passes iff every control `passed`, `allowedCategory === true`,
-   `reversible === true`, `rollbackExists === true`, `remaining > 0`, and
+   `reversible === true`, `rollbackArtifact` non-empty, `remaining > 0`, and
    `touchesSensitive === false`. Sensitive security work routes to `review`
-   for human deploy authorization.
+   for human deploy authorization via `canHumanAuthorizeSensitiveDeploy`, which
+   additionally requires the externally recorded `rollback-path-exists` anchor.
 
 5. **Observation gate** — `evaluateObservation(window)`:
    priorities are `errors > aiCost > latency`. A single measurement never
    rolls back. Degradation is confirmed only when **N consecutive**
    measurements cross the configured threshold for the highest-priority
-   metric that is breached. User satisfaction is recorded but can never
-   directly select `rollback`; it is aggregated as a product signal.
+   metric that is breached. Validation additionally requires at least **N**
+   samples recorded (an empty or sub-threshold window never validates). User
+   satisfaction is recorded but can never directly select `rollback`; it is
+   aggregated as a product signal.
 
 6. **Feedback anonymity** — feedback is anonymous by default. Contact relay
    requires (a) a dedicated contact-permission vote that reached the normal
@@ -179,7 +184,10 @@ replace a command.
 6. `observation-window` — the observation window elapsed with measurements
    recorded.
 7. `rollback-path-exists` — a rollback artifact/command is registered for the
-   shipped change.
+   shipped change. This is an **external** anchor: it is recorded by the
+   verifier tool (`product:anchors`) via `ANCHOR_RECORDED` after confirming the
+   rollback artifact is genuine, not self-sealed by the ship action. It is a
+   ship-gate prerequisite.
 8. `frozen-set-intact` — the frozen rules the optimizer is never allowed to
    tune are unchanged this run.
 9. `regression` — the independent counter-metric proves that AI-sourced
@@ -214,22 +222,30 @@ replace a command.
 7. `execution` cannot reach `verification` at zero remaining budget; it routes
    to `budgetBlocked`.
 8. `verification` cannot reach `ship` unless every control passed, the change
-   is allowed/reversible, a rollback exists, budget remains, and the change is
-   not sensitive. Otherwise it routes to `review`.
+   is allowed/reversible, the externally recorded `rollback-path-exists` anchor
+   is present, budget remains, and the change is not sensitive. Otherwise it
+   routes to `review`. Sensitive changes can only reach `ship` from `review`
+   via a human `deploy-authorized` resolution that satisfies
+   `canHumanAuthorizeSensitiveDeploy` (all controls passed, allowed/reversible,
+   rollback anchor present, budget holding).
 9. `observation` cannot reach `rollback` on a single measurement; it requires
    N consecutive measurements crossing the deterministic threshold.
-10. User satisfaction feedback can never directly select `rollback`; it is
+10. `observation` cannot reach `validated` with fewer than N recorded samples;
+    an empty or sub-threshold observation window never validates.
+11. A vote at expiry with quorum reached must adopt; a vote at expiry without
+    quorum must reject. A duplicate `VOTE_OPENED` never resets an existing tally.
+12. User satisfaction feedback can never directly select `rollback`; it is
     aggregated as a product signal only.
-11. Member identity is never revealed unless a dedicated contact-permission
+13. Member identity is never revealed unless a dedicated contact-permission
     vote reached quorum AND a final human consent event was emitted.
-12. `budgetBlocked` has exactly one outgoing edge: an immediate, deterministic
+14. `budgetBlocked` has exactly one outgoing edge: an immediate, deterministic
     escalation to `review` (no event, no bypass, no contributor swap, no
     automatic budget increase). Only a human `REVIEW_RESOLVED` can leave `review`.
-13. No agent may unilaterally decide a state transition. `REVIEW_RESOLVED`,
+15. No agent may unilaterally decide a state transition. `REVIEW_RESOLVED`,
     `RETRY_VERIFICATION_AUTHORIZED`, `CONTACT_RELAY_AUTHORIZED`, and `CANCEL`
     are human-only.
-14. Terminal states reject every later event.
-15. Product-loop status never changes a Swarm DAO proposal status, a Graph
+16. Terminal states reject every later event.
+17. Product-loop status never changes a Swarm DAO proposal status, a Graph
     Engineering run status, an Improvement Loop cycle status, or any other
     machine's state; correlation is immutable and one-way.
 16. Existing core-model purity rules apply: no filesystem, network, ambient
