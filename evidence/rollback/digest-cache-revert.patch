@@ -1,0 +1,25 @@
+# Demo rollback artifact for the product-loop reference demo.
+#
+# This is a committed fixture (NOT git-ignored), referenced by the proposal
+# draft in tools/product-loop/demo.ts (`baseDraft.rollbackArtifact`). The
+# product-loop model requires the `rollback-path-exists` external anchor to be
+# sealed by the verifier tool only after the rollback artifact is confirmed
+# genuine. The demo (acting as the verifier) verifies this file on disk before
+# emitting that anchor, so the evidence is truthful rather than fabricated.
+#
+# It reverts the hypothetical "cache the rendered proposal digest" change that
+# the demo's baseDraft.scope describes. It is a fixture for the reference demo
+# only and is not applied to the codebase.
+--- a/packages/core/src/application/proposals/render-digest.ts
++++ b/packages/core/src/application/proposals/render-digest.ts
+@@ -1,9 +1,3 @@
+-const digestCache = new Map<string, string>();
+-
+ export function renderDigest(input: DigestInput): string {
+-  const cached = digestCache.get(input.key);
+-  if (cached) return cached;
+-  const digest = computeDigest(input);
+-  digestCache.set(input.key, digest);
+-  return digest;
++  return computeDigest(input);
+ }
