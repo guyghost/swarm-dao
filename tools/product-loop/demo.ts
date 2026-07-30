@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { validateProductContract } from "./contract.js";
 import { createProductRunner, type ProductRunner, type ProductSubmissionResult } from "./runner.js";
@@ -166,7 +167,15 @@ const driveToObservation = async (
   // 5. Verification. The verifier records a passing control AND the three
   //    external anchors the machine never auto-seals: frozen-set-intact,
   //    regression, and rollback-path-exists. The rollback path is a ship-gate
-  //    prerequisite recorded only after the artifact is confirmed genuine.
+  //    prerequisite recorded only after the artifact is confirmed genuine —
+  //    the demo does not fabricate it; it verifies the declared artifact on
+  //    disk before sealing the anchor.
+  const rollbackArtifactPath = resolve(root, baseDraft.rollbackArtifact);
+  if (!existsSync(rollbackArtifactPath)) {
+    throw new Error(
+      `rollback-path-exists anchor cannot be sealed: artifact not found at ${rollbackArtifactPath}`,
+    );
+  }
   await submit(
     makeSignal(
       runId,
@@ -189,7 +198,7 @@ const driveToObservation = async (
   );
   await submit(
     makeSignal(runId, "ANCHOR_RECORDED", "tool", "verifier", { anchor: "rollback-path-exists", status: "passed" }, [
-      `rollback artifact verified: ${baseDraft.rollbackArtifact}`,
+      `rollback artifact verified on disk: ${baseDraft.rollbackArtifact}`,
     ]),
   );
   await submit(makeSignal(runId, "VERIFY_EVALUATE", "system", "product-runner"));

@@ -2,6 +2,10 @@ import { describe, expect, it } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import {
+  allRequiredAnchorsPassed,
+  REQUIRED_PRODUCT_ANCHORS,
+} from "../../../packages/core/src/models/product-loop.machine.js";
 import { createProductRunner } from "../runner.js";
 
 const FIXED_TIME = "2026-07-30T10:00:00.000Z";
@@ -127,6 +131,21 @@ describe("product runner — nominal path (scenario 1)", () => {
       expect(evalResult.accepted).toBe(true);
       expect(runner.snapshot().state).toBe("validated");
       expect(runner.snapshot().status).toBe("done");
+
+      // The test name promises "all 9 anchors passed" — verify it against the
+      // persisted snapshot rather than only the terminal state/status. Every
+      // required anchor must be present, in `passed` status, and carry
+      // non-empty evidence (the same invariant the model enforces at
+      // `validated` via `allRequiredAnchorsPassed`).
+      const anchors = runner.snapshot().context.anchors;
+      expect(Object.keys(anchors)).toHaveLength(REQUIRED_PRODUCT_ANCHORS.length);
+      for (const name of REQUIRED_PRODUCT_ANCHORS) {
+        const result = anchors[name];
+        expect(result, `anchor ${name} must be recorded`).toBeDefined();
+        expect(result?.status, `anchor ${name} must be passed`).toBe("passed");
+        expect(result?.evidence, `anchor ${name} must carry non-empty evidence`).toBeTruthy();
+      }
+      expect(allRequiredAnchorsPassed(anchors)).toBe(true);
     } finally {
       await rm(evidenceRoot, { recursive: true, force: true });
     }
