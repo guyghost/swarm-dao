@@ -211,13 +211,11 @@ export const tallyProductVotes = (favorable: number, config: VoteConfig | null):
 export const applyBudgetCharge = (envelope: BudgetEnvelope | null, action: BudgetAction): BudgetEnvelope => {
   if (!envelope) return { initial: 0, consumed: 0, history: [] };
   const consumed = envelope.consumed + Math.max(0, action.amount);
-  const remaining = Math.max(0, envelope.initial - consumed);
   return {
     initial: envelope.initial,
     consumed,
-    remaining,
     history: [...envelope.history, action],
-  } as BudgetEnvelope;
+  };
 };
 
 export const budgetRemaining = (envelope: BudgetEnvelope | null): number => {

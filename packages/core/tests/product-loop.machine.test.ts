@@ -29,7 +29,6 @@ const standardVote: VoteConfig = { quorum: 1, kind: "standard", expiryHours: 72 
 
 const reachVote = (runId = "machine-nominal", draft: ProposalDraft = baseDraft): AnyActor => {
   const actor = createProductActor({ runId });
-  actor.start();
   actor.send({ type: "PROPOSAL_DRAFTED", source: "ai", draft });
   actor.send({ type: "OPEN_PROPOSITION", source: "tool" });
   actor.send({ type: "QUALIFICATION_RUN", source: "tool" });

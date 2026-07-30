@@ -108,11 +108,11 @@
       ],
       "properties": {
         "qualification-passed": { "const": "bun run product:validate" },
-        "vote-quorum": { "const": "bun test packages/core/tests/product-loop.policy.test.ts" },
-        "budget-envelope": { "const": "bun test packages/core/tests/product-loop.policy.test.ts" },
+        "vote-quorum": { "const": "bun test packages/core/tests/product-loop.regression.test.ts" },
+        "budget-envelope": { "const": "bun test packages/core/tests/product-loop.regression.test.ts" },
         "controls-passed": { "const": "bun test packages/core/tests/product-loop.machine.test.ts" },
-        "auto-ship-policy": { "const": "bun test packages/core/tests/product-loop.policy.test.ts" },
-        "observation-window": { "const": "bun test packages/core/tests/product-loop.policy.test.ts" },
+        "auto-ship-policy": { "const": "bun test packages/core/tests/product-loop.regression.test.ts" },
+        "observation-window": { "const": "bun test packages/core/tests/product-loop.regression.test.ts" },
         "rollback-path-exists": { "const": "bun run product:anchors" },
         "frozen-set-intact": { "const": "bun test packages/core/tests/product-loop.frozen.test.ts" },
         "regression": { "const": "bun run product:regression" }

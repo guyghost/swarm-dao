@@ -342,7 +342,9 @@ export const validateProductSignal = (input: unknown): ProductSignalValidation =
   }
 
   const type = input.type;
-  const knownType = typeof type === "string" && type in EVENT_SOURCES ? (type as KnownEventType) : null;
+  // Use an own-property lookup so an unknown event whose type collides with an
+  // inherited key (e.g. "toString", "__proto__") is never misclassified as known.
+  const knownType = typeof type === "string" && Object.hasOwn(EVENT_SOURCES, type) ? (type as KnownEventType) : null;
   if (!knownType) issues.push("type must be a known product event");
 
   const source = input.source;
@@ -354,9 +356,11 @@ export const validateProductSignal = (input: unknown): ProductSignalValidation =
 
   // Bind the event's authority to the producer's declared graph node. System
   // evaluation events are emitted by the runner and have no producer node.
+  // Own-property lookup so a caller-supplied prototype key (e.g. "__proto__")
+  // can never resolve to a real producer declaration.
   const producer = typeof input.producer === "string" ? input.producer : "";
   if (knownType && !SYSTEM_EVENTS.has(knownType)) {
-    const declared = PRODUCER_EMISSIONS[producer];
+    const declared = Object.hasOwn(PRODUCER_EMISSIONS, producer) ? PRODUCER_EMISSIONS[producer] : null;
     if (!declared) {
       issues.push(`producer ${producer || "?"} is not a declared graph producer for ${knownType}`);
     } else {

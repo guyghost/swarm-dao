@@ -107,7 +107,6 @@ separate budget-opened event.
 | `EXECUTION_DONE` | `tool` | `execution` | `verification` only when budget remains; otherwise `budgetBlocked` |
 | `VERIFY_RUN` | `tool` | `verification` | Record control results |
 | `VERIFY_EVALUATE` | `system` | `verification` | `ship` if all controls pass, change is allowed/reversible, rollback exists, budget remains, and not sensitive; otherwise `review` |
-| `SHIP_DECIDED` | `tool` | `verification` | `ship` (only the deterministic auto-ship policy) |
 | `OBSERVATION_SAMPLE` | `tool` | `ship`/`observation` | Record one measurement (errors, aiCost, latency, satisfaction) |
 | `OBSERVATION_EVALUATE` | `system` | `observation` | `validated` at end of window without confirmed degradation; `rollback` on confirmed degradation |
 | `CORRECTIVE_PROPOSITION_OPENED` | `tool` | `rollback` | `proposition`; auto-open the corrective proposal |

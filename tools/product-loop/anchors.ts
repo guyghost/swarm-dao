@@ -19,13 +19,24 @@ const run = (
     const child = spawn(cmd, args as string[], { stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
+    let settled = false;
+    const finish = (value: { code: number | null; signal: NodeJS.Signals | null; stdout: string; stderr: string }) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
     child.stdout?.on("data", (chunk) => {
       stdout += chunk.toString();
     });
     child.stderr?.on("data", (chunk) => {
       stderr += chunk.toString();
     });
-    child.on("close", (code, signal) => resolve({ code, signal, stdout, stderr }));
+    // spawn() can fail to start (ENOENT etc.) and emit "error" instead of
+    // "close"; without this handler the gate would hang forever on that path.
+    child.on("error", (error) =>
+      finish({ code: null, signal: null, stdout, stderr: stderr ? `${stderr}\n${error.message}` : error.message }),
+    );
+    child.on("close", (code, signal) => finish({ code, signal, stdout, stderr }));
   });
 
 const main = async (): Promise<void> => {

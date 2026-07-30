@@ -33,7 +33,6 @@ const draft = (overrides: Partial<ProposalDraft> = {}): ProposalDraft => ({
 
 const startActor = (runId = "regression"): AnyActor => {
   const actor = createProductActor({ runId });
-  actor.start();
   return actor;
 };
 
