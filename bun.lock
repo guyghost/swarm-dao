@@ -15,15 +15,26 @@
         "typescript": "^6.0.3",
       },
     },
+    "packages/benchmarks": {
+      "name": "@guyghost/swarm-dao-benchmarks",
+      "version": "0.1.0",
+      "dependencies": {
+        "@guyghost/swarm-dao-core": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+        "@types/node": "^26.0.1",
+      },
+    },
     "packages/claude-adapter": {
       "name": "@guyghost/swarm-dao-claude-adapter",
-      "version": "0.1.0",
+      "version": "0.2.1",
       "bin": {
         "swarm-dao-claude": "./dist/cli.js",
       },
       "dependencies": {
-        "@guyghost/swarm-dao-core": "^0.2.0",
-        "@guyghost/swarm-dao-mcp": "^0.1.0",
+        "@guyghost/swarm-dao-core": "^0.4.0",
+        "@guyghost/swarm-dao-mcp": "^0.2.1",
       },
       "devDependencies": {
         "@types/bun": "latest",
@@ -31,7 +42,7 @@
     },
     "packages/cli": {
       "name": "@guyghost/swarm-dao-cli",
-      "version": "0.2.0",
+      "version": "0.2.2",
       "bin": {
         "swarm-dao": "./dist/cli.js",
       },
@@ -44,13 +55,13 @@
     },
     "packages/codex-adapter": {
       "name": "@guyghost/swarm-dao-codex-adapter",
-      "version": "0.1.0",
+      "version": "0.2.1",
       "bin": {
         "swarm-dao-codex": "./dist/cli.js",
       },
       "dependencies": {
-        "@guyghost/swarm-dao-core": "^0.2.0",
-        "@guyghost/swarm-dao-mcp": "^0.1.0",
+        "@guyghost/swarm-dao-core": "^0.4.0",
+        "@guyghost/swarm-dao-mcp": "^0.2.1",
       },
       "devDependencies": {
         "@types/bun": "latest",
@@ -58,13 +69,13 @@
     },
     "packages/copilot-adapter": {
       "name": "@guyghost/swarm-dao-copilot-adapter",
-      "version": "0.1.0",
+      "version": "0.3.1",
       "bin": {
-        "swarm-dao-copilot": "./dist/cli.js",
+        "swarm-dao-copilot": "dist/cli.js",
       },
       "dependencies": {
-        "@guyghost/swarm-dao-core": "^0.2.0",
-        "@guyghost/swarm-dao-mcp": "^0.1.0",
+        "@guyghost/swarm-dao-core": "^0.4.0",
+        "@guyghost/swarm-dao-mcp": "^0.2.1",
       },
       "devDependencies": {
         "@types/bun": "latest",
@@ -72,7 +83,7 @@
     },
     "packages/core": {
       "name": "@guyghost/swarm-dao-core",
-      "version": "0.2.0",
+      "version": "0.4.0",
       "dependencies": {
         "xstate": "^5.32.2",
       },
@@ -81,14 +92,30 @@
         "@types/node": "^26.0.1",
       },
     },
+    "packages/integration-tests": {
+      "name": "@guyghost/swarm-dao-integration-tests",
+      "version": "0.1.0",
+      "dependencies": {
+        "@guyghost/swarm-dao-claude-adapter": "workspace:*",
+        "@guyghost/swarm-dao-codex-adapter": "workspace:*",
+        "@guyghost/swarm-dao-copilot-adapter": "workspace:*",
+        "@guyghost/swarm-dao-core": "workspace:*",
+        "@guyghost/swarm-dao-mcp": "workspace:*",
+        "@modelcontextprotocol/sdk": "^1.29.0",
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+        "@types/node": "^26.0.1",
+      },
+    },
     "packages/mcp-server": {
       "name": "@guyghost/swarm-dao-mcp",
-      "version": "0.1.0",
+      "version": "0.2.1",
       "bin": {
         "swarm-dao-mcp": "./dist/cli.js",
       },
       "dependencies": {
-        "@guyghost/swarm-dao-core": "^0.2.0",
+        "@guyghost/swarm-dao-core": "^0.4.0",
         "@modelcontextprotocol/sdk": "^1.29.0",
       },
       "devDependencies": {
@@ -98,7 +125,7 @@
     },
     "packages/opencode-adapter": {
       "name": "@guyghost/swarm-dao-opencode-adapter",
-      "version": "0.2.0",
+      "version": "0.2.2",
       "dependencies": {
         "@guyghost/swarm-dao-core": "^0.1.4",
       },
@@ -114,7 +141,7 @@
     },
     "packages/pi-adapter": {
       "name": "@guyghost/swarm-dao-pi-adapter",
-      "version": "0.2.0",
+      "version": "0.2.2",
       "dependencies": {
         "@guyghost/swarm-dao-core": "^0.1.4",
       },
@@ -190,6 +217,8 @@
 
     "@changesets/write": ["@changesets/write@0.4.0", "", { "dependencies": { "@changesets/types": "^6.1.0", "fs-extra": "^7.0.1", "human-id": "^4.1.1", "prettier": "^2.7.1" } }, "sha512-CdTLvIOPiCNuH71pyDu3rA+Q0n65cmAbXnwWH84rKGiFumFzkmHNT8KHTMEchcxN+Kl8I54xGUhJ7l3E7X396Q=="],
 
+    "@guyghost/swarm-dao-benchmarks": ["@guyghost/swarm-dao-benchmarks@workspace:packages/benchmarks"],
+
     "@guyghost/swarm-dao-claude-adapter": ["@guyghost/swarm-dao-claude-adapter@workspace:packages/claude-adapter"],
 
     "@guyghost/swarm-dao-cli": ["@guyghost/swarm-dao-cli@workspace:packages/cli"],
@@ -199,6 +228,8 @@
     "@guyghost/swarm-dao-copilot-adapter": ["@guyghost/swarm-dao-copilot-adapter@workspace:packages/copilot-adapter"],
 
     "@guyghost/swarm-dao-core": ["@guyghost/swarm-dao-core@workspace:packages/core"],
+
+    "@guyghost/swarm-dao-integration-tests": ["@guyghost/swarm-dao-integration-tests@workspace:packages/integration-tests"],
 
     "@guyghost/swarm-dao-mcp": ["@guyghost/swarm-dao-mcp@workspace:packages/mcp-server"],
 

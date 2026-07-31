@@ -31,25 +31,23 @@ bun install
 bun add typebox
 ```
 
-### 2. Link the Workspace Package
+### 2. Set Up the Workspace
 
-Bun workspaces do not always create a physical symlink in `node_modules/`. Create it manually so the extension can resolve `@guyghost/swarm-dao-core`:
-
-```bash
-mkdir -p node_modules/@guyghost
-ln -s ../../packages/core node_modules/@guyghost/swarm-dao-core
-```
-
-### 3. Register the Extension
-
-Create a symlink so Pi discovers the extension automatically:
+Bun workspaces do not always create a physical symlink in `node_modules/`, and
+optional host SDKs need local stubs. One command handles both, plus the local
+Pi extension registration:
 
 ```bash
-mkdir -p .pi/extensions
-ln -s ../../packages/pi-adapter/src/index.ts .pi/extensions/swarm-dao.ts
+bun run setup-workspace
 ```
 
-Or install globally:
+`bun install` runs it through `prepare`; re-run it whenever an install prunes
+the symlinks it manages.
+
+### 3. Register the Extension Globally
+
+The setup above already links `.pi/extensions/swarm-dao.ts` for this checkout.
+To make the extension available everywhere:
 
 ```bash
 mkdir -p ~/.pi/agent/extensions/swarm-dao
@@ -403,8 +401,7 @@ ls -la node_modules/@guyghost/swarm-dao-core
 
 If missing, recreate it:
 ```bash
-mkdir -p node_modules/@guyghost
-ln -s ../../packages/core node_modules/@guyghost/swarm-dao-core
+bun run setup-workspace
 ```
 
 ### OpenCode: "Plugin not found"

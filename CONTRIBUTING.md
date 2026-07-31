@@ -12,11 +12,19 @@ cd swarm-dao
 # Install dependencies (requires Bun >= 1.3)
 bun install
 
-# Create local type stubs for optional host SDKs (required for typecheck/build)
-bun run setup-stubs
+# Workspace links, Pi extension and optional host SDK stubs.
+# `bun install` runs this via `prepare`; re-run it whenever an install
+# prunes the symlinks it manages.
+bun run setup-workspace
 
 # Run tests
 bun test
+
+# Integration tests (cross-host, MCP protocol, on-disk state)
+bun run test:integration
+
+# Performance benchmarks (see packages/benchmarks/README.md)
+bun run bench
 
 # Type check
 bun run --filter '*' typecheck

@@ -1,0 +1,22 @@
+{
+  "name": "@guyghost/swarm-dao-benchmarks",
+  "version": "0.1.0",
+  "description": "Performance benchmarks for Swarm DAO core operations",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "bench": "bun run benchmarks/index.ts",
+    "bench:ci": "bun run benchmarks/index.ts --json benchmark-results.json",
+    "bench:compare": "bun run scripts/compare-benchmarks.ts",
+    "test": "bun test",
+    "lint": "biome check .",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/node": "^26.0.1"
+  },
+  "dependencies": {
+    "@guyghost/swarm-dao-core": "workspace:*"
+  }
+}

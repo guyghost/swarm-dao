@@ -37,6 +37,10 @@ Thumbs.db
 # Test coverage
 coverage/
 
+# Benchmark runs (machine-specific timings)
+benchmark-results.json
+benchmark-baseline.json
+
 # Environment
 .env
 .env.local
