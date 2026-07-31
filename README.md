@@ -11,19 +11,11 @@ Swarm DAO unifies the governance systems from [pi-swarm-dao](https://github.com/
 git clone https://github.com/guyghost/swarm-dao.git
 cd swarm-dao
 
-# Install dependencies
+# Install dependencies (runs the workspace setup and build via `prepare`)
 bun install
 
-# Create local type stubs for optional host SDKs (required for typecheck/build)
-bun run setup-stubs
-
-# Link workspace package (Bun workspaces may need manual symlink)
-mkdir -p node_modules/@guyghost
-ln -s ../../packages/core node_modules/@guyghost/swarm-dao-core
-
-# Register Pi extension
-mkdir -p .pi/extensions
-ln -s ../../packages/pi-adapter/src/index.ts .pi/extensions/swarm-dao.ts
+# Re-run the setup any time: workspace links, Pi extension, optional SDK stubs
+bun run setup-workspace
 
 # Start Pi — the extension is auto-discovered
 pi
@@ -425,6 +417,13 @@ bun test
 # Run specific package tests
 bun test packages/core/tests
 bun test packages/cli/tests
+
+# Run integration tests
+bun run test:integration
+
+# Run performance benchmarks
+bun run bench
+bun run bench:ci
 ```
 
 ## CI/CD

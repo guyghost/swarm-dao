@@ -1,0 +1,27 @@
+{
+  "name": "@guyghost/swarm-dao-integration-tests",
+  "version": "0.1.0",
+  "description": "Cross-package integration tests for Swarm DAO multi-host governance",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "bun test",
+    "test:e2e": "bun test tests/e2e",
+    "test:cross-host": "bun test tests/cross-host",
+    "test:compatibility": "bun test tests/compatibility",
+    "lint": "biome check .",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/node": "^26.0.1"
+  },
+  "dependencies": {
+    "@guyghost/swarm-dao-claude-adapter": "workspace:*",
+    "@guyghost/swarm-dao-codex-adapter": "workspace:*",
+    "@guyghost/swarm-dao-copilot-adapter": "workspace:*",
+    "@guyghost/swarm-dao-core": "workspace:*",
+    "@guyghost/swarm-dao-mcp": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.29.0"
+  }
+}
