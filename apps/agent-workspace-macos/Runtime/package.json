@@ -1,0 +1,5 @@
+{
+  "name": "@swarm-dao/agent-workspace-macos-runtime",
+  "private": true,
+  "type": "module"
+}

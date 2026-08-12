@@ -1,4 +1,5 @@
 export * from "./initialize-dao.use-case.js";
+export * from "./local-agent-workspace.service.js";
 export * from "./proposals/control-proposal.use-case.js";
 export * from "./proposals/create-amendment-proposal.use-case.js";
 export * from "./proposals/create-proposal.use-case.js";

@@ -124,6 +124,22 @@ abandonment, verification retry, contact-relay authorization, and cancellation.
 | `bun test packages/core/tests/product-loop.frozen.test.ts` | frozen-set-intact |
 | `bun run product:regression` | regression |
 
+## Local agent mission for macOS (M1)
+
+`local-agent-mission.md`, `local-agent-mission.graph.json`, and
+`local-agent-mission.graph.schema.json` define the approved behavioral
+contract for a standalone native macOS application that launches and
+observes local agents through one shared mission thread.
+
+The contract separates mission, agent, subagent-request, and policy-override
+authority; seals an immutable launch template/autonomy snapshot; models
+descendants-first stopping; and keeps every LLM output at signal-only authority.
+`local-agent-mission.review.md` records Review coverage and the subsequent
+authorization of its exact hash. The executable XState machines live in
+`packages/core/src/models`; the first native vertical slice lives in
+`apps/agent-workspace-macos`. Deferred adapter, catalogue, private-conversation,
+and generic runtime scope remains outside M1.
+
 
 ## Review checklist
 

@@ -6,6 +6,10 @@ node_modules/
 # Build outputs
 dist/
 build/
+.build/
+.swiftpm/
+*.bun-build
+*.profraw
 *.tsbuildinfo
 
 # DAO local state
@@ -24,6 +28,7 @@ evidence/product-loops/
 # IDE
 .vscode/
 .idea/
+apps/*/.codex/environments/environment.toml
 *.swp
 *.swo
 

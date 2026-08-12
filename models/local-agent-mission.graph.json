@@ -1,0 +1,1163 @@
+{
+  "$schema": "./local-agent-mission.graph.schema.json",
+  "id": "swarm-dao-local-agent-mission",
+  "version": 1,
+  "scope": "macos-local-shared-mission-thread",
+  "milestone": "m1-model-review",
+  "platform": {
+    "kind": "native-macos",
+    "preferredUi": "SwiftUI",
+    "executionBoundary": "local-mac",
+    "projectBoundary": "distinct-monorepo-project"
+  },
+  "authority": {
+    "missionState": "mission-machine",
+    "agentState": "agent-machine",
+    "subagentRequestState": "subagent-request-machine",
+    "policyOverrideState": "policy-override-machine",
+    "llm": "signal-only",
+    "freeFormTextTransitions": false
+  },
+  "eventSources": ["human", "ai", "system", "tool"],
+  "entities": [
+    {
+      "id": "team-template",
+      "mutability": "append-only-revisions",
+      "requiredFields": [
+        "templateId",
+        "revision",
+        "origin",
+        "name",
+        "agents",
+        "createdBy",
+        "createdAt"
+      ],
+      "commands": ["CREATE_TEMPLATE", "SAVE_TEMPLATE_REVISION", "DUPLICATE_TEMPLATE"],
+      "invariants": [
+        "built-in revisions are immutable",
+        "saving an edit creates a new revision",
+        "duplicating creates a new templateId with lineage",
+        "templates never carry mission runtime state"
+      ]
+    },
+    {
+      "id": "mission-template-snapshot",
+      "mutability": "immutable-after-launch",
+      "requiredFields": [
+        "snapshotId",
+        "missionId",
+        "sourceTemplateId",
+        "sourceRevision",
+        "normalizedTeam",
+        "autonomyContract",
+        "contentHash",
+        "sealedAt"
+      ],
+      "commands": ["SEAL_MISSION_TEMPLATE_SNAPSHOT"],
+      "invariants": [
+        "one snapshot belongs to exactly one mission",
+        "launch is rejected without a snapshot hash",
+        "later template revisions cannot change a launched mission",
+        "the autonomy contract is structured and contains no free-form transition instruction"
+      ]
+    },
+    {
+      "id": "mission-message",
+      "mutability": "append-only",
+      "requiredFields": [
+        "messageId",
+        "missionId",
+        "author",
+        "visibility",
+        "kind",
+        "content",
+        "createdAt"
+      ],
+      "commands": ["APPEND_HUMAN_MESSAGE", "APPEND_AGENT_MESSAGE", "APPEND_SYSTEM_NOTICE"],
+      "invariants": [
+        "M1 accepts only mission_shared visibility",
+        "the visibility envelope already supports mission_shared or direct",
+        "direct visibility is rejected with feature_not_enabled in M1",
+        "raw prompts, chain-of-thought, stdout, stderr, tool payloads, stack traces, tokens and secrets never enter the shared thread",
+        "subagent refusals and human-validation requests create visible system notices"
+      ]
+    },
+    {
+      "id": "agent-record",
+      "mutability": "state-machine-plus-append-only-activity",
+      "requiredFields": [
+        "agentId",
+        "missionId",
+        "role",
+        "state",
+        "effectivePermissions",
+        "parentAgentId",
+        "capabilities",
+        "activityJournal"
+      ],
+      "commands": ["APPEND_AGENT_ACTIVITY"],
+      "invariants": [
+        "every agent belongs to exactly one mission",
+        "parentAgentId is null only for top-level agents",
+        "parent and child belong to the same mission",
+        "the activity journal is technical and is not rendered as shared-thread content",
+        "chain-of-thought and secrets are never persisted in the activity journal"
+      ]
+    },
+    {
+      "id": "autonomy-contract",
+      "mutability": "immutable-base-plus-expiring-overrides",
+      "requiredFields": [
+        "allowedToolIds",
+        "budgetLimits",
+        "delegationLimits",
+        "fileAccessRules",
+        "validationThresholds",
+        "retryLimits"
+      ],
+      "commands": ["VALIDATE_AUTONOMY_CONTRACT"],
+      "invariants": [
+        "all policy dimensions are structured",
+        "missing dimensions fail closed",
+        "the launch contract cannot exceed effective policy",
+        "runtime overrides do not mutate the sealed base contract"
+      ]
+    },
+    {
+      "id": "decision-journal-entry",
+      "mutability": "append-only",
+      "requiredFields": [
+        "entryId",
+        "missionId",
+        "aggregateType",
+        "aggregateId",
+        "eventType",
+        "source",
+        "accepted",
+        "reasonCode",
+        "occurredAt",
+        "sequence"
+      ],
+      "commands": ["APPEND_DECISION_JOURNAL_ENTRY"],
+      "invariants": [
+        "accepted and rejected events are journaled",
+        "sequence is strictly monotonic per mission",
+        "timestamps are injected and never read by a pure model guard",
+        "payloads are redacted before persistence"
+      ]
+    }
+  ],
+  "policyModel": {
+    "layers": [
+      {
+        "id": "system-ceilings",
+        "priority": 1,
+        "mutable": false,
+        "missionOverrideable": false
+      },
+      {
+        "id": "application-global-rules",
+        "priority": 2,
+        "mutable": true,
+        "missionOverrideableByField": true
+      },
+      {
+        "id": "mission-autonomy-contract",
+        "priority": 3,
+        "mutable": false,
+        "missionOverrideableByField": true
+      },
+      {
+        "id": "confirmed-mission-overrides",
+        "priority": 4,
+        "mutable": false,
+        "missionOverrideableByField": false
+      }
+    ],
+    "dimensions": [
+      "allowedToolIds",
+      "budgetLimits",
+      "delegationLimits",
+      "fileAccessRules",
+      "validationThresholds",
+      "retryLimits"
+    ],
+    "evaluationOrder": [
+      "reject malformed or incomplete facts",
+      "reject any system-ceiling violation",
+      "apply global rules",
+      "apply the sealed mission autonomy contract",
+      "apply only active, exact-scope, human-confirmed mission overrides",
+      "re-check system ceilings",
+      "reserve budget atomically",
+      "emit allow, requires_human_confirmation or deny with reason codes"
+    ],
+    "invariants": [
+      "system ceilings can never be relaxed",
+      "a field marked non-overrideable can never be relaxed for a mission",
+      "an override is bound to one mission, one exact policy diff and one human principal",
+      "an override expires when its mission reaches a terminal state",
+      "allowlists are intersected unless an eligible active override explicitly expands an overrideable lower layer",
+      "numeric maxima never exceed the system ceiling",
+      "file paths are canonicalized by a trusted tool and checked against read and write roots separately",
+      "symlink or path-resolution uncertainty fails closed",
+      "budget reservation and consumption are atomic and append-only",
+      "global rules are append-only revisions and every authorization is bound to the evaluated revision",
+      "a tighter global revision applies to the next uncommitted effect while a looser revision never expands a sealed mission contract implicitly",
+      "an AI signal cannot contain a permission grant, override confirmation or policy verdict"
+    ]
+  },
+  "machines": [
+    {
+      "id": "mission-machine",
+      "initial": "draft",
+      "states": [
+        { "id": "draft", "terminal": false },
+        { "id": "pending", "terminal": false },
+        { "id": "active", "terminal": false },
+        { "id": "pausing", "terminal": false },
+        { "id": "paused", "terminal": false },
+        { "id": "human_intervention_required", "terminal": false },
+        { "id": "cancelling", "terminal": false },
+        { "id": "failing", "terminal": false },
+        { "id": "completed", "terminal": true },
+        { "id": "cancelled", "terminal": true },
+        { "id": "failed", "terminal": true }
+      ],
+      "events": [
+        { "type": "MISSION_DRAFT_UPDATED", "sources": ["human"] },
+        { "type": "MISSION_LAUNCH_REQUESTED", "sources": ["human"] },
+        { "type": "MISSION_ACTIVATION_EVALUATED", "sources": ["system"] },
+        { "type": "MISSION_PAUSE_REQUESTED", "sources": ["human"] },
+        { "type": "MISSION_PAUSE_QUIESCENCE_EVALUATED", "sources": ["system"] },
+        { "type": "MISSION_RESUME_REQUESTED", "sources": ["human"] },
+        { "type": "AGENT_SIGNAL_RECORDED", "sources": ["ai"] },
+        { "type": "MISSION_HUMAN_INTERVENTION_REQUIRED", "sources": ["system"] },
+        { "type": "MISSION_INTERVENTION_EVALUATED", "sources": ["system"] },
+        { "type": "MISSION_COMPLETION_EVALUATED", "sources": ["system"] },
+        { "type": "MISSION_CANCEL_REQUESTED", "sources": ["human"] },
+        { "type": "MISSION_FAILURE_RECORDED", "sources": ["system", "tool"] },
+        { "type": "MISSION_QUIESCENCE_EVALUATED", "sources": ["system"] },
+        { "type": "HUMAN_MESSAGE_SUBMITTED", "sources": ["human"] }
+      ],
+      "transitions": [
+        {
+          "id": "M01",
+          "from": ["draft"],
+          "event": "MISSION_DRAFT_UPDATED",
+          "guard": "ownerAndStructuredDraft",
+          "to": "draft",
+          "effects": ["persistMissionDraft", "journalDecision"]
+        },
+        {
+          "id": "M02",
+          "from": ["draft"],
+          "event": "MISSION_LAUNCH_REQUESTED",
+          "guard": "ownerValidTemplateValidContractNoUnconfirmedOverrides",
+          "to": "pending",
+          "effects": [
+            "sealMissionTemplateSnapshot",
+            "createTopLevelAgentRecords",
+            "requestTopLevelAgentStarts",
+            "journalDecision"
+          ]
+        },
+        {
+          "id": "M03",
+          "from": ["pending"],
+          "event": "MISSION_ACTIVATION_EVALUATED",
+          "guard": "allRequiredTopLevelAgentsActive",
+          "to": "active",
+          "effects": ["appendMissionActivatedNotice", "journalDecision"]
+        },
+        {
+          "id": "M04",
+          "from": ["pending"],
+          "event": "MISSION_ACTIVATION_EVALUATED",
+          "guard": "startupNeedsHumanIntervention",
+          "to": "human_intervention_required",
+          "effects": ["recordInterventionOriginPending", "appendHumanInterventionNotice", "journalDecision"]
+        },
+        {
+          "id": "M05",
+          "from": ["pending"],
+          "event": "MISSION_ACTIVATION_EVALUATED",
+          "guard": "startupStillInProgress",
+          "to": "pending",
+          "effects": ["journalDecision"]
+        },
+        {
+          "id": "M06",
+          "from": ["active"],
+          "event": "MISSION_PAUSE_REQUESTED",
+          "guard": "missionOwner",
+          "to": "pausing",
+          "effects": ["requestRestartableAgentInterruptCascade", "appendMissionPausingNotice", "journalDecision"]
+        },
+        {
+          "id": "M07",
+          "from": ["paused"],
+          "event": "MISSION_RESUME_REQUESTED",
+          "guard": "missionOwnerNoBlockingOverrideAndAllAgentsRestartablyQuiescent",
+          "to": "pending",
+          "effects": ["requestInterruptedAgentRestarts", "appendMissionResumeNotice", "journalDecision"]
+        },
+        {
+          "id": "M08",
+          "from": ["active"],
+          "event": "AGENT_SIGNAL_RECORDED",
+          "guard": "validHumanInputRequiredSignalFromActiveMissionAgent",
+          "to": "human_intervention_required",
+          "effects": ["recordInterventionOriginActive", "appendHumanInterventionNotice", "journalDecision"]
+        },
+        {
+          "id": "M09",
+          "from": ["active"],
+          "event": "AGENT_SIGNAL_RECORDED",
+          "guard": "validSubagentRequestSignalFromActiveMissionAgent",
+          "to": "active",
+          "effects": ["createSubagentRequest", "journalDecision"]
+        },
+        {
+          "id": "M10",
+          "from": ["active"],
+          "event": "AGENT_SIGNAL_RECORDED",
+          "guard": "validSharedMessageSignalFromActiveMissionAgent",
+          "to": "active",
+          "effects": ["appendSanitizedAgentMessage", "journalDecision"]
+        },
+        {
+          "id": "M11",
+          "from": ["human_intervention_required"],
+          "event": "MISSION_INTERVENTION_EVALUATED",
+          "guard": "allBlockersResolvedAndOriginActive",
+          "to": "active",
+          "effects": ["appendInterventionResolvedNotice", "journalDecision"]
+        },
+        {
+          "id": "M12",
+          "from": ["human_intervention_required"],
+          "event": "MISSION_INTERVENTION_EVALUATED",
+          "guard": "allBlockersResolvedAndOriginPending",
+          "to": "pending",
+          "effects": ["requestEligibleAgentRestarts", "appendInterventionResolvedNotice", "journalDecision"]
+        },
+        {
+          "id": "M13",
+          "from": ["human_intervention_required"],
+          "event": "MISSION_INTERVENTION_EVALUATED",
+          "guard": "blockersRemain",
+          "to": "human_intervention_required",
+          "effects": ["journalDecision"]
+        },
+        {
+          "id": "M14",
+          "from": ["active"],
+          "event": "MISSION_COMPLETION_EVALUATED",
+          "guard": "completionEvidenceAndAllWorkTerminal",
+          "to": "completed",
+          "effects": ["expireMissionOverrides", "appendMissionCompletedNotice", "journalDecision"]
+        },
+        {
+          "id": "M15",
+          "from": ["draft"],
+          "event": "MISSION_CANCEL_REQUESTED",
+          "guard": "missionOwner",
+          "to": "cancelled",
+          "effects": ["expireMissionOverrides", "journalDecision"]
+        },
+        {
+          "id": "M16",
+          "from": ["pending", "active", "pausing", "paused", "human_intervention_required"],
+          "event": "MISSION_CANCEL_REQUESTED",
+          "guard": "missionOwner",
+          "to": "cancelling",
+          "effects": ["requestTerminalAgentCancelCascade", "cancelOpenSubagentRequests", "journalDecision"]
+        },
+        {
+          "id": "M17",
+          "from": ["pending", "active", "pausing", "paused", "human_intervention_required", "cancelling"],
+          "event": "MISSION_FAILURE_RECORDED",
+          "guard": "trustedFatalErrorCode",
+          "to": "failing",
+          "effects": ["requestTerminalAgentCancelCascade", "cancelOpenSubagentRequests", "journalDecision"]
+        },
+        {
+          "id": "M18",
+          "from": ["cancelling"],
+          "event": "MISSION_QUIESCENCE_EVALUATED",
+          "guard": "allAgentsAndRequestsQuiescent",
+          "to": "cancelled",
+          "effects": ["expireMissionOverrides", "appendMissionCancelledNotice", "journalDecision"]
+        },
+        {
+          "id": "M19",
+          "from": ["failing"],
+          "event": "MISSION_QUIESCENCE_EVALUATED",
+          "guard": "allAgentsAndRequestsQuiescent",
+          "to": "failed",
+          "effects": ["expireMissionOverrides", "appendMissionFailedNotice", "journalDecision"]
+        },
+        {
+          "id": "M20",
+          "from": ["draft", "pending", "active", "pausing", "paused", "human_intervention_required"],
+          "event": "HUMAN_MESSAGE_SUBMITTED",
+          "guard": "authorizedParticipantAndMissionSharedVisibility",
+          "to": "$same",
+          "effects": ["appendHumanMessage", "journalDecision"]
+        },
+        {
+          "id": "M21",
+          "from": ["active"],
+          "event": "MISSION_HUMAN_INTERVENTION_REQUIRED",
+          "guard": "openStructuredHumanBlocker",
+          "to": "human_intervention_required",
+          "effects": ["recordInterventionOriginActive", "appendHumanInterventionNotice", "journalDecision"]
+        },
+        {
+          "id": "M22",
+          "from": ["pausing"],
+          "event": "MISSION_PAUSE_QUIESCENCE_EVALUATED",
+          "guard": "allAgentsRestartablyQuiescentAndNoOpenStartIntent",
+          "to": "paused",
+          "effects": ["appendMissionPausedNotice", "journalDecision"]
+        }
+      ],
+      "forbidden": [
+        "launch outside draft",
+        "launch from free-form text",
+        "activation while any required top-level agent is not active",
+        "completion with open subagent requests, active descendants, unresolved blockers or missing completion evidence",
+        "resume outside paused",
+        "post-terminal events",
+        "direct messages in M1",
+        "AI pause, resume, cancel, launch, completion or policy decision events"
+      ],
+      "terminalStates": ["completed", "cancelled", "failed"]
+    },
+    {
+      "id": "agent-machine",
+      "initial": "ready",
+      "states": [
+        { "id": "ready", "terminal": false },
+        { "id": "starting", "terminal": false },
+        { "id": "active", "terminal": false },
+        { "id": "waiting_for_human", "terminal": false },
+        { "id": "retry_wait", "terminal": false },
+        { "id": "interrupted", "terminal": false },
+        { "id": "stopping", "terminal": false },
+        { "id": "failing", "terminal": false },
+        { "id": "completed", "terminal": true },
+        { "id": "cancelled", "terminal": true },
+        { "id": "failed", "terminal": true }
+      ],
+      "events": [
+        { "type": "AGENT_START_AUTHORIZED", "sources": ["system"] },
+        { "type": "PROCESS_STARTED", "sources": ["tool"] },
+        { "type": "PROCESS_START_FAILED", "sources": ["tool"] },
+        { "type": "AGENT_SIGNAL_RECORDED", "sources": ["ai"] },
+        { "type": "HUMAN_RESPONSE_RECORDED", "sources": ["human"] },
+        { "type": "PROCESS_EXITED", "sources": ["tool"] },
+        { "type": "AGENT_INTERRUPT_REQUESTED", "sources": ["human", "system"] },
+        { "type": "AGENT_CANCEL_REQUESTED", "sources": ["system"] },
+        { "type": "DESCENDANTS_QUIESCENT", "sources": ["system"] },
+        { "type": "PROCESS_STOPPED", "sources": ["tool"] },
+        { "type": "LOCAL_PROCESS_ABSENT", "sources": ["tool"] },
+        { "type": "PROCESS_STOP_FAILED", "sources": ["tool"] },
+        { "type": "STOP_RETRY_DUE", "sources": ["system"] },
+        { "type": "AGENT_RESTART_AUTHORIZED", "sources": ["human", "system"] },
+        { "type": "AGENT_RETRY_DUE", "sources": ["system"] },
+        { "type": "AGENT_RETRY_AUTHORIZED", "sources": ["human"] }
+      ],
+      "transitions": [
+        {
+          "id": "A01",
+          "from": ["ready"],
+          "event": "AGENT_START_AUTHORIZED",
+          "guard": "missionAllowsStartAndPolicyReservationSucceeded",
+          "to": "starting",
+          "effects": ["requestLocalAgentProcessStart", "journalDecision"]
+        },
+        {
+          "id": "A02",
+          "from": ["starting"],
+          "event": "PROCESS_STARTED",
+          "guard": "matchingLaunchTokenAndLocalProcessIdentity",
+          "to": "active",
+          "effects": ["resolveMatchingRetryBlockerIfPresent", "appendAgentActivity", "journalDecision"]
+        },
+        {
+          "id": "A03",
+          "from": ["starting"],
+          "event": "PROCESS_START_FAILED",
+          "guard": "retryableErrorAndAutomaticRetryAvailable",
+          "to": "retry_wait",
+          "effects": ["incrementStartAttempt", "scheduleAgentRetry", "appendAgentActivity", "journalDecision"]
+        },
+        {
+          "id": "A04",
+          "from": ["starting"],
+          "event": "PROCESS_START_FAILED",
+          "guard": "nonRetryableOrRetryBudgetExhausted",
+          "to": "failed",
+          "effects": ["releaseUnusedReservation", "appendAgentActivity", "signalMissionBlocker", "journalDecision"]
+        },
+        {
+          "id": "A25",
+          "from": ["starting"],
+          "event": "PROCESS_START_FAILED",
+          "guard": "retryableErrorAndHumanConfirmationRequired",
+          "to": "retry_wait",
+          "effects": [
+            "incrementStartAttempt",
+            "openHumanRetryRequest",
+            "signalMissionBlocker",
+            "appendAgentActivity",
+            "journalDecision"
+          ]
+        },
+        {
+          "id": "A05",
+          "from": ["retry_wait"],
+          "event": "AGENT_RETRY_DUE",
+          "guard": "automaticRetryAuthorizedByPolicyAndDeadlineReached",
+          "to": "starting",
+          "effects": ["requestLocalAgentProcessStart", "journalDecision"]
+        },
+        {
+          "id": "A06",
+          "from": ["active"],
+          "event": "AGENT_SIGNAL_RECORDED",
+          "guard": "validHumanInputRequiredSignal",
+          "to": "waiting_for_human",
+          "effects": ["appendAgentActivity", "signalMissionBlocker", "journalDecision"]
+        },
+        {
+          "id": "A07",
+          "from": ["active"],
+          "event": "AGENT_SIGNAL_RECORDED",
+          "guard": "validContentOrSubagentSignal",
+          "to": "active",
+          "effects": ["appendAgentActivity", "journalDecision"]
+        },
+        {
+          "id": "A08",
+          "from": ["waiting_for_human"],
+          "event": "HUMAN_RESPONSE_RECORDED",
+          "guard": "authorizedHumanResponseMatchesOpenRequest",
+          "to": "active",
+          "effects": ["deliverHumanResponseToAgent", "resolveMissionBlocker", "appendAgentActivity", "journalDecision"]
+        },
+        {
+          "id": "A09",
+          "from": ["active", "waiting_for_human"],
+          "event": "PROCESS_EXITED",
+          "guard": "expectedSuccessfulExitWithCompletionEvidence",
+          "to": "completed",
+          "effects": ["releaseAgentReservations", "appendAgentActivity", "journalDecision"]
+        },
+        {
+          "id": "A10",
+          "from": ["active", "waiting_for_human"],
+          "event": "PROCESS_EXITED",
+          "guard": "unexpectedRetryableExitAndAutomaticRetryAvailable",
+          "to": "retry_wait",
+          "effects": ["incrementRuntimeAttempt", "scheduleAgentRetry", "appendAgentActivity", "journalDecision"]
+        },
+        {
+          "id": "A11",
+          "from": ["active", "waiting_for_human"],
+          "event": "PROCESS_EXITED",
+          "guard": "unexpectedNonRetryableExitOrRetryBudgetExhausted",
+          "to": "failing",
+          "effects": [
+            "releaseAgentReservations",
+            "requestTerminalDescendantCancel",
+            "appendAgentActivity",
+            "signalMissionBlocker",
+            "journalDecision"
+          ]
+        },
+        {
+          "id": "A26",
+          "from": ["active", "waiting_for_human"],
+          "event": "PROCESS_EXITED",
+          "guard": "unexpectedRetryableExitAndHumanConfirmationRequired",
+          "to": "retry_wait",
+          "effects": [
+            "incrementRuntimeAttempt",
+            "openHumanRetryRequest",
+            "signalMissionBlocker",
+            "appendAgentActivity",
+            "journalDecision"
+          ]
+        },
+        {
+          "id": "A12",
+          "from": ["ready", "starting", "active", "waiting_for_human", "retry_wait", "interrupted"],
+          "event": "AGENT_INTERRUPT_REQUESTED",
+          "guard": "authorizedRestartableInterrupt",
+          "to": "stopping",
+          "effects": [
+            "recordRestartableStopReason",
+            "cancelOpenLaunchIntent",
+            "requestDescendantsFirstStop",
+            "journalDecision"
+          ]
+        },
+        {
+          "id": "A13",
+          "from": ["ready", "starting", "active", "waiting_for_human", "retry_wait", "interrupted"],
+          "event": "AGENT_CANCEL_REQUESTED",
+          "guard": "missionOrParentCancelCascade",
+          "to": "stopping",
+          "effects": [
+            "recordTerminalStopReason",
+            "cancelOpenLaunchIntent",
+            "requestDescendantsFirstStop",
+            "journalDecision"
+          ]
+        },
+        {
+          "id": "A14",
+          "from": ["stopping"],
+          "event": "DESCENDANTS_QUIESCENT",
+          "guard": "allDescendantsQuiescentAndNoOpenLaunchIntent",
+          "to": "stopping",
+          "effects": ["requestLocalAgentProcessStopOrAbsenceEvidence", "journalDecision"]
+        },
+        {
+          "id": "A15",
+          "from": ["stopping"],
+          "event": "PROCESS_STOPPED",
+          "guard": "matchingStopTokenRestartableReasonAndDescendantsQuiescent",
+          "to": "interrupted",
+          "effects": ["releaseAgentReservations", "appendAgentActivity", "journalDecision"]
+        },
+        {
+          "id": "A16",
+          "from": ["stopping"],
+          "event": "PROCESS_STOPPED",
+          "guard": "matchingStopTokenTerminalReasonAndDescendantsQuiescent",
+          "to": "cancelled",
+          "effects": ["releaseAgentReservations", "appendAgentActivity", "journalDecision"]
+        },
+        {
+          "id": "A17",
+          "from": ["stopping"],
+          "event": "PROCESS_STOP_FAILED",
+          "guard": "stopRetryAvailable",
+          "to": "stopping",
+          "effects": ["incrementStopAttempt", "scheduleStopRetry", "appendAgentActivity", "journalDecision"]
+        },
+        {
+          "id": "A18",
+          "from": ["stopping"],
+          "event": "STOP_RETRY_DUE",
+          "guard": "injectedDeadlineReachedAndDescendantsQuiescent",
+          "to": "stopping",
+          "effects": ["requestLocalAgentProcessStop", "journalDecision"]
+        },
+        {
+          "id": "A19",
+          "from": ["stopping"],
+          "event": "PROCESS_STOP_FAILED",
+          "guard": "stopRetryExhausted",
+          "to": "failed",
+          "effects": ["appendAgentActivity", "signalMissionFatalCleanupError", "journalDecision"]
+        },
+        {
+          "id": "A20",
+          "from": ["interrupted"],
+          "event": "AGENT_RESTART_AUTHORIZED",
+          "guard": "restartableReasonAndMissionAllowsStartAndPolicyReservationSucceeded",
+          "to": "starting",
+          "effects": ["requestLocalAgentProcessStart", "journalDecision"]
+        },
+        {
+          "id": "A21",
+          "from": ["retry_wait"],
+          "event": "AGENT_RETRY_AUTHORIZED",
+          "guard": "missionOwnerMatchesPendingRetryMissionEligibleAndHardLimitAllows",
+          "to": "starting",
+          "effects": [
+            "recordHumanRetryAuthorization",
+            "requestLocalAgentProcessStart",
+            "journalDecision"
+          ]
+        },
+        {
+          "id": "A22",
+          "from": ["stopping"],
+          "event": "LOCAL_PROCESS_ABSENT",
+          "guard": "matchingStopTokenRestartableReasonAndDescendantsQuiescent",
+          "to": "interrupted",
+          "effects": ["releaseAgentReservations", "appendAgentActivity", "journalDecision"]
+        },
+        {
+          "id": "A23",
+          "from": ["stopping"],
+          "event": "LOCAL_PROCESS_ABSENT",
+          "guard": "matchingStopTokenTerminalReasonAndDescendantsQuiescent",
+          "to": "cancelled",
+          "effects": ["releaseAgentReservations", "appendAgentActivity", "journalDecision"]
+        },
+        {
+          "id": "A24",
+          "from": ["failing"],
+          "event": "DESCENDANTS_QUIESCENT",
+          "guard": "allDescendantsQuiescentAndParentProcessExited",
+          "to": "failed",
+          "effects": ["appendAgentActivity", "journalDecision"]
+        },
+        {
+          "id": "A27",
+          "from": ["stopping"],
+          "event": "AGENT_CANCEL_REQUESTED",
+          "guard": "terminalCascadeUpgradesRestartableStop",
+          "to": "stopping",
+          "effects": ["recordTerminalStopReason", "requestDescendantsFirstStop", "journalDecision"]
+        }
+      ],
+      "forbidden": [
+        "start without mission and policy authorization",
+        "process acknowledgement with a stale launch or stop token",
+        "restart after terminal cancellation",
+        "parent stop acknowledgement before descendants are quiescent",
+        "AI process, retry, interrupt, cancel, permission or human-response events",
+        "post-terminal events"
+      ],
+      "terminalStates": ["completed", "cancelled", "failed"]
+    },
+    {
+      "id": "subagent-request-machine",
+      "initial": "requested",
+      "states": [
+        { "id": "requested", "terminal": false },
+        { "id": "policy_validating", "terminal": false },
+        { "id": "awaiting_policy_override", "terminal": false },
+        { "id": "approved", "terminal": false },
+        { "id": "starting", "terminal": false },
+        { "id": "retry_wait", "terminal": false },
+        { "id": "started", "terminal": true },
+        { "id": "refused", "terminal": true },
+        { "id": "cancelled", "terminal": true },
+        { "id": "failed", "terminal": true }
+      ],
+      "events": [
+        { "type": "POLICY_VALIDATION_REQUESTED", "sources": ["system"] },
+        { "type": "POLICY_FACTS_RECORDED", "sources": ["tool"] },
+        { "type": "POLICY_OVERRIDE_ACTIVATED", "sources": ["system"] },
+        { "type": "POLICY_OVERRIDE_REJECTED", "sources": ["system"] },
+        { "type": "SUBAGENT_START_AUTHORIZED", "sources": ["system"] },
+        { "type": "CHILD_AGENT_ACTIVE", "sources": ["system"] },
+        { "type": "CHILD_AGENT_FAILED", "sources": ["system"] },
+        { "type": "SUBAGENT_RETRY_DUE", "sources": ["system"] },
+        { "type": "SUBAGENT_RETRY_AUTHORIZED", "sources": ["human"] },
+        { "type": "SUBAGENT_REQUEST_CANCELLED", "sources": ["human", "system"] }
+      ],
+      "transitions": [
+        {
+          "id": "S01",
+          "from": ["requested"],
+          "event": "POLICY_VALIDATION_REQUESTED",
+          "guard": "requestCompleteParentActiveSameMission",
+          "to": "policy_validating",
+          "effects": ["requestCanonicalPolicyFacts", "journalDecision"]
+        },
+        {
+          "id": "S13",
+          "from": ["requested"],
+          "event": "POLICY_VALIDATION_REQUESTED",
+          "guard": "requestInvalidParentInactiveOrCrossMission",
+          "to": "refused",
+          "effects": ["appendSubagentRefusedNotice", "journalDecision"]
+        },
+        {
+          "id": "S02",
+          "from": ["policy_validating"],
+          "event": "POLICY_FACTS_RECORDED",
+          "guard": "deterministicPolicyAllowsAndBudgetReserved",
+          "to": "approved",
+          "effects": ["recordPolicyEvidence", "journalDecision"]
+        },
+        {
+          "id": "S03",
+          "from": ["policy_validating"],
+          "event": "POLICY_FACTS_RECORDED",
+          "guard": "eligibleMissionOverrideRequired",
+          "to": "awaiting_policy_override",
+          "effects": [
+            "createPolicyOverrideRequest",
+            "signalMissionBlocker",
+            "appendPolicyConfirmationNotice",
+            "journalDecision"
+          ]
+        },
+        {
+          "id": "S04",
+          "from": ["policy_validating"],
+          "event": "POLICY_FACTS_RECORDED",
+          "guard": "deterministicPolicyDenies",
+          "to": "refused",
+          "effects": ["releaseSubagentReservation", "appendSubagentRefusedNotice", "journalDecision"]
+        },
+        {
+          "id": "S05",
+          "from": ["awaiting_policy_override"],
+          "event": "POLICY_OVERRIDE_ACTIVATED",
+          "guard": "matchingMissionRequestAndPolicyDiff",
+          "to": "policy_validating",
+          "effects": ["resolveMissionBlocker", "requestCanonicalPolicyFacts", "journalDecision"]
+        },
+        {
+          "id": "S06",
+          "from": ["awaiting_policy_override"],
+          "event": "POLICY_OVERRIDE_REJECTED",
+          "guard": "matchingMissionRequest",
+          "to": "refused",
+          "effects": [
+            "resolveMissionBlocker",
+            "releaseSubagentReservation",
+            "appendSubagentRefusedNotice",
+            "journalDecision"
+          ]
+        },
+        {
+          "id": "S07",
+          "from": ["approved"],
+          "event": "SUBAGENT_START_AUTHORIZED",
+          "guard": "missionAndParentStillActivePolicyStillValidAndReservationHeld",
+          "to": "starting",
+          "effects": ["createChildAgentRecord", "authorizeChildAgentStart", "journalDecision"]
+        },
+        {
+          "id": "S08",
+          "from": ["starting"],
+          "event": "CHILD_AGENT_ACTIVE",
+          "guard": "matchingChildSameMissionAndParent",
+          "to": "started",
+          "effects": ["appendSubagentStartedNotice", "journalDecision"]
+        },
+        {
+          "id": "S09",
+          "from": ["starting"],
+          "event": "CHILD_AGENT_FAILED",
+          "guard": "retryableFailureAndAutomaticRetryAvailable",
+          "to": "retry_wait",
+          "effects": ["incrementSubagentStartAttempt", "scheduleSubagentRetry", "journalDecision"]
+        },
+        {
+          "id": "S10",
+          "from": ["starting"],
+          "event": "CHILD_AGENT_FAILED",
+          "guard": "nonRetryableOrRetryExhausted",
+          "to": "failed",
+          "effects": ["releaseSubagentReservation", "appendSubagentFailedNotice", "journalDecision"]
+        },
+        {
+          "id": "S15",
+          "from": ["starting"],
+          "event": "CHILD_AGENT_FAILED",
+          "guard": "retryableFailureAndHumanConfirmationRequired",
+          "to": "retry_wait",
+          "effects": [
+            "incrementSubagentStartAttempt",
+            "openHumanRetryRequest",
+            "signalMissionBlocker",
+            "journalDecision"
+          ]
+        },
+        {
+          "id": "S11",
+          "from": ["retry_wait"],
+          "event": "SUBAGENT_RETRY_DUE",
+          "guard": "automaticRetryAuthorizedByPolicyDeadlineReachedParentActive",
+          "to": "approved",
+          "effects": ["journalDecision"]
+        },
+        {
+          "id": "S12",
+          "from": ["requested", "policy_validating", "awaiting_policy_override", "approved", "starting", "retry_wait"],
+          "event": "SUBAGENT_REQUEST_CANCELLED",
+          "guard": "missionOwnerParentStopOrMissionTerminal",
+          "to": "cancelled",
+          "effects": ["releaseSubagentReservation", "cancelLinkedOverrideRequest", "journalDecision"]
+        },
+        {
+          "id": "S14",
+          "from": ["retry_wait"],
+          "event": "SUBAGENT_RETRY_AUTHORIZED",
+          "guard": "missionOwnerMatchesPendingRetryParentActiveAndHardLimitAllows",
+          "to": "approved",
+          "effects": ["recordHumanRetryAuthorization", "resolveMissionBlocker", "journalDecision"]
+        }
+      ],
+      "forbidden": [
+        "request from an agent that is not active",
+        "cross-mission parent or child",
+        "spawn before deterministic policy validation",
+        "spawn on an AI-provided policy verdict",
+        "override of a system ceiling",
+        "duplicate child identity or budget reservation",
+        "post-terminal events"
+      ],
+      "terminalStates": ["started", "refused", "cancelled", "failed"]
+    },
+    {
+      "id": "policy-override-machine",
+      "initial": "proposed",
+      "states": [
+        { "id": "proposed", "terminal": false },
+        { "id": "ceiling_check", "terminal": false },
+        { "id": "awaiting_confirmation", "terminal": false },
+        { "id": "active", "terminal": false },
+        { "id": "rejected", "terminal": true },
+        { "id": "expired", "terminal": true },
+        { "id": "cancelled", "terminal": true }
+      ],
+      "events": [
+        { "type": "OVERRIDE_FACTS_REQUESTED", "sources": ["system"] },
+        { "type": "OVERRIDE_FACTS_RECORDED", "sources": ["tool"] },
+        { "type": "POLICY_OVERRIDE_CONFIRMED", "sources": ["human"] },
+        { "type": "POLICY_OVERRIDE_DECLINED", "sources": ["human"] },
+        { "type": "POLICY_OVERRIDE_EXPIRED", "sources": ["system"] },
+        { "type": "POLICY_OVERRIDE_CANCELLED", "sources": ["human", "system"] }
+      ],
+      "transitions": [
+        {
+          "id": "O01",
+          "from": ["proposed"],
+          "event": "OVERRIDE_FACTS_REQUESTED",
+          "guard": "structuredExactPolicyDiffBoundToMission",
+          "to": "ceiling_check",
+          "effects": ["requestCanonicalPolicyFacts", "journalDecision"]
+        },
+        {
+          "id": "O02",
+          "from": ["ceiling_check"],
+          "event": "OVERRIDE_FACTS_RECORDED",
+          "guard": "withinSystemCeilingsAndAllFieldsOverrideable",
+          "to": "awaiting_confirmation",
+          "effects": ["appendPolicyConfirmationNotice", "journalDecision"]
+        },
+        {
+          "id": "O03",
+          "from": ["ceiling_check"],
+          "event": "OVERRIDE_FACTS_RECORDED",
+          "guard": "ceilingExceededOrFieldNotOverrideable",
+          "to": "rejected",
+          "effects": ["appendPolicyOverrideRejectedNotice", "journalDecision"]
+        },
+        {
+          "id": "O04",
+          "from": ["awaiting_confirmation"],
+          "event": "POLICY_OVERRIDE_CONFIRMED",
+          "guard": "missionOwnerAndExactDiffFingerprintMatches",
+          "to": "active",
+          "effects": ["activateMissionOverride", "appendPolicyOverrideActivatedNotice", "journalDecision"]
+        },
+        {
+          "id": "O05",
+          "from": ["awaiting_confirmation"],
+          "event": "POLICY_OVERRIDE_DECLINED",
+          "guard": "missionOwnerAndExactDiffFingerprintMatches",
+          "to": "rejected",
+          "effects": ["appendPolicyOverrideRejectedNotice", "journalDecision"]
+        },
+        {
+          "id": "O06",
+          "from": ["active"],
+          "event": "POLICY_OVERRIDE_EXPIRED",
+          "guard": "missionTerminalizationAuthorizedAndQuiescent",
+          "to": "expired",
+          "effects": ["removeOverrideFromEffectivePolicy", "journalDecision"]
+        },
+        {
+          "id": "O07",
+          "from": ["proposed", "ceiling_check", "awaiting_confirmation", "active"],
+          "event": "POLICY_OVERRIDE_CANCELLED",
+          "guard": "linkedRequestCancelledMissionTerminalOrOwnerAndNoLiveDependency",
+          "to": "cancelled",
+          "effects": ["removeOverrideFromEffectivePolicy", "requestAffectedPolicyReevaluation", "journalDecision"]
+        }
+      ],
+      "forbidden": [
+        "AI confirmation, decline, cancellation or expiry",
+        "confirmation by a non-owner",
+        "confirmation with a stale or partial policy diff fingerprint",
+        "activation above a system ceiling",
+        "activation for a non-overrideable field",
+        "reuse by another mission or request",
+        "remaining active after mission termination",
+        "post-terminal events"
+      ],
+      "terminalStates": ["rejected", "expired", "cancelled"]
+    }
+  ],
+  "crossMachineRules": [
+    {
+      "id": "X01",
+      "rule": "A mission owns every agent, subagent request and policy override correlated by missionId; cross-mission references are rejected."
+    },
+    {
+      "id": "X02",
+      "rule": "An accepted subagent signal creates a request only when the parent agent snapshot is active."
+    },
+    {
+      "id": "X03",
+      "rule": "A child agent record is created only after its request reaches approved, and its parentAgentId and missionId are immutable."
+    },
+    {
+      "id": "X04",
+      "rule": "Stopping a parent computes a deterministic descendants-first plan from the persisted parent graph; the parent cannot acknowledge stopped before every descendant is completed, cancelled, failed or interrupted."
+    },
+    {
+      "id": "X05",
+      "rule": "Mission cancellation or failure cancels all non-terminal subagent requests, stops every live agent descendants-first and expires every active override before the mission reaches its terminal state."
+    },
+    {
+      "id": "X06",
+      "rule": "Mission completion requires all required agents terminal, no live descendants, no open subagent request, no unresolved human blocker and deterministic completion evidence."
+    },
+    {
+      "id": "X07",
+      "rule": "Agent and request failures are signals to the mission model; application or UI code cannot assign a mission target state."
+    },
+    {
+      "id": "X08",
+      "rule": "Policy evaluation consumes canonical facts and model configuration; a tool reports facts and evidence but never an allow or deny verdict."
+    },
+    {
+      "id": "X09",
+      "rule": "An active override cannot be removed while a live agent or request depends on it; terminalization expires overrides only after dependent work is quiescent."
+    }
+  ],
+  "retryModel": {
+    "errorClassification": "deterministic-error-code-registry",
+    "clock": "injected-deadline-events",
+    "idempotencyKey": "missionId:aggregateId:operation:attempt",
+    "rules": [
+      "every retry family has a finite system ceiling and a finite mission-contract limit",
+      "attempt increments before an effect is scheduled",
+      "automatic retry is allowed only below both limits and below the human-validation threshold",
+      "a retry above the automatic threshold requires an exact human authorization event",
+      "non-retryable errors never enter retry_wait",
+      "replay of the same idempotency key cannot duplicate a process, child, message or budget charge"
+    ]
+  },
+  "effectProtocol": {
+    "decisionOrder": [
+      "validate event schema, source principal and current snapshot",
+      "run pure guards and select exactly one declared transition",
+      "atomically persist next snapshot, journal entry and effect intents",
+      "execute committed effect intents outside the model",
+      "return typed acknowledgements as new events"
+    ],
+    "invariants": [
+      "no external effect runs before its intent is durably committed",
+      "effect execution never mutates model state directly",
+      "recovery replays committed intents by idempotency key",
+      "unmatched, malformed, wrong-source and post-terminal events are rejected and journaled",
+      "a persistence failure commits neither the transition nor its effects"
+    ]
+  },
+  "globalInvariants": [
+    {
+      "id": "INV-01",
+      "rule": "Only the four declared machines change their respective states."
+    },
+    {
+      "id": "INV-02",
+      "rule": "An LLM produces content or typed signals only and can never select a target state, command, approval, retry, cancellation, permission grant or policy verdict."
+    },
+    {
+      "id": "INV-03",
+      "rule": "Free-form text is never parsed into a state-transition event."
+    },
+    {
+      "id": "INV-04",
+      "rule": "Every launched mission owns an immutable template and autonomy-contract snapshot."
+    },
+    {
+      "id": "INV-05",
+      "rule": "Every agent and subagent request belongs to exactly one mission; every child has a traceable parent in that mission."
+    },
+    {
+      "id": "INV-06",
+      "rule": "System ceilings are immutable and cannot be overridden."
+    },
+    {
+      "id": "INV-07",
+      "rule": "Mission overrides require explicit human confirmation of an exact structured diff, are journaled and expire with the mission."
+    },
+    {
+      "id": "INV-08",
+      "rule": "The shared thread contains human-facing messages and decision notices only; technical activity remains on the agent record."
+    },
+    {
+      "id": "INV-09",
+      "rule": "Terminal machine states are immutable."
+    },
+    {
+      "id": "INV-10",
+      "rule": "Parent interruption and cancellation handle descendants before parent quiescence."
+    },
+    {
+      "id": "INV-11",
+      "rule": "All budgets, retries, permissions and validation thresholds are evaluated deterministically from structured data."
+    },
+    {
+      "id": "INV-12",
+      "rule": "Model functions perform no I/O and use no ambient clock, randomness, process API, filesystem API or host SDK."
+    },
+    {
+      "id": "INV-13",
+      "rule": "The M1 runtime launches local agents itself and has no adapter catalogue, adapter manifest or configuration-assistant dependency."
+    },
+    {
+      "id": "INV-14",
+      "rule": "A mission is paused only after all live agents are restartably quiescent and no start intent remains open."
+    },
+    {
+      "id": "INV-15",
+      "rule": "A process absence acknowledgement cannot complete an agent stop while a launch intent for that agent remains open."
+    },
+    {
+      "id": "INV-16",
+      "rule": "All LLM calls live in dedicated AI workers behind typed signal ports; UI, application, policy, persistence and process layers do not invoke an LLM inline."
+    }
+  ],
+  "plannedXStateMachines": [
+    {
+      "id": "localMissionMachine",
+      "contract": "mission-machine",
+      "plannedPath": "packages/core/src/models/local-mission.machine.ts"
+    },
+    {
+      "id": "localAgentMachine",
+      "contract": "agent-machine",
+      "plannedPath": "packages/core/src/models/local-agent.machine.ts"
+    },
+    {
+      "id": "subagentRequestMachine",
+      "contract": "subagent-request-machine",
+      "plannedPath": "packages/core/src/models/subagent-request.machine.ts"
+    },
+    {
+      "id": "policyOverrideMachine",
+      "contract": "policy-override-machine",
+      "plannedPath": "packages/core/src/models/policy-override.machine.ts"
+    }
+  ],
+  "deferred": [
+    "executable XState machines",
+    "SwiftUI or AppKit application code",
+    "application use cases, persistence and process orchestration",
+    "universal adapters, adapter manifests, adapter catalogue and setup assistant",
+    "direct messages and private channels",
+    "remote or distributed execution",
+    "cloud synchronization",
+    "implementation tests and production verification"
+  ]
+}
