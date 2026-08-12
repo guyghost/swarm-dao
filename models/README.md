@@ -23,6 +23,11 @@ Invariants:
 5. Repositories are instance-owned. A host may not use process-global state as its runtime boundary.
 6. Presenters transform structured results and contain no business decisions.
 
+The native macOS Agent Workspace persistence milestone is defined by
+`local-agent-workspace-persistence.md`, its graph/schema, and review. It extends
+`local-agent-mission.*` with fail-closed storage and explicit restart recovery;
+restoration never revives a local process.
+
 ## Effect model
 
 Application workflows follow this shape:

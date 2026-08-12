@@ -112,4 +112,47 @@ describe("WorkspaceHost", () => {
     expect(response.error).toContain("pause is not available");
     expect(response.projection.mission.state).toBe("draft");
   });
+
+  test("keeps user template revisions append-only and built-ins immutable", async () => {
+    const host = createHost();
+    const agents = [{ agentId: "reviewer", role: "Reviewer", capabilities: ["review"], required: true }] as const;
+    const created = await host.handle({
+      type: "create_team_template",
+      templateId: "user-reviewer",
+      name: "Reviewer",
+      agents,
+    });
+    expect(created.templates.find((template) => template.templateId === "user-reviewer")?.revision).toBe(1);
+
+    const revised = await host.handle({
+      type: "save_team_template_revision",
+      templateId: "user-reviewer",
+      expectedRevision: 1,
+      name: "Reviewer v2",
+      agents,
+    });
+    expect(revised.templates.find((template) => template.templateId === "user-reviewer")).toMatchObject({
+      revision: 2,
+      name: "Reviewer v2",
+    });
+
+    const stale = await host.handle({
+      type: "save_team_template_revision",
+      templateId: "user-reviewer",
+      expectedRevision: 1,
+      name: "Stale",
+      agents,
+    });
+    expect(stale.ok).toBe(false);
+    expect(stale.error).toContain("stale");
+    const builtIn = await host.handle({
+      type: "save_team_template_revision",
+      templateId: "core-duo",
+      expectedRevision: 1,
+      name: "Changed built-in",
+      agents,
+    });
+    expect(builtIn.ok).toBe(false);
+    expect(builtIn.error).toContain("immutable");
+  });
 });

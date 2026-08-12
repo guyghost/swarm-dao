@@ -2,6 +2,10 @@ import SwiftUI
 
 struct LaunchMissionView: View {
   let templates: [TeamTemplate]
+  let initialAutonomyContract: AutonomyContract?
+  let onCreateTemplate: (String, [MissionTemplateAgent]) -> Void
+  let onDuplicateTemplate: (TeamTemplate, String) -> Void
+  let onSaveTemplateRevision: (TeamTemplate, String, [MissionTemplateAgent]) -> Void
   let onLaunch: (LaunchConfiguration) -> Void
 
   @Environment(\.dismiss) private var dismiss
@@ -17,6 +21,35 @@ struct LaunchMissionView: View {
   @State private var maxChildren = 2
   @State private var maxConcurrency = 3
   @State private var humanRetryAttempt = 2
+  @State private var templateName = ""
+
+  init(
+    templates: [TeamTemplate],
+    initialAutonomyContract: AutonomyContract?,
+    onCreateTemplate: @escaping (String, [MissionTemplateAgent]) -> Void,
+    onDuplicateTemplate: @escaping (TeamTemplate, String) -> Void,
+    onSaveTemplateRevision: @escaping (TeamTemplate, String, [MissionTemplateAgent]) -> Void,
+    onLaunch: @escaping (LaunchConfiguration) -> Void
+  ) {
+    self.templates = templates
+    self.initialAutonomyContract = initialAutonomyContract
+    self.onCreateTemplate = onCreateTemplate
+    self.onDuplicateTemplate = onDuplicateTemplate
+    self.onSaveTemplateRevision = onSaveTemplateRevision
+    self.onLaunch = onLaunch
+    if let contract = initialAutonomyContract {
+      _allowedTools = State(initialValue: contract.allowedToolIds.joined(separator: ", "))
+      _readRoot = State(initialValue: contract.fileAccessRules.readRoots.first ?? "")
+      _writeRoot = State(initialValue: contract.fileAccessRules.writeRoots.first ?? "")
+      _maxActions = State(initialValue: contract.budgetLimits.maxActions)
+      _maxRuntimeSeconds = State(initialValue: contract.budgetLimits.maxRuntimeSeconds)
+      _delegationEnabled = State(initialValue: contract.delegationLimits.enabled)
+      _maxDepth = State(initialValue: contract.delegationLimits.maxDepth)
+      _maxChildren = State(initialValue: contract.delegationLimits.maxChildrenPerParent)
+      _maxConcurrency = State(initialValue: contract.delegationLimits.maxMissionConcurrency)
+      _humanRetryAttempt = State(initialValue: contract.validationThresholds.humanRetryAttempt)
+    }
+  }
 
   var body: some View {
     NavigationStack {
@@ -36,6 +69,23 @@ struct LaunchMissionView: View {
             }
             .disabled(agent.required)
           }
+          TextField("Nom du modèle personnel", text: $templateName)
+          HStack {
+            Button("Enregistrer l’équipe") {
+              onCreateTemplate(templateName, selectedAgents)
+            }
+            Button("Dupliquer le modèle") {
+              if let selectedTemplate {
+                onDuplicateTemplate(selectedTemplate, templateName)
+              }
+            }
+            if let selectedTemplate, selectedTemplate.origin != .builtIn {
+              Button("Nouvelle révision") {
+                onSaveTemplateRevision(selectedTemplate, templateName, selectedAgents)
+              }
+            }
+          }
+          .disabled(templateName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
         Section("Outils et budgets") {
           TextField("Outils autorisés", text: $allowedTools)
@@ -93,6 +143,10 @@ struct LaunchMissionView: View {
     guard let template = selectedTemplate, !tools.isEmpty, maxActions > 0, maxRuntimeSeconds > 0
     else { return false }
     return template.agents.filter(\.required).allSatisfy { enabledAgentIds.contains($0.agentId) }
+  }
+
+  private var selectedAgents: [MissionTemplateAgent] {
+    (selectedTemplate?.agents ?? []).filter { enabledAgentIds.contains($0.agentId) }
   }
 
   private var configuration: LaunchConfiguration {

@@ -29,6 +29,7 @@ private struct RequestEnvelope: Encodable, Sendable {
 
 private actor RuntimeConnection {
   private let executableURL: URL
+  private let storageDirectoryURL: URL
   private var process: Process?
   private var inputPipe: Pipe?
   private var outputPipe: Pipe?
@@ -36,8 +37,9 @@ private actor RuntimeConnection {
   private var output: FileHandle?
   private var bufferedOutput = Data()
 
-  init(executableURL: URL) {
+  init(executableURL: URL, storageDirectoryURL: URL) {
     self.executableURL = executableURL
+    self.storageDirectoryURL = storageDirectoryURL
   }
 
   deinit {
@@ -68,6 +70,7 @@ private actor RuntimeConnection {
     let inputPipe = Pipe()
     let outputPipe = Pipe()
     process.executableURL = executableURL
+    process.arguments = ["--storage-directory", storageDirectoryURL.path]
     process.standardInput = inputPipe
     process.standardOutput = outputPipe
     process.standardError = FileHandle.standardError
@@ -100,14 +103,22 @@ private actor RuntimeConnection {
 public final class SubprocessWorkspaceModelClient: WorkspaceModelClient {
   private let connection: RuntimeConnection
 
-  public init(runtimeURL: URL? = nil) {
+  public init(runtimeURL: URL? = nil, storageDirectoryURL: URL? = nil) {
     let configuredPath = ProcessInfo.processInfo.environment["AGENT_WORKSPACE_RUNTIME_PATH"]
     let resolvedURL =
       runtimeURL
       ?? configuredPath.map(URL.init(fileURLWithPath:))
       ?? Bundle.main.resourceURL?.appendingPathComponent("AgentWorkspaceRuntime")
       ?? URL(fileURLWithPath: "/missing/AgentWorkspaceRuntime")
-    connection = RuntimeConnection(executableURL: resolvedURL)
+    let defaultStorageURL =
+      FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
+      .appendingPathComponent("Swarm DAO", isDirectory: true)
+      .appendingPathComponent("Agent Workspace", isDirectory: true)
+      ?? FileManager.default.temporaryDirectory.appendingPathComponent(
+        "Swarm-DAO-Agent-Workspace", isDirectory: true)
+    connection = RuntimeConnection(
+      executableURL: resolvedURL,
+      storageDirectoryURL: storageDirectoryURL ?? defaultStorageURL)
   }
 
   public func send(_ command: WorkspaceCommand) async throws -> WorkspaceHostResponse {

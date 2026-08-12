@@ -1,5 +1,8 @@
 import { createHash } from "node:crypto";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { systemClock } from "../../../../packages/core/src/index.js";
+import { FileWorkspacePersistence } from "./file-workspace-persistence.js";
 import { LocalWorkerProcessPort } from "./local-worker-process.js";
 import { decodeWorkspaceRequest, WorkspaceHost } from "./workspace-host.js";
 
@@ -63,12 +66,25 @@ const currentWorkerCommand = (): readonly string[] => {
 
 const runHost = async (): Promise<void> => {
   const processPort = new LocalWorkerProcessPort(currentWorkerCommand());
-  const host = new WorkspaceHost({
+  const missionId = "local-mission";
+  const ownerId = "local-owner";
+  const storageDirectory =
+    argumentAfter("--storage-directory") ??
+    process.env.AGENT_WORKSPACE_STORAGE_DIRECTORY ??
+    join(homedir(), "Library", "Application Support", "Swarm DAO", "Agent Workspace");
+  const persistence = new FileWorkspacePersistence({
+    directory: storageDirectory,
+    missionId,
+    ownerId,
+    clock: systemClock,
+  });
+  const host = await WorkspaceHost.restore({
     missionId: "local-mission",
-    ownerId: "local-owner",
+    ownerId,
     processPort,
     clock: systemClock,
     hash: { digest: (value) => createHash("sha256").update(value).digest("hex") },
+    persistence,
   });
   process.on("SIGTERM", () => {
     void processPort.stopAll().finally(() => process.exit(0));

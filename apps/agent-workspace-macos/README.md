@@ -4,6 +4,17 @@ This is the first native macOS vertical slice of Swarm DAO's local Agent Workspa
 
 The shared mission conversation is the primary surface. Agent process details are projected only into the agent inspector. Mission and agent lifecycle decisions are owned by the XState models in `packages/core/src/models`; SwiftUI receives projections and model-derived commands through a closed local NDJSON protocol.
 
+Workspace state is stored locally in
+`~/Library/Application Support/Swarm DAO/Agent Workspace/workspace-v1.json`.
+The versioned envelope uses integrity hashes and an atomic same-directory
+rename. User template revisions, the shared history, agent profiles, the sealed
+launch snapshot, and the last structured autonomy configuration survive app
+restarts.
+
+Restart never revives a worker process. A mission that was running is restored
+as `paused`, its non-terminal agents as `interrupted`, and the UI requires an
+explicit owner action before fresh launch intents can be committed.
+
 ## Run
 
 ```sh

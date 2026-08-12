@@ -134,8 +134,30 @@ public struct TeamTemplate: Codable, Equatable, Identifiable, Sendable {
   public let name: String
   public let origin: TeamTemplateOrigin
   public let agents: [MissionTemplateAgent]
+  public let lineage: TeamTemplateLineage?
 
   public var id: String { templateId }
+
+  public init(
+    templateId: String,
+    revision: Int,
+    name: String,
+    origin: TeamTemplateOrigin,
+    agents: [MissionTemplateAgent],
+    lineage: TeamTemplateLineage? = nil
+  ) {
+    self.templateId = templateId
+    self.revision = revision
+    self.name = name
+    self.origin = origin
+    self.agents = agents
+    self.lineage = lineage
+  }
+}
+
+public struct TeamTemplateLineage: Codable, Equatable, Sendable {
+  public let sourceTemplateId: String
+  public let sourceRevision: Int
 }
 
 public struct MissionTemplateSnapshot: Codable, Equatable, Sendable {
@@ -154,6 +176,32 @@ public struct MissionProjection: Codable, Equatable, Sendable {
   public let state: MissionState
   public let availableCommands: [MissionCommand]
   public let templateSnapshot: MissionTemplateSnapshot?
+  public let recovery: WorkspaceRecovery?
+}
+
+public struct WorkspaceRecovery: Codable, Equatable, Sendable {
+  public let required: Bool
+  public let previousState: MissionState
+  public let recoveredAt: String
+}
+
+public enum WorkspacePersistenceState: String, Codable, Sendable {
+  case uninitialized
+  case loading
+  case migrating
+  case recovering
+  case ready
+  case saving
+  case saveFailed = "save_failed"
+  case storageBlocked = "storage_blocked"
+  case corrupt
+  case incompatible
+}
+
+public struct WorkspaceStorageStatus: Codable, Equatable, Sendable {
+  public let state: WorkspacePersistenceState
+  public let revision: Int
+  public let errorCode: String?
 }
 
 public struct AgentActivity: Codable, Equatable, Sendable {
@@ -185,6 +233,8 @@ public struct WorkspaceHostResponse: Codable, Equatable, Sendable {
   public let error: String?
   public let projection: WorkspaceProjection
   public let templates: [TeamTemplate]
+  public let autonomyConfiguration: AutonomyContract?
+  public let storage: WorkspaceStorageStatus
 }
 
 public struct LaunchConfiguration: Codable, Equatable, Sendable {
@@ -206,6 +256,11 @@ public enum WorkspaceCommand: Equatable, Sendable, Encodable {
   case pauseMission
   case resumeMission
   case cancelMission
+  case createTeamTemplate(templateId: String, name: String, agents: [MissionTemplateAgent])
+  case duplicateTeamTemplate(
+    sourceTemplateId: String, sourceRevision: Int, templateId: String, name: String)
+  case saveTeamTemplateRevision(
+    templateId: String, expectedRevision: Int, name: String, agents: [MissionTemplateAgent])
 
   private enum CodingKeys: String, CodingKey {
     case type
@@ -213,6 +268,11 @@ public enum WorkspaceCommand: Equatable, Sendable, Encodable {
     case enabledAgentIds
     case autonomyContract
     case content
+    case name
+    case agents
+    case sourceTemplateId
+    case sourceRevision
+    case expectedRevision
   }
 
   public func encode(to encoder: Encoder) throws {
@@ -234,6 +294,23 @@ public enum WorkspaceCommand: Equatable, Sendable, Encodable {
       try container.encode("resume_mission", forKey: .type)
     case .cancelMission:
       try container.encode("cancel_mission", forKey: .type)
+    case .createTeamTemplate(let templateId, let name, let agents):
+      try container.encode("create_team_template", forKey: .type)
+      try container.encode(templateId, forKey: .templateId)
+      try container.encode(name, forKey: .name)
+      try container.encode(agents, forKey: .agents)
+    case .duplicateTeamTemplate(let sourceTemplateId, let sourceRevision, let templateId, let name):
+      try container.encode("duplicate_team_template", forKey: .type)
+      try container.encode(sourceTemplateId, forKey: .sourceTemplateId)
+      try container.encode(sourceRevision, forKey: .sourceRevision)
+      try container.encode(templateId, forKey: .templateId)
+      try container.encode(name, forKey: .name)
+    case .saveTeamTemplateRevision(let templateId, let expectedRevision, let name, let agents):
+      try container.encode("save_team_template_revision", forKey: .type)
+      try container.encode(templateId, forKey: .templateId)
+      try container.encode(expectedRevision, forKey: .expectedRevision)
+      try container.encode(name, forKey: .name)
+      try container.encode(agents, forKey: .agents)
     }
   }
 }

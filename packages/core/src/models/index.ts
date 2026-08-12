@@ -4,6 +4,7 @@ export * from "./local-agent.machine.js";
 export * from "./local-mission.machine.js";
 export * from "./local-workspace.policy.js";
 export * from "./local-workspace.types.js";
+export * from "./local-workspace-persistence.machine.js";
 export * from "./policy-override.machine.js";
 export * from "./product-loop.machine.js";
 export * from "./proposal.machine.js";

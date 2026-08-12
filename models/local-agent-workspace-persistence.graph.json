@@ -1,0 +1,127 @@
+{
+  "$schema": "./local-agent-workspace-persistence.graph.schema.json",
+  "id": "swarm-dao-local-agent-workspace-persistence",
+  "version": 1,
+  "milestone": "m2-local-persistence",
+  "authority": {
+    "durabilityState": "persistence-recovery-machine",
+    "missionState": "mission-machine",
+    "agentState": "agent-machine",
+    "llm": "signal-only",
+    "freeFormTextTransitions": false
+  },
+  "storageFormat": {
+    "currentSchemaVersion": 1,
+    "supportedLegacyVersions": [0],
+    "committedFile": "workspace-v1.json",
+    "atomicCommit": [
+      "validate complete payload",
+      "write same-directory temporary file with private permissions",
+      "fsync temporary file",
+      "atomic rename over committed file",
+      "fsync parent directory"
+    ],
+    "integrityFields": ["payloadHash", "checksum"],
+    "singleAuthority": "committed file only; temporary files are never promoted"
+  },
+  "persistedEntities": [
+    "mission persisted snapshot and shared messages",
+    "agent persisted snapshots and sanitized activity",
+    "user team-template immutable revisions and lineage",
+    "last structured autonomy configuration",
+    "message and idempotency sequences",
+    "recovery audit entries"
+  ],
+  "machine": {
+    "id": "persistence-recovery-machine",
+    "initial": "uninitialized",
+    "states": [
+      { "id": "uninitialized", "terminal": false },
+      { "id": "loading", "terminal": false },
+      { "id": "migrating", "terminal": false },
+      { "id": "recovering", "terminal": false },
+      { "id": "ready", "terminal": false },
+      { "id": "saving", "terminal": false },
+      { "id": "save_failed", "terminal": false },
+      { "id": "storage_blocked", "terminal": true },
+      { "id": "corrupt", "terminal": true },
+      { "id": "incompatible", "terminal": true }
+    ],
+    "events": [
+      { "type": "STORAGE_LOAD_REQUESTED", "sources": ["system"] },
+      { "type": "STORAGE_MISSING", "sources": ["tool"] },
+      { "type": "STORAGE_RECORD_LOADED", "sources": ["tool"] },
+      { "type": "STORAGE_LOAD_FAILED", "sources": ["tool"] },
+      { "type": "STORAGE_MIGRATION_SUCCEEDED", "sources": ["tool"] },
+      { "type": "STORAGE_MIGRATION_FAILED", "sources": ["tool"] },
+      { "type": "WORKSPACE_RECOVERY_APPLIED", "sources": ["system"] },
+      { "type": "PERSISTENCE_SAVE_REQUESTED", "sources": ["system"] },
+      { "type": "STORAGE_SAVE_COMMITTED", "sources": ["tool"] },
+      { "type": "STORAGE_SAVE_FAILED", "sources": ["tool"] },
+      { "type": "STORAGE_SAVE_RETRY_DUE", "sources": ["system"] },
+      { "type": "STORAGE_SAVE_RETRY_AUTHORIZED", "sources": ["human"] },
+      { "type": "STORAGE_SAVE_RETRIES_EXHAUSTED", "sources": ["system"] }
+    ],
+    "transitions": [
+      { "id": "P01", "from": ["uninitialized"], "event": "STORAGE_LOAD_REQUESTED", "guard": "systemStartup", "to": "loading", "effects": ["requestCommittedFileRead"] },
+      { "id": "P02", "from": ["loading"], "event": "STORAGE_MISSING", "guard": "trustedMissingFile", "to": "recovering", "effects": ["createEmptyWorkspaceCandidate"] },
+      { "id": "P03", "from": ["loading"], "event": "STORAGE_RECORD_LOADED", "guard": "currentVersionExactShapeAndIntegrityValid", "to": "recovering", "effects": ["retainValidatedWorkspaceCandidate"] },
+      { "id": "P04", "from": ["loading"], "event": "STORAGE_RECORD_LOADED", "guard": "supportedLegacyVersionExactShape", "to": "migrating", "effects": ["requestAtomicMigration"] },
+      { "id": "P05", "from": ["loading"], "event": "STORAGE_RECORD_LOADED", "guard": "schemaVersionNewerThanCurrent", "to": "incompatible", "effects": ["recordStableStorageError"] },
+      { "id": "P06", "from": ["loading"], "event": "STORAGE_LOAD_FAILED", "guard": "malformedPartialChecksumOrInvariantFailure", "to": "corrupt", "effects": ["recordStableStorageError"] },
+      { "id": "P07", "from": ["migrating"], "event": "STORAGE_MIGRATION_SUCCEEDED", "guard": "matchingPayloadHashAndCurrentVersionCommitted", "to": "recovering", "effects": ["retainValidatedWorkspaceCandidate"] },
+      { "id": "P08", "from": ["migrating"], "event": "STORAGE_MIGRATION_FAILED", "guard": "trustedMigrationFailure", "to": "corrupt", "effects": ["recordStableStorageError"] },
+      { "id": "P09", "from": ["recovering"], "event": "WORKSPACE_RECOVERY_APPLIED", "guard": "allRecoveredAggregatesSafeAndNoLiveProcess", "to": "ready", "effects": ["recordRecoveryAudit"] },
+      { "id": "P10", "from": ["ready"], "event": "PERSISTENCE_SAVE_REQUESTED", "guard": "validChangedPayloadAndNoWriteInFlight", "to": "saving", "effects": ["retainImmutablePendingPayload", "requestAtomicSave"] },
+      { "id": "P11", "from": ["ready"], "event": "PERSISTENCE_SAVE_REQUESTED", "guard": "payloadHashAlreadyCommitted", "to": "ready", "effects": ["acknowledgeIdempotentSave"] },
+      { "id": "P12", "from": ["saving"], "event": "STORAGE_SAVE_COMMITTED", "guard": "matchingPendingHashAndMonotonicRevision", "to": "ready", "effects": ["adoptCommittedMetadata", "clearPendingPayload"] },
+      { "id": "P13", "from": ["saving"], "event": "STORAGE_SAVE_FAILED", "guard": "trustedTransientWriteFailure", "to": "save_failed", "effects": ["retainPendingPayload", "incrementSaveAttempt", "restoreLastDurableWorkspace"] },
+      { "id": "P14", "from": ["save_failed"], "event": "STORAGE_SAVE_RETRY_DUE", "guard": "matchingPendingHashAttemptWithinFiniteLimit", "to": "saving", "effects": ["requestAtomicSave"] },
+      { "id": "P15", "from": ["save_failed"], "event": "STORAGE_SAVE_RETRY_AUTHORIZED", "guard": "ownerExactPendingHashAttemptWithinFiniteLimit", "to": "saving", "effects": ["requestAtomicSave"] },
+      { "id": "P16", "from": ["save_failed"], "event": "STORAGE_SAVE_RETRIES_EXHAUSTED", "guard": "systemExactPendingHashAndLimitExceeded", "to": "storage_blocked", "effects": ["restoreLastDurableWorkspace", "recordStableStorageError"] }
+    ],
+    "forbidden": [
+      "AI-sourced storage, migration, recovery, save, or retry events",
+      "recovery before exact schema and integrity validation",
+      "promotion of a temporary or partial file",
+      "overwrite of corrupt or future-version storage",
+      "save acknowledgement for a different payload hash",
+      "unbounded or text-authorized retries",
+      "mutating commands from a terminal storage state"
+    ],
+    "terminalStates": ["storage_blocked", "corrupt", "incompatible"]
+  },
+  "recoveryTransitions": [
+    { "id": "RM01", "authorityMachine": "agent-machine", "from": ["ready", "starting", "active", "waiting_for_human", "retry_wait", "stopping", "interrupted", "failing"], "event": "WORKSPACE_RESTART_RECOVERED", "guard": "systemRestartableDispositionAndTrustedProcessAbsence", "to": "interrupted", "effects": ["clearProcessIdentityAndOldEffectIntents", "appendRestartInterruptionActivity", "journalDecision"] },
+    { "id": "RM02", "authorityMachine": "mission-machine", "from": ["pending", "active", "pausing", "human_intervention_required"], "event": "WORKSPACE_RESTART_RECOVERED", "guard": "systemRecoveryAllAgentsInterruptedAndNoLiveProcess", "to": "paused", "effects": ["recordRecoveryMetadata", "appendRestartPausedNotice", "journalDecision"] },
+    { "id": "RM03", "authorityMachine": "agent-machine", "from": ["ready", "starting", "active", "waiting_for_human", "retry_wait", "stopping", "interrupted", "failing"], "event": "WORKSPACE_RESTART_RECOVERED", "guard": "systemTerminalCancellationDispositionAndTrustedProcessAbsence", "to": "cancelled", "effects": ["clearProcessIdentityAndOldEffectIntents", "releaseReservations", "appendRecoveryCancellationActivity", "journalDecision"] },
+    { "id": "RM04", "authorityMachine": "mission-machine", "from": ["cancelling"], "event": "WORKSPACE_RESTART_RECOVERED", "guard": "systemCancellationRecoveryAllAggregatesQuiescentAndNoLiveProcess", "to": "cancelled", "effects": ["expireMissionOverrides", "recordRecoveryMetadata", "appendMissionCancelledNotice", "journalDecision"] },
+    { "id": "RM05", "authorityMachine": "agent-machine", "from": ["ready", "starting", "active", "waiting_for_human", "retry_wait", "stopping", "interrupted", "failing"], "event": "WORKSPACE_RESTART_RECOVERED", "guard": "systemTerminalFailureDispositionAndTrustedProcessAbsence", "to": "failed", "effects": ["clearProcessIdentityAndOldEffectIntents", "releaseReservations", "appendRecoveryFailureActivity", "journalDecision"] },
+    { "id": "RM06", "authorityMachine": "mission-machine", "from": ["failing"], "event": "WORKSPACE_RESTART_RECOVERED", "guard": "systemFailureRecoveryAllAggregatesQuiescentAndNoLiveProcess", "to": "failed", "effects": ["expireMissionOverrides", "recordRecoveryMetadata", "appendMissionFailedNotice", "journalDecision"] },
+    { "id": "RM07", "authorityMachine": "mission-machine", "from": ["paused"], "event": "WORKSPACE_RESTART_RECOVERED", "guard": "systemRecoveryAllAgentsInterruptedAndNoLiveProcess", "to": "paused", "effects": ["recordRecoveryMetadata", "appendRestartPausedNotice", "journalDecision"] }
+  ],
+  "invariants": [
+    { "id": "PINV-01", "rule": "No local child process is live immediately after workspace restoration." },
+    { "id": "PINV-02", "rule": "No pre-restart local process start, send, retry, or stop intent is replayed automatically." },
+    { "id": "PINV-03", "rule": "Only mission-machine and agent-machine select recovered business states." },
+    { "id": "PINV-04", "rule": "Operational restored missions are paused and non-terminal agents are interrupted before persistence becomes ready." },
+    { "id": "PINV-05", "rule": "A recovered mission creates a process only after an authenticated owner resume and durable new intent." },
+    { "id": "PINV-06", "rule": "A failed commit runs no external business effect and restores the last durable workspace." },
+    { "id": "PINV-07", "rule": "Duplicate payload hashes are idempotent and changed payload revisions are monotonic." },
+    { "id": "PINV-08", "rule": "Corrupt, partial, checksum-invalid, and future storage is never silently replaced or partially loaded." },
+    { "id": "PINV-09", "rule": "User template revisions and mission launch snapshots are immutable after commit." },
+    { "id": "PINV-10", "rule": "Persisted technical activity is sanitized and cannot enter the shared conversation." },
+    { "id": "PINV-11", "rule": "Restored autonomy configuration grants no permission and causes no transition by itself." },
+    { "id": "PINV-12", "rule": "Models perform no filesystem, clock, hashing, process, network, or LLM I/O." }
+  ],
+  "deferred": [
+    "multiple concurrently selected mission workspaces",
+    "private conversations and direct-message UI",
+    "generic adapters, manifests, catalogues, and configuration assistant",
+    "real LLM integration",
+    "remote execution and cloud synchronization",
+    "destructive storage reset or repair UI",
+    "encrypted-at-rest secret storage",
+    "cross-device template synchronization"
+  ]
+}

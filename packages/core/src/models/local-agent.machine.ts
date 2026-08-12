@@ -1,4 +1,4 @@
-import { type ActorRefFrom, assign, createActor, setup } from "xstate";
+import { type ActorRefFrom, assign, createActor, type Snapshot, setup } from "xstate";
 import {
   type AgentActivityEntry,
   isNonEmpty,
@@ -89,6 +89,13 @@ export type LocalAgentEvent =
       ownerId: string;
       operation: "start" | "runtime";
       attempt: number;
+    }>
+  | Readonly<{
+      type: "WORKSPACE_RESTART_RECOVERED";
+      source: WorkspaceEventSource;
+      disposition: "restartable_interruption" | "terminal_cancellation" | "terminal_failure";
+      recoveredAt: string;
+      processAbsenceVerified: boolean;
     }>;
 
 const retryableErrorCodes = new Set(["process-temporary", "resource-temporary", "worker-unavailable"]);
@@ -260,6 +267,24 @@ const agentSetup = setup({
       context.processId === null &&
       event.openLaunchIntents === 0 &&
       event.descendantStates.every((state) => descendantTerminalStates.has(state)),
+    restartableRecovery: ({ event }) =>
+      event.type === "WORKSPACE_RESTART_RECOVERED" &&
+      event.source === "system" &&
+      event.disposition === "restartable_interruption" &&
+      event.processAbsenceVerified &&
+      isNonEmpty(event.recoveredAt),
+    cancellationRecovery: ({ event }) =>
+      event.type === "WORKSPACE_RESTART_RECOVERED" &&
+      event.source === "system" &&
+      event.disposition === "terminal_cancellation" &&
+      event.processAbsenceVerified &&
+      isNonEmpty(event.recoveredAt),
+    failureRecovery: ({ event }) =>
+      event.type === "WORKSPACE_RESTART_RECOVERED" &&
+      event.source === "system" &&
+      event.disposition === "terminal_failure" &&
+      event.processAbsenceVerified &&
+      isNonEmpty(event.recoveredAt),
   },
   actions: {
     recordStartRequest: assign(({ context, event }) => {
@@ -397,6 +422,18 @@ const agentSetup = setup({
       effects: appendEffect(context, "launch_local_agent", context.startAttempt + context.runtimeAttempt),
       activity: appendActivity(context, "restart_authorized", "restartable"),
     })),
+    recordWorkspaceRecovery: assign(({ context, event }) => {
+      if (event.type !== "WORKSPACE_RESTART_RECOVERED") return {};
+      return {
+        processId: null,
+        launchToken: null,
+        pendingHumanRetry: null,
+        stopReason: event.disposition === "restartable_interruption" ? ("restartable" as const) : null,
+        descendantsQuiescent: true,
+        effects: [],
+        activity: appendActivity(context, "workspace_restart_recovered", event.disposition),
+      };
+    }),
   },
 });
 
@@ -422,6 +459,12 @@ const runningStopTransitions = {
   AGENT_CANCEL_REQUESTED: { guard: "terminalCancel", target: "stopping", actions: "recordTerminalStop" },
 } as const;
 
+const workspaceRecoveryTransitions = [
+  { guard: "cancellationRecovery", target: "cancelled", actions: "recordWorkspaceRecovery" },
+  { guard: "failureRecovery", target: "failed", actions: "recordWorkspaceRecovery" },
+  { guard: "restartableRecovery", target: "interrupted", actions: "recordWorkspaceRecovery" },
+] as const;
+
 export const localAgentMachine = agentSetup.createMachine({
   id: "localAgent",
   initial: "ready",
@@ -442,6 +485,7 @@ export const localAgentMachine = agentSetup.createMachine({
   states: {
     ready: {
       on: {
+        WORKSPACE_RESTART_RECOVERED: workspaceRecoveryTransitions,
         AGENT_START_AUTHORIZED: {
           guard: "systemStartAuthorization",
           target: "starting",
@@ -452,6 +496,7 @@ export const localAgentMachine = agentSetup.createMachine({
     },
     starting: {
       on: {
+        WORKSPACE_RESTART_RECOVERED: workspaceRecoveryTransitions,
         PROCESS_STARTED: { guard: "matchingProcessStart", target: "active", actions: "recordProcessStarted" },
         PROCESS_START_FAILED: failureTransitions,
         ...runningStopTransitions,
@@ -459,6 +504,7 @@ export const localAgentMachine = agentSetup.createMachine({
     },
     active: {
       on: {
+        WORKSPACE_RESTART_RECOVERED: workspaceRecoveryTransitions,
         AGENT_SIGNAL_RECORDED: [
           { guard: "humanInputSignal", target: "waiting_for_human", actions: "recordHumanWait" },
           { guard: "contentSignal", actions: "recordSignal" },
@@ -469,6 +515,7 @@ export const localAgentMachine = agentSetup.createMachine({
     },
     waiting_for_human: {
       on: {
+        WORKSPACE_RESTART_RECOVERED: workspaceRecoveryTransitions,
         HUMAN_RESPONSE_RECORDED: {
           guard: "matchingHumanResponse",
           target: "active",
@@ -480,6 +527,7 @@ export const localAgentMachine = agentSetup.createMachine({
     },
     retry_wait: {
       on: {
+        WORKSPACE_RESTART_RECOVERED: workspaceRecoveryTransitions,
         AGENT_RETRY_DUE: { guard: "automaticRetryDue", target: "starting", actions: "recordRetryLaunch" },
         AGENT_RETRY_AUTHORIZED: { guard: "exactHumanRetry", target: "starting", actions: "recordRetryLaunch" },
         ...runningStopTransitions,
@@ -487,12 +535,14 @@ export const localAgentMachine = agentSetup.createMachine({
     },
     interrupted: {
       on: {
+        WORKSPACE_RESTART_RECOVERED: workspaceRecoveryTransitions,
         AGENT_RESTART_AUTHORIZED: { guard: "restartAuthorization", target: "starting", actions: "recordRestart" },
         ...runningStopTransitions,
       },
     },
     stopping: {
       on: {
+        WORKSPACE_RESTART_RECOVERED: workspaceRecoveryTransitions,
         DESCENDANTS_QUIESCENT: {
           guard: "descendantsQuiescent",
           actions: "recordDescendantsQuiescent",
@@ -515,6 +565,7 @@ export const localAgentMachine = agentSetup.createMachine({
     },
     failing: {
       on: {
+        WORKSPACE_RESTART_RECOVERED: workspaceRecoveryTransitions,
         DESCENDANTS_QUIESCENT: { guard: "failingDescendantsQuiescent", target: "failed" },
       },
     },
@@ -526,8 +577,8 @@ export const localAgentMachine = agentSetup.createMachine({
 
 export type LocalAgentActor = ActorRefFrom<typeof localAgentMachine>;
 
-export const createLocalAgentActor = (input: LocalAgentMachineInput): LocalAgentActor => {
-  const actor = createActor(localAgentMachine, { input });
+export const createLocalAgentActor = (input: LocalAgentMachineInput, snapshot?: Snapshot<unknown>): LocalAgentActor => {
+  const actor = createActor(localAgentMachine, { input, snapshot });
   actor.start();
   return actor;
 };

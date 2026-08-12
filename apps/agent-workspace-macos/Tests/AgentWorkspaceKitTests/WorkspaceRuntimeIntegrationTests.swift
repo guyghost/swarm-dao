@@ -17,7 +17,15 @@ final class WorkspaceRuntimeIntegrationTests: XCTestCase {
     guard FileManager.default.isExecutableFile(atPath: runtimeURL.path) else {
       throw XCTSkip("Build AgentWorkspaceRuntime before running the integration test")
     }
-    let client = SubprocessWorkspaceModelClient(runtimeURL: runtimeURL)
+    let storageURL = FileManager.default.temporaryDirectory.appendingPathComponent(
+      "AgentWorkspaceRuntimeTests-\(UUID().uuidString)", isDirectory: true)
+    defer {
+      if FileManager.default.fileExists(atPath: storageURL.path) {
+        try? FileManager.default.removeItem(at: storageURL)
+      }
+    }
+    let client = SubprocessWorkspaceModelClient(
+      runtimeURL: runtimeURL, storageDirectoryURL: storageURL)
 
     let initial = try await client.send(.getWorkspace)
     XCTAssertEqual(initial.projection.mission.state, .draft)

@@ -1,4 +1,4 @@
-import { type ActorRefFrom, assign, createActor, setup } from "xstate";
+import { type ActorRefFrom, assign, createActor, type Snapshot, setup } from "xstate";
 import {
   appendUnique,
   isMissionShared,
@@ -34,6 +34,11 @@ export interface LocalMissionContext {
   blockers: readonly string[];
   interventionOrigin: "pending" | "active" | null;
   effects: readonly WorkspaceEffectIntent[];
+  recovery: Readonly<{
+    required: boolean;
+    previousState: MissionState;
+    recoveredAt: string;
+  }> | null;
 }
 
 export interface LocalMissionMachineInput {
@@ -100,6 +105,15 @@ export type LocalMissionEvent =
       source: WorkspaceEventSource;
       ownerId: string;
       message: MissionMessage;
+    }>
+  | Readonly<{
+      type: "WORKSPACE_RESTART_RECOVERED";
+      source: WorkspaceEventSource;
+      disposition: "restartable_interruption" | "terminal_cancellation" | "terminal_failure";
+      previousState: MissionState;
+      recoveredAt: string;
+      agentStates: readonly LocalAgentState[];
+      liveProcessCount: number;
     }>;
 
 const ownerEvent = (context: LocalMissionContext, event: LocalMissionEvent): boolean =>
@@ -138,6 +152,7 @@ const missionSetup = setup({
       event.requiredAgents.some((agent) => agent.state === "failed" || agent.state === "waiting_for_human"),
     systemEvent: ({ event }) => event.source === "system",
     owner: ({ context, event }) => ownerEvent(context, event),
+    ownerNoBlockers: ({ context, event }) => ownerEvent(context, event) && context.blockers.length === 0,
     sharedHumanMessage: ({ context, event }) =>
       event.type === "HUMAN_MESSAGE_SUBMITTED" &&
       ownerEvent(context, event) &&
@@ -190,6 +205,27 @@ const missionSetup = setup({
       event.allAgentsQuiescent &&
       event.openSubagentRequests === 0 &&
       event.liveProcessCount === 0,
+    restartableRecovery: ({ event }) =>
+      event.type === "WORKSPACE_RESTART_RECOVERED" &&
+      event.source === "system" &&
+      event.disposition === "restartable_interruption" &&
+      isNonEmpty(event.recoveredAt) &&
+      event.liveProcessCount === 0 &&
+      event.agentStates.every((state) => state === "interrupted" || terminalAgentStates.has(state)),
+    cancellationRecovery: ({ event }) =>
+      event.type === "WORKSPACE_RESTART_RECOVERED" &&
+      event.source === "system" &&
+      event.disposition === "terminal_cancellation" &&
+      isNonEmpty(event.recoveredAt) &&
+      event.liveProcessCount === 0 &&
+      event.agentStates.every((state) => state === "completed" || state === "cancelled" || state === "failed"),
+    failureRecovery: ({ event }) =>
+      event.type === "WORKSPACE_RESTART_RECOVERED" &&
+      event.source === "system" &&
+      event.disposition === "terminal_failure" &&
+      isNonEmpty(event.recoveredAt) &&
+      event.liveProcessCount === 0 &&
+      event.agentStates.every((state) => state === "completed" || state === "cancelled" || state === "failed"),
   },
   actions: {
     sealSnapshot: assign(({ context, event }) => {
@@ -263,6 +299,7 @@ const missionSetup = setup({
     })),
     requestResume: assign(({ context }) => ({
       effects: addEffect(context, "restart_interrupted_agents", "resume"),
+      recovery: null,
     })),
     requestCancel: assign(({ context }) => ({
       effects: addEffect(context, "cancel_agents_descendants_first", "cancel"),
@@ -274,6 +311,31 @@ const missionSetup = setup({
         event.type === "MISSION_FAILURE_RECORDED" ? event.errorCode : "failure",
       ),
     })),
+    recordRestartRecovery: assign(({ context, event }) => {
+      if (event.type !== "WORKSPACE_RESTART_RECOVERED") return {};
+      return {
+        recovery: {
+          required: event.disposition === "restartable_interruption",
+          previousState: event.previousState,
+          recoveredAt: event.recoveredAt,
+        },
+        effects: [],
+        messages: appendUnique(context.messages, {
+          messageId: `mission-recovered:${context.missionId}:${event.recoveredAt}`,
+          missionId: context.missionId,
+          author: { kind: "system", id: "mission-model", displayName: "Workspace" },
+          visibility: { kind: "mission_shared", participantIds: [] },
+          kind: "system_notice",
+          content:
+            event.disposition === "restartable_interruption"
+              ? "Mission paused after app restart. Local agents were not restarted."
+              : event.disposition === "terminal_cancellation"
+                ? "Mission cancellation completed during restart recovery."
+                : "Mission failure cleanup completed during restart recovery.",
+          createdAt: event.recoveredAt,
+        }),
+      };
+    }),
   },
 });
 
@@ -300,6 +362,7 @@ export const localMissionMachine = missionSetup.createMachine({
     blockers: [],
     interventionOrigin: null,
     effects: [],
+    recovery: null,
   }),
   states: {
     draft: {
@@ -311,6 +374,11 @@ export const localMissionMachine = missionSetup.createMachine({
     },
     pending: {
       on: {
+        WORKSPACE_RESTART_RECOVERED: {
+          guard: "restartableRecovery",
+          target: "paused",
+          actions: "recordRestartRecovery",
+        },
         MISSION_ACTIVATION_EVALUATED: [
           { guard: "allRequiredAgentsActive", target: "active", actions: "appendActivatedNotice" },
           {
@@ -331,6 +399,11 @@ export const localMissionMachine = missionSetup.createMachine({
     },
     active: {
       on: {
+        WORKSPACE_RESTART_RECOVERED: {
+          guard: "restartableRecovery",
+          target: "paused",
+          actions: "recordRestartRecovery",
+        },
         AGENT_SIGNAL_RECORDED: [
           { guard: "agentHumanInputSignal", target: "human_intervention_required", actions: "openAgentBlocker" },
           { guard: "sharedAgentMessage", actions: "appendAgentMessage" },
@@ -349,6 +422,11 @@ export const localMissionMachine = missionSetup.createMachine({
     },
     pausing: {
       on: {
+        WORKSPACE_RESTART_RECOVERED: {
+          guard: "restartableRecovery",
+          target: "paused",
+          actions: "recordRestartRecovery",
+        },
         MISSION_PAUSE_QUIESCENCE_EVALUATED: { guard: "pauseQuiescent", target: "paused" },
         ...sharedMessageTransitions,
         ...cancelTransition,
@@ -357,7 +435,8 @@ export const localMissionMachine = missionSetup.createMachine({
     },
     paused: {
       on: {
-        MISSION_RESUME_REQUESTED: { guard: "owner", target: "pending", actions: "requestResume" },
+        WORKSPACE_RESTART_RECOVERED: { guard: "restartableRecovery", actions: "recordRestartRecovery" },
+        MISSION_RESUME_REQUESTED: { guard: "ownerNoBlockers", target: "pending", actions: "requestResume" },
         ...sharedMessageTransitions,
         ...cancelTransition,
         ...failureTransition,
@@ -365,6 +444,11 @@ export const localMissionMachine = missionSetup.createMachine({
     },
     human_intervention_required: {
       on: {
+        WORKSPACE_RESTART_RECOVERED: {
+          guard: "restartableRecovery",
+          target: "paused",
+          actions: "recordRestartRecovery",
+        },
         MISSION_INTERVENTION_EVALUATED: [
           { guard: "allBlockersResolvedFromActive", target: "active", actions: "resolveBlockers" },
           { guard: "allBlockersResolvedFromPending", target: "pending", actions: "resolveBlockers" },
@@ -376,12 +460,22 @@ export const localMissionMachine = missionSetup.createMachine({
     },
     cancelling: {
       on: {
+        WORKSPACE_RESTART_RECOVERED: {
+          guard: "cancellationRecovery",
+          target: "cancelled",
+          actions: "recordRestartRecovery",
+        },
         MISSION_QUIESCENCE_EVALUATED: { guard: "quiescent", target: "cancelled" },
         ...failureTransition,
       },
     },
     failing: {
       on: {
+        WORKSPACE_RESTART_RECOVERED: {
+          guard: "failureRecovery",
+          target: "failed",
+          actions: "recordRestartRecovery",
+        },
         MISSION_QUIESCENCE_EVALUATED: { guard: "quiescent", target: "failed" },
       },
     },
@@ -393,8 +487,11 @@ export const localMissionMachine = missionSetup.createMachine({
 
 export type LocalMissionActor = ActorRefFrom<typeof localMissionMachine>;
 
-export const createLocalMissionActor = (input: LocalMissionMachineInput): LocalMissionActor => {
-  const actor = createActor(localMissionMachine, { input });
+export const createLocalMissionActor = (
+  input: LocalMissionMachineInput,
+  snapshot?: Snapshot<unknown>,
+): LocalMissionActor => {
+  const actor = createActor(localMissionMachine, { input, snapshot });
   actor.start();
   return actor;
 };

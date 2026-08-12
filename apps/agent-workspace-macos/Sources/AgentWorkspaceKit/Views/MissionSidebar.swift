@@ -32,6 +32,30 @@ struct MissionSidebar: View {
         }
       }
 
+      if let recovery = store.projection?.mission.recovery, recovery.required {
+        Section("Récupération") {
+          Label(
+            "Mission interrompue au redémarrage",
+            systemImage: "exclamationmark.arrow.triangle.2.circlepath")
+          Text(
+            "Aucun processus local n’a été relancé. État précédent : \(recovery.previousState.label.lowercased())."
+          )
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          if store.isAvailable(.resume) {
+            Button("Reprendre explicitement", systemImage: "play.fill") {
+              Task { await store.resume() }
+            }
+            .disabled(store.isWorking)
+          }
+        }
+      }
+
+      Section("Stockage local") {
+        LabeledContent("État", value: store.storage.state.label)
+        LabeledContent("Révision", value: String(store.storage.revision))
+      }
+
       Section("Agents") {
         ForEach(store.projection?.agents ?? []) { agent in
           Button {
@@ -57,6 +81,20 @@ struct MissionSidebar: View {
       }
     }
     .navigationTitle("Agent Workspace")
+  }
+}
+
+extension WorkspacePersistenceState {
+  fileprivate var label: String {
+    switch self {
+    case .ready: "À jour"
+    case .saving: "Enregistrement"
+    case .loading, .recovering, .migrating, .uninitialized: "Chargement"
+    case .saveFailed: "Nouvel essai"
+    case .storageBlocked: "Bloqué"
+    case .corrupt: "Données corrompues"
+    case .incompatible: "Version incompatible"
+    }
   }
 }
 

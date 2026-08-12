@@ -22,10 +22,26 @@ public struct WorkspaceRootView: View {
       }
     }
     .sheet(isPresented: $showsLaunchSheet) {
-      LaunchMissionView(templates: store.templates) { configuration in
-        showsLaunchSheet = false
-        Task { await store.launch(configuration) }
-      }
+      LaunchMissionView(
+        templates: store.templates,
+        initialAutonomyContract: store.autonomyConfiguration,
+        onCreateTemplate: { name, agents in
+          showsLaunchSheet = false
+          Task { await store.createTemplate(name: name, agents: agents) }
+        },
+        onDuplicateTemplate: { template, name in
+          showsLaunchSheet = false
+          Task { await store.duplicateTemplate(template, name: name) }
+        },
+        onSaveTemplateRevision: { template, name, agents in
+          showsLaunchSheet = false
+          Task { await store.saveTemplateRevision(template, name: name, agents: agents) }
+        },
+        onLaunch: { configuration in
+          showsLaunchSheet = false
+          Task { await store.launch(configuration) }
+        }
+      )
     }
     .alert("Agent Workspace", isPresented: errorPresented) {
       Button("Fermer") { store.clearError() }

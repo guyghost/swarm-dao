@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import {
   type LocalAgentProcessPort,
   LocalAgentWorkspaceService,
+  type LocalWorkspacePersistedState,
   type TeamTemplate,
 } from "../src/application/local-agent-workspace.service.js";
 import type { AutonomyContract } from "../src/models/local-mission.machine.js";
@@ -111,6 +112,10 @@ describe("LocalAgentWorkspaceService", () => {
     expect(projection.messages.some((message) => message.content.includes("stdout:"))).toBe(false);
     expect(projection.agents[0]?.activity.some((entry) => entry.kind === "worker_roundtrip")).toBe(true);
     expect(projection.agents[0]?.activity.some((entry) => entry.detail.includes("stdout:"))).toBe(false);
+
+    const afterSecondRoundtrip = await service.sendHumanMessage("Inspect again.");
+    const messageIds = afterSecondRoundtrip.messages.map((message) => message.messageId);
+    expect(new Set(messageIds).size).toBe(messageIds.length);
   });
 
   it("derives pause, resume, and cancellation controls from mission snapshots", async () => {
@@ -130,5 +135,28 @@ describe("LocalAgentWorkspaceService", () => {
     expect(cancelled.mission.state).toBe("cancelled");
     expect(cancelled.mission.availableCommands).toEqual([]);
     await expect(service.sendHumanMessage("too late")).rejects.toThrow("send_message is not available");
+  });
+
+  it("rolls back a failed durable transition before any process effect", async () => {
+    const processes = new FakeLocalProcessPort();
+    const service = new LocalAgentWorkspaceService({
+      missionId: "mission-1",
+      ownerId: "owner-1",
+      processPort: processes,
+      clock: { now: () => "2026-08-12T12:00:00.000Z" },
+      hash: { digest: (value) => `sha256:${value.length}` },
+      persistence: {
+        save(_state: LocalWorkspacePersistedState): Promise<void> {
+          return Promise.reject(new Error("storage unavailable"));
+        },
+      },
+    });
+
+    await expect(service.launch({ template, enabledAgentIds: ["planner"], autonomyContract })).rejects.toThrow(
+      "storage unavailable",
+    );
+    expect(service.projection().mission.state).toBe("draft");
+    expect(service.projection().agents).toEqual([]);
+    expect(processes.started).toEqual([]);
   });
 });

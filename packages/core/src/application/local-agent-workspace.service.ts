@@ -1,6 +1,8 @@
+import type { Snapshot } from "xstate";
 import {
   createLocalAgentActor,
   type LocalAgentActor,
+  type LocalAgentContext,
   type LocalAgentMachineInput,
 } from "../models/local-agent.machine.js";
 import {
@@ -28,6 +30,13 @@ export type TeamTemplate = Readonly<{
   name: string;
   origin: "built_in" | "user" | "duplicate";
   agents: readonly MissionTemplateAgent[];
+  lineage?: Readonly<{ sourceTemplateId: string; sourceRevision: number }>;
+}>;
+
+export type WorkspaceRecoveryProjection = Readonly<{
+  required: boolean;
+  previousState: MissionState;
+  recoveredAt: string;
 }>;
 
 export type LocalAgentWorkerResult = Readonly<{
@@ -62,6 +71,7 @@ export type WorkspaceProjection = Readonly<{
     state: MissionState;
     availableCommands: readonly MissionCommand[];
     templateSnapshot: MissionTemplateSnapshot | null;
+    recovery: WorkspaceRecoveryProjection | null;
   }>;
   messages: readonly MissionMessage[];
   agents: readonly AgentProfileProjection[];
@@ -73,12 +83,53 @@ export type LaunchMissionCommand = Readonly<{
   autonomyContract: AutonomyContract;
 }>;
 
+export type PersistedAgentRecord = Readonly<{
+  agentId: string;
+  snapshot: Snapshot<unknown>;
+}>;
+
+export type LocalWorkspacePersistedState = Readonly<{
+  missionSnapshot: Snapshot<unknown>;
+  agents: readonly PersistedAgentRecord[];
+  technicalActivity: readonly Readonly<{ agentId: string; entries: readonly AgentActivityEntry[] }>[];
+  userTemplateRevisions: readonly TeamTemplate[];
+  lastAutonomyContract: AutonomyContract | null;
+  messageSequence: number;
+}>;
+
+export interface LocalWorkspacePersistencePort {
+  save(state: LocalWorkspacePersistedState): Promise<void>;
+}
+
+export type CreateTeamTemplateCommand = Readonly<{
+  templateId: string;
+  name: string;
+  agents: readonly MissionTemplateAgent[];
+}>;
+
+export type DuplicateTeamTemplateCommand = Readonly<{
+  sourceTemplateId: string;
+  sourceRevision: number;
+  templateId: string;
+  name: string;
+}>;
+
+export type SaveTeamTemplateRevisionCommand = Readonly<{
+  templateId: string;
+  expectedRevision: number;
+  name: string;
+  agents: readonly MissionTemplateAgent[];
+}>;
+
 type ServiceDependencies = Readonly<{
   missionId: string;
   ownerId: string;
   processPort: LocalAgentProcessPort;
   clock: ClockPort;
   hash: SnapshotHashPort;
+  builtInTemplates?: readonly TeamTemplate[];
+  restoredState?: LocalWorkspacePersistedState;
+  persistence?: LocalWorkspacePersistencePort;
 }>;
 
 const agentState = (actor: LocalAgentActor): LocalAgentState => String(actor.getSnapshot().value) as LocalAgentState;
@@ -100,15 +151,39 @@ const canonicalSnapshotContent = (
   });
 
 export class LocalAgentWorkspaceService {
-  readonly #mission: LocalMissionActor;
+  #mission: LocalMissionActor;
   readonly #agents = new Map<string, LocalAgentActor>();
   readonly #technicalActivity = new Map<string, AgentActivityEntry[]>();
   readonly #dependencies: ServiceDependencies;
+  readonly #templates: TeamTemplate[];
+  #lastAutonomyContract: AutonomyContract | null;
+  #lastDurableState: LocalWorkspacePersistedState;
   #messageSequence = 0;
 
   public constructor(dependencies: ServiceDependencies) {
     this.#dependencies = dependencies;
-    this.#mission = createLocalMissionActor({ missionId: dependencies.missionId, ownerId: dependencies.ownerId });
+    this.#templates = [...(dependencies.builtInTemplates ?? [])];
+    this.#lastAutonomyContract = dependencies.restoredState?.lastAutonomyContract ?? null;
+    if (dependencies.restoredState) {
+      this.#mission = createLocalMissionActor(
+        { missionId: dependencies.missionId, ownerId: dependencies.ownerId },
+        dependencies.restoredState.missionSnapshot,
+      );
+      for (const record of dependencies.restoredState.agents) {
+        const input = this.#agentInputFromSnapshot(record.snapshot);
+        this.#agents.set(record.agentId, createLocalAgentActor(input, record.snapshot));
+      }
+      for (const record of dependencies.restoredState.technicalActivity) {
+        this.#technicalActivity.set(record.agentId, record.entries.map(sanitizeAgentActivity));
+      }
+      this.#templates.push(
+        ...dependencies.restoredState.userTemplateRevisions.map((template) => structuredClone(template)),
+      );
+      this.#messageSequence = dependencies.restoredState.messageSequence;
+    } else {
+      this.#mission = createLocalMissionActor({ missionId: dependencies.missionId, ownerId: dependencies.ownerId });
+    }
+    this.#lastDurableState = this.persistedState();
   }
 
   public projection(): WorkspaceProjection {
@@ -119,6 +194,7 @@ export class LocalAgentWorkspaceService {
         state: missionState(this.#mission),
         availableCommands: missionAvailableCommands(missionSnapshot.value),
         templateSnapshot: missionSnapshot.context.templateSnapshot,
+        recovery: missionSnapshot.context.recovery,
       },
       messages: missionSnapshot.context.messages,
       agents: [...this.#agents.values()].map((actor) => {
@@ -134,6 +210,38 @@ export class LocalAgentWorkspaceService {
           activity: [...snapshot.context.activity, ...(this.#technicalActivity.get(snapshot.context.agentId) ?? [])],
         };
       }),
+    };
+  }
+
+  public templates(): readonly TeamTemplate[] {
+    const latest = new Map<string, TeamTemplate>();
+    for (const template of this.#templates) {
+      const current = latest.get(template.templateId);
+      if (!current || current.revision < template.revision) latest.set(template.templateId, template);
+    }
+    return [...latest.values()].map((template) => structuredClone(template));
+  }
+
+  public lastAutonomyContract(): AutonomyContract | null {
+    return this.#lastAutonomyContract ? structuredClone(this.#lastAutonomyContract) : null;
+  }
+
+  public persistedState(): LocalWorkspacePersistedState {
+    return {
+      missionSnapshot: this.#mission.getPersistedSnapshot(),
+      agents: [...this.#agents.entries()].map(([agentId, actor]) => ({
+        agentId,
+        snapshot: actor.getPersistedSnapshot(),
+      })),
+      technicalActivity: [...this.#technicalActivity.entries()].map(([agentId, entries]) => ({
+        agentId,
+        entries: entries.map(sanitizeAgentActivity),
+      })),
+      userTemplateRevisions: this.#templates
+        .filter((template) => template.origin !== "built_in")
+        .map((template) => structuredClone(template)),
+      lastAutonomyContract: this.#lastAutonomyContract ? structuredClone(this.#lastAutonomyContract) : null,
+      messageSequence: this.#messageSequence,
     };
   }
 
@@ -165,6 +273,7 @@ export class LocalAgentWorkspaceService {
     });
     if (missionState(this.#mission) !== "pending") throw new Error("mission model rejected launch");
 
+    this.#lastAutonomyContract = structuredClone(command.autonomyContract);
     for (const agent of normalizedTeam) {
       const input: LocalAgentMachineInput = {
         agentId: agent.agentId,
@@ -179,8 +288,16 @@ export class LocalAgentWorkspaceService {
       };
       const actor = createLocalAgentActor(input);
       this.#agents.set(agent.agentId, actor);
-      await this.#startAgent(actor, `launch:${agent.agentId}:0`, `reservation:${agent.agentId}:0`);
+      actor.send({
+        type: "AGENT_START_AUTHORIZED",
+        source: "system",
+        launchToken: `launch:${agent.agentId}:0`,
+        reservationId: `reservation:${agent.agentId}:0`,
+      });
+      if (agentState(actor) !== "starting") throw new Error(`agent ${agent.agentId} rejected start`);
     }
+    await this.#commit();
+    for (const actor of this.#agents.values()) await this.#startAuthorizedAgent(actor);
     this.#mission.send({
       type: "MISSION_ACTIVATION_EVALUATED",
       source: "system",
@@ -189,6 +306,7 @@ export class LocalAgentWorkspaceService {
         .map((agent) => ({ agentId: agent.agentId, state: agentState(this.#agent(agent.agentId)) })),
     });
     if (missionState(this.#mission) !== "active") throw new Error("mission model rejected activation");
+    await this.#commit();
     return this.projection();
   }
 
@@ -211,18 +329,24 @@ export class LocalAgentWorkspaceService {
     });
     if (this.#mission.getSnapshot().context.messages.length === before)
       throw new Error("mission model rejected message");
+    await this.#commit();
 
     for (const actor of this.#agents.values()) {
       if (agentState(actor) !== "active") continue;
       const result = await this.#dependencies.processPort.send(actor.getSnapshot().context.agentId, content);
       this.#appendTechnicalActivity(actor.getSnapshot().context.agentId, result.activity);
-      actor.send({ type: "AGENT_SIGNAL_RECORDED", source: "ai", signal: result.signal });
+      const signal = {
+        ...result.signal,
+        messageId: `agent:${actor.getSnapshot().context.agentId}:${++this.#messageSequence}`,
+      };
+      actor.send({ type: "AGENT_SIGNAL_RECORDED", source: "ai", signal });
       this.#mission.send({
         type: "AGENT_SIGNAL_RECORDED",
         source: "ai",
         agentId: actor.getSnapshot().context.agentId,
-        signal: result.signal,
+        signal,
       });
+      await this.#commit();
     }
     return this.projection();
   }
@@ -231,6 +355,7 @@ export class LocalAgentWorkspaceService {
     this.#requireCommand("pause");
     this.#mission.send({ type: "MISSION_PAUSE_REQUESTED", source: "human", ownerId: this.#dependencies.ownerId });
     if (missionState(this.#mission) !== "pausing") throw new Error("mission model rejected pause");
+    await this.#commit();
     for (const actor of this.#agents.values()) await this.#interruptAgent(actor);
     this.#mission.send({
       type: "MISSION_PAUSE_QUIESCENCE_EVALUATED",
@@ -239,6 +364,7 @@ export class LocalAgentWorkspaceService {
       openStartIntents: 0,
     });
     if (missionState(this.#mission) !== "paused") throw new Error("mission model rejected pause quiescence");
+    await this.#commit();
     return this.projection();
   }
 
@@ -250,8 +376,10 @@ export class LocalAgentWorkspaceService {
       if (agentState(actor) !== "interrupted") continue;
       const token = `resume:${actor.getSnapshot().context.agentId}:${actor.getSnapshot().context.startAttempt}`;
       actor.send({ type: "AGENT_RESTART_AUTHORIZED", source: "system", launchToken: token });
-      const started = await this.#dependencies.processPort.start(actor.getSnapshot().context.agentId);
-      actor.send({ type: "PROCESS_STARTED", source: "tool", launchToken: token, processId: started.processId });
+    }
+    await this.#commit();
+    for (const actor of this.#agents.values()) {
+      if (agentState(actor) === "starting") await this.#startAuthorizedAgent(actor);
     }
     this.#mission.send({
       type: "MISSION_ACTIVATION_EVALUATED",
@@ -262,14 +390,19 @@ export class LocalAgentWorkspaceService {
       })),
     });
     if (missionState(this.#mission) !== "active") throw new Error("mission model rejected resumed activation");
+    await this.#commit();
     return this.projection();
   }
 
   public async cancel(): Promise<WorkspaceProjection> {
     this.#requireCommand("cancel");
     this.#mission.send({ type: "MISSION_CANCEL_REQUESTED", source: "human", ownerId: this.#dependencies.ownerId });
-    if (missionState(this.#mission) === "cancelled") return this.projection();
+    if (missionState(this.#mission) === "cancelled") {
+      await this.#commit();
+      return this.projection();
+    }
     if (missionState(this.#mission) !== "cancelling") throw new Error("mission model rejected cancellation");
+    await this.#commit();
     for (const actor of this.#agents.values()) await this.#cancelAgent(actor);
     const states = [...this.#agents.values()].map(agentState);
     const terminal = states.every((state) => state === "completed" || state === "cancelled" || state === "failed");
@@ -281,7 +414,120 @@ export class LocalAgentWorkspaceService {
       liveProcessCount: terminal ? 0 : states.length,
     });
     if (missionState(this.#mission) !== "cancelled") throw new Error("mission model rejected cancellation quiescence");
+    await this.#commit();
     return this.projection();
+  }
+
+  public async recoverAfterRestart(recoveredAt: string, persist = true): Promise<WorkspaceProjection> {
+    const previousState = missionState(this.#mission);
+    if (
+      previousState === "draft" ||
+      previousState === "completed" ||
+      previousState === "cancelled" ||
+      previousState === "failed"
+    ) {
+      return this.projection();
+    }
+    const disposition =
+      previousState === "cancelling"
+        ? ("terminal_cancellation" as const)
+        : previousState === "failing"
+          ? ("terminal_failure" as const)
+          : ("restartable_interruption" as const);
+    for (const actor of this.#agents.values()) {
+      const state = agentState(actor);
+      if (state === "completed" || state === "cancelled" || state === "failed") continue;
+      actor.send({
+        type: "WORKSPACE_RESTART_RECOVERED",
+        source: "system",
+        disposition,
+        recoveredAt,
+        processAbsenceVerified: true,
+      });
+    }
+    this.#mission.send({
+      type: "WORKSPACE_RESTART_RECOVERED",
+      source: "system",
+      disposition,
+      previousState,
+      recoveredAt,
+      agentStates: [...this.#agents.values()].map(agentState),
+      liveProcessCount: 0,
+    });
+    const expectedState =
+      disposition === "restartable_interruption"
+        ? "paused"
+        : disposition === "terminal_cancellation"
+          ? "cancelled"
+          : "failed";
+    if (missionState(this.#mission) !== expectedState) throw new Error("mission model rejected restart recovery");
+    if (persist) await this.#commit();
+    return this.projection();
+  }
+
+  public async persistCurrentState(): Promise<void> {
+    await this.#commit();
+  }
+
+  public async createTemplate(command: CreateTeamTemplateCommand): Promise<readonly TeamTemplate[]> {
+    if (!this.#validTemplateIdentity(command.templateId, command.name, command.agents)) {
+      throw new Error("team template is invalid");
+    }
+    if (this.#templates.some((template) => template.templateId === command.templateId)) {
+      throw new Error("team template id already exists");
+    }
+    this.#templates.push({
+      templateId: command.templateId,
+      revision: 1,
+      name: command.name.trim(),
+      origin: "user",
+      agents: structuredClone(command.agents),
+    });
+    await this.#commit();
+    return this.templates();
+  }
+
+  public async duplicateTemplate(command: DuplicateTeamTemplateCommand): Promise<readonly TeamTemplate[]> {
+    const source = this.#templates.find(
+      (template) => template.templateId === command.sourceTemplateId && template.revision === command.sourceRevision,
+    );
+    if (!source) throw new Error("source team template revision does not exist");
+    if (this.#templates.some((template) => template.templateId === command.templateId)) {
+      throw new Error("team template id already exists");
+    }
+    if (!this.#validTemplateIdentity(command.templateId, command.name, source.agents)) {
+      throw new Error("team template is invalid");
+    }
+    this.#templates.push({
+      templateId: command.templateId,
+      revision: 1,
+      name: command.name.trim(),
+      origin: "duplicate",
+      agents: structuredClone(source.agents),
+      lineage: { sourceTemplateId: source.templateId, sourceRevision: source.revision },
+    });
+    await this.#commit();
+    return this.templates();
+  }
+
+  public async saveTemplateRevision(command: SaveTeamTemplateRevisionCommand): Promise<readonly TeamTemplate[]> {
+    const current = this.templates().find((template) => template.templateId === command.templateId);
+    if (!current) throw new Error("team template does not exist");
+    if (current.origin === "built_in") throw new Error("built-in team templates are immutable");
+    if (current.revision !== command.expectedRevision) throw new Error("team template revision is stale");
+    if (!this.#validTemplateIdentity(command.templateId, command.name, command.agents)) {
+      throw new Error("team template is invalid");
+    }
+    this.#templates.push({
+      templateId: current.templateId,
+      revision: current.revision + 1,
+      name: command.name.trim(),
+      origin: current.origin,
+      agents: structuredClone(command.agents),
+      ...(current.lineage ? { lineage: structuredClone(current.lineage) } : {}),
+    });
+    await this.#commit();
+    return this.templates();
   }
 
   #requireCommand(command: MissionCommand): void {
@@ -296,20 +542,26 @@ export class LocalAgentWorkspaceService {
     return actor;
   }
 
-  async #startAgent(actor: LocalAgentActor, launchToken: string, reservationId: string): Promise<void> {
-    actor.send({ type: "AGENT_START_AUTHORIZED", source: "system", launchToken, reservationId });
-    if (agentState(actor) !== "starting")
-      throw new Error(`agent ${actor.getSnapshot().context.agentId} rejected start`);
-    const started = await this.#dependencies.processPort.start(actor.getSnapshot().context.agentId);
+  async #startAuthorizedAgent(actor: LocalAgentActor): Promise<void> {
+    const id = actor.getSnapshot().context.agentId;
+    const launchToken = actor.getSnapshot().context.launchToken;
+    if (agentState(actor) !== "starting" || !launchToken) throw new Error(`agent ${id} has no committed start intent`);
+    const started = await this.#dependencies.processPort.start(id);
     actor.send({ type: "PROCESS_STARTED", source: "tool", launchToken, processId: started.processId });
-    if (agentState(actor) !== "active")
-      throw new Error(`agent ${actor.getSnapshot().context.agentId} rejected process ack`);
+    if (agentState(actor) !== "active") throw new Error(`agent ${id} rejected process ack`);
+    try {
+      await this.#commit();
+    } catch (error) {
+      await this.#dependencies.processPort.stop(id);
+      throw error;
+    }
   }
 
   async #interruptAgent(actor: LocalAgentActor): Promise<void> {
     const id = actor.getSnapshot().context.agentId;
     actor.send({ type: "AGENT_INTERRUPT_REQUESTED", source: "system", reason: "mission-paused" });
     actor.send({ type: "DESCENDANTS_QUIESCENT", source: "system", descendantStates: [], openLaunchIntents: 0 });
+    await this.#commit();
     const outcome = await this.#dependencies.processPort.stop(id);
     actor.send({
       type: outcome === "stopped" ? "PROCESS_STOPPED" : "LOCAL_PROCESS_ABSENT",
@@ -317,6 +569,7 @@ export class LocalAgentWorkspaceService {
       stopToken: `stop:${id}`,
     });
     if (agentState(actor) !== "interrupted") throw new Error(`agent ${id} rejected restartable stop`);
+    await this.#commit();
   }
 
   async #cancelAgent(actor: LocalAgentActor): Promise<void> {
@@ -325,6 +578,7 @@ export class LocalAgentWorkspaceService {
     if (state === "completed" || state === "cancelled" || state === "failed") return;
     actor.send({ type: "AGENT_CANCEL_REQUESTED", source: "system", reason: "mission-cancelled" });
     actor.send({ type: "DESCENDANTS_QUIESCENT", source: "system", descendantStates: [], openLaunchIntents: 0 });
+    await this.#commit();
     const outcome = await this.#dependencies.processPort.stop(id);
     actor.send({
       type: outcome === "stopped" ? "PROCESS_STOPPED" : "LOCAL_PROCESS_ABSENT",
@@ -332,10 +586,95 @@ export class LocalAgentWorkspaceService {
       stopToken: `stop:${id}`,
     });
     if (agentState(actor) !== "cancelled") throw new Error(`agent ${id} rejected terminal stop`);
+    await this.#commit();
   }
 
   #appendTechnicalActivity(agentId: string, entry: AgentActivityEntry): void {
     const entries = this.#technicalActivity.get(agentId) ?? [];
     this.#technicalActivity.set(agentId, [...entries, sanitizeAgentActivity(entry)]);
+  }
+
+  async #commit(): Promise<void> {
+    const candidate = this.persistedState();
+    try {
+      await this.#dependencies.persistence?.save(candidate);
+      this.#lastDurableState = candidate;
+    } catch (error) {
+      this.#restore(this.#lastDurableState);
+      throw error;
+    }
+  }
+
+  #restore(state: LocalWorkspacePersistedState): void {
+    this.#mission.stop();
+    for (const actor of this.#agents.values()) actor.stop();
+    this.#agents.clear();
+    this.#technicalActivity.clear();
+    this.#mission = createLocalMissionActor(
+      { missionId: this.#dependencies.missionId, ownerId: this.#dependencies.ownerId },
+      state.missionSnapshot,
+    );
+    for (const record of state.agents) {
+      this.#agents.set(
+        record.agentId,
+        createLocalAgentActor(this.#agentInputFromSnapshot(record.snapshot), record.snapshot),
+      );
+    }
+    for (const record of state.technicalActivity) {
+      this.#technicalActivity.set(record.agentId, record.entries.map(sanitizeAgentActivity));
+    }
+    this.#templates.splice(
+      0,
+      this.#templates.length,
+      ...(this.#dependencies.builtInTemplates ?? []),
+      ...state.userTemplateRevisions.map((template) => structuredClone(template)),
+    );
+    this.#lastAutonomyContract = state.lastAutonomyContract ? structuredClone(state.lastAutonomyContract) : null;
+    this.#messageSequence = state.messageSequence;
+  }
+
+  #agentInputFromSnapshot(snapshot: Snapshot<unknown>): LocalAgentMachineInput {
+    if (typeof snapshot !== "object" || snapshot === null || !("context" in snapshot)) {
+      throw new Error("persisted agent snapshot is malformed");
+    }
+    const context = snapshot.context as Partial<LocalAgentContext>;
+    if (
+      typeof context.agentId !== "string" ||
+      typeof context.missionId !== "string" ||
+      context.missionId !== this.#dependencies.missionId ||
+      typeof context.ownerId !== "string" ||
+      typeof context.role !== "string" ||
+      !Array.isArray(context.capabilities) ||
+      !Array.isArray(context.effectivePermissions) ||
+      !context.retryLimits ||
+      typeof context.humanRetryAttempt !== "number"
+    ) {
+      throw new Error("persisted agent snapshot context is invalid");
+    }
+    return {
+      agentId: context.agentId,
+      missionId: context.missionId,
+      ownerId: context.ownerId,
+      role: context.role,
+      parentAgentId: context.parentAgentId ?? null,
+      capabilities: context.capabilities,
+      effectivePermissions: context.effectivePermissions,
+      retryLimits: context.retryLimits,
+      humanRetryAttempt: context.humanRetryAttempt,
+    };
+  }
+
+  #validTemplateIdentity(templateId: string, name: string, agents: readonly MissionTemplateAgent[]): boolean {
+    const ids = agents.map((agent) => agent.agentId);
+    return (
+      templateId.trim().length > 0 &&
+      name.trim().length > 0 &&
+      agents.length > 0 &&
+      agents.some((agent) => agent.required) &&
+      new Set(ids).size === ids.length &&
+      agents.every(
+        (agent) => agent.agentId.trim().length > 0 && agent.role.trim().length > 0 && agent.capabilities.length > 0,
+      )
+    );
   }
 }

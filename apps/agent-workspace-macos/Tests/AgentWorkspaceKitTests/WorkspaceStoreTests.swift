@@ -59,6 +59,25 @@ final class WorkspaceStoreTests: XCTestCase {
     XCTAssertFalse(store.sharedMessages.contains { $0.content.contains("trace privée") })
     XCTAssertEqual(store.projection?.agents.first?.activity.first?.detail, "trace privée")
   }
+
+  func testStoreProjectsSafeRestartRecoveryWithoutInventingAnAction() async {
+    let response = Fixtures.response(
+      state: .paused,
+      commands: [.sendMessage, .resume, .cancel],
+      recovery: .init(
+        required: true,
+        previousState: .active,
+        recoveredAt: "2026-08-12T13:00:00.000Z"))
+    let store = WorkspaceStore(client: FakeWorkspaceModelClient(responses: [response]))
+
+    await store.refresh()
+
+    XCTAssertEqual(store.projection?.mission.state, .paused)
+    XCTAssertEqual(store.projection?.mission.recovery?.previousState, .active)
+    XCTAssertTrue(store.isAvailable(.resume))
+    XCTAssertFalse(store.isAvailable(.launch))
+    XCTAssertEqual(store.storage, .init(state: .ready, revision: 1, errorCode: nil))
+  }
 }
 
 @MainActor
@@ -97,7 +116,8 @@ private enum Fixtures {
     state: MissionState,
     commands: [MissionCommand],
     messages: [MissionMessage] = [],
-    activity: [AgentActivity] = []
+    activity: [AgentActivity] = [],
+    recovery: WorkspaceRecovery? = nil
   ) -> WorkspaceHostResponse {
     let template = TeamTemplate(
       templateId: "core-duo",
@@ -128,7 +148,8 @@ private enum Fixtures {
           missionId: "mission",
           state: state,
           availableCommands: commands,
-          templateSnapshot: state == .draft ? nil : snapshot
+          templateSnapshot: state == .draft ? nil : snapshot,
+          recovery: recovery
         ),
         messages: messages,
         agents: [
@@ -144,7 +165,9 @@ private enum Fixtures {
           )
         ]
       ),
-      templates: [template]
+      templates: [template],
+      autonomyConfiguration: autonomyContract,
+      storage: .init(state: .ready, revision: 1, errorCode: nil)
     )
   }
 }

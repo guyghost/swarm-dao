@@ -6,6 +6,9 @@ import Observation
 public final class WorkspaceStore {
   public private(set) var projection: WorkspaceProjection?
   public private(set) var templates: [TeamTemplate] = []
+  public private(set) var autonomyConfiguration: AutonomyContract?
+  public private(set) var storage = WorkspaceStorageStatus(
+    state: .uninitialized, revision: 0, errorCode: nil)
   public private(set) var isWorking = false
   public private(set) var lastError: String?
   public var selectedAgentId: String?
@@ -52,6 +55,34 @@ public final class WorkspaceStore {
     await execute(.cancelMission)
   }
 
+  public func createTemplate(name: String, agents: [MissionTemplateAgent]) async {
+    await execute(
+      .createTeamTemplate(
+        templateId: "user-\(UUID().uuidString.lowercased())", name: name, agents: agents))
+  }
+
+  public func duplicateTemplate(_ template: TeamTemplate, name: String) async {
+    await execute(
+      .duplicateTeamTemplate(
+        sourceTemplateId: template.templateId,
+        sourceRevision: template.revision,
+        templateId: "duplicate-\(UUID().uuidString.lowercased())",
+        name: name
+      ))
+  }
+
+  public func saveTemplateRevision(
+    _ template: TeamTemplate, name: String, agents: [MissionTemplateAgent]
+  ) async {
+    await execute(
+      .saveTeamTemplateRevision(
+        templateId: template.templateId,
+        expectedRevision: template.revision,
+        name: name,
+        agents: agents
+      ))
+  }
+
   public func clearError() {
     lastError = nil
   }
@@ -63,6 +94,8 @@ public final class WorkspaceStore {
       let response = try await client.send(command)
       projection = response.projection
       templates = response.templates
+      autonomyConfiguration = response.autonomyConfiguration
+      storage = response.storage
       lastError = response.ok ? nil : response.error
     } catch {
       lastError = error.localizedDescription
