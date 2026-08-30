@@ -363,7 +363,16 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
         args: { proposalId: schema.number() },
         // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
         async execute(args: any, _context: any) {
-          return handleDaoExecute(args.proposalId, repository);
+          return handleDaoExecute(
+            {
+              adapter: createOpenCodeHostAdapter(ctx),
+              workDir: directory,
+              deliberationMode: "manual",
+              controlToolName: "dao_control",
+              repository,
+            },
+            args.proposalId,
+          );
         },
       }),
 

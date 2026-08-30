@@ -101,6 +101,7 @@ For example, `vote` is CLI-only (deterministic), and the GitHub commands are MCP
 | `/dao plan` | `proposalId` | `dao_plan` | Show the delivery plan for a proposal |
 | `/dao artefacts` | `proposalId` | `dao_artefacts` | View the auto-generated artefacts for a proposal |
 | `/dao audit` | `[proposalId]` | `dao_audit` | View the audit trail |
+| `/dao attention` | `[--source <s>,...]` | — (CLI) | List pending human gates across workflow runs (read-only) |
 | `/dao dry-run` | `proposalId` | `dao_dry_run` | Preview execution without applying changes |
 | `/dao roundtable` | — | `dao_roundtable` | Ask every agent to suggest a proposal idea |
 

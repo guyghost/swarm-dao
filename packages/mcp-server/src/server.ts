@@ -310,7 +310,7 @@ export function createSwarmDaoMcpServer(workDir = resolveDaoRoot(), repository?:
         case "dao_control":
           return textResult(await handleDaoControl(ctx, Number(args.proposalId)));
         case "dao_execute":
-          return textResult(await handleDaoExecute(Number(args.proposalId), repository));
+          return textResult(await handleDaoExecute(ctx, Number(args.proposalId)));
         case "dao_ship":
           return textResult(
             await handleDaoShip(ctx, Number(args.proposalId), {

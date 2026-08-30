@@ -242,6 +242,11 @@ Per-project config in `.dao/config.json`:
   "agentOverrides": {
     "researcher": { "enabled": false },
     "critic": { "weight": 5 }
+  },
+  "execution": {
+    "isolation": "worktree",
+    "worktreeRoot": ".dao/worktrees",
+    "baseBranch": "main"
   }
 }
 ```
@@ -251,6 +256,22 @@ Per-project config in `.dao/config.json`:
 is actively applied (agents are filtered/overridden on every `dao_deliberate`
 call). `mode`-based edit blocking and path-based suggestions are not wired
 into any host yet; treat them as reserved schema for now.
+
+### Execution isolation (worktrees)
+
+When `execution.isolation` is `"worktree"` (default `"none"`), executing or
+shipping a proposal first carves an isolated git worktree — branch
+`dao/<id>-<slug>` checked out under `execution.worktreeRoot` (default
+`.dao/worktrees`, gitignored with the rest of `.dao/`). The pattern comes
+from swarm-forge: concurrent executions never step on each other in the
+shared checkout, work happens on a dedicated branch, and merging back stays
+a deliberate action (via the existing GitHub PR flow or a plain `git merge`).
+
+Preparation is idempotent (re-running `dao_execute` reattaches to the
+existing branch), and a failed preparation leaves the proposal `controlled`
+— no state transition happens without the workspace. The execution snapshot
+and audit entry record the real branch. Available on every host surface:
+`dao_execute` (Pi, OpenCode, MCP hosts) and `swarm-dao ship` (CLI).
 
 ## Delegated Facet Investigation (advanced, opt-in)
 

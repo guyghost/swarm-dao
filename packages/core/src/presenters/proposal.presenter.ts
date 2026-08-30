@@ -37,7 +37,9 @@ export function presentControl(control: ControlCheckResult): string {
 
 export function presentExecution(result: Extract<ExecuteProposalResult, { ok: true }>): string {
   const taskCount = result.plan.phases.reduce((sum, phase) => sum + phase.tasks.length, 0);
-  return `# ✅ Proposal Executed — #${result.proposal.id}\n\n**Title:** ${result.proposal.title}\n**Status:** 🚀 executed\n**Branch:** \`${result.plan.branchStrategy}\`\n**Plan:** ${result.plan.phases.length} phases, ${taskCount} tasks\n\nThe delivery agent has prepared an implementation plan. Review the tasks and begin implementation.`;
+  // snapshot.branch is the branch actually used: the delivery plan strategy
+  // without isolation, the isolated dao/<id>-<slug> branch with a workspace.
+  return `# ✅ Proposal Executed — #${result.proposal.id}\n\n**Title:** ${result.proposal.title}\n**Status:** 🚀 executed\n**Branch:** \`${result.snapshot.branch}\`\n**Plan:** ${result.plan.phases.length} phases, ${taskCount} tasks\n\nThe delivery agent has prepared an implementation plan. Review the tasks and begin implementation.`;
 }
 
 export function presentShip(result: Extract<ShipProposalResult, { ok: true }>): string {

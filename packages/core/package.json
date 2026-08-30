@@ -33,6 +33,18 @@
       "types": "./dist/delivery/index.d.ts",
       "import": "./dist/delivery/index.js"
     },
+    "./delivery/artefacts": {
+      "types": "./dist/delivery/artefacts.d.ts",
+      "import": "./dist/delivery/artefacts.js"
+    },
+    "./adapters": {
+      "types": "./dist/adapters/index.d.ts",
+      "import": "./dist/adapters/index.js"
+    },
+    "./ports": {
+      "types": "./dist/ports/index.d.ts",
+      "import": "./dist/ports/index.js"
+    },
     "./persistence": {
       "types": "./dist/persistence.d.ts",
       "import": "./dist/persistence.js"
