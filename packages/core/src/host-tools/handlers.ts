@@ -211,7 +211,8 @@ export async function handleDaoShip(
       store: new FsShipAuditStore(ctx.workDir),
       challengeEnabled: true,
       force: options?.force === true,
-      forceReason: options?.force === true ? "dao_ship --force" : undefined,
+      forceReason: options?.force === true ? "dao_ship force" : undefined,
+      options: { cascade: options?.cascade === true },
     });
     if (!gate.proceed)
       return `# 🛑 Ship Audit — Do Not Proceed
@@ -224,11 +225,13 @@ Force with an explicit reason when genuinely required: re-run with \`force=true\
     // bypass a configured worktree.
     const workspace = createExecutionWorkspace(shipConfig.execution, ctx.adapter, ctx.workDir);
     const auditedUseCase = new ShipProposalUseCase({ repository, clock: systemClock, workspace });
+    // The audited path: force means "bypass the audit challenge" ONLY —
+    // dependency checks still run inside the use-case (review resolution:
+    // the bypass satisfies INV-1, nothing else).
     const auditedResult = await auditedUseCase.execute({
       proposalId,
       actor: ctx.adapter.hostId,
       cascade: options?.cascade,
-      force: options?.force,
     });
     await gate.consume?.();
     if (!auditedResult.ok) return auditedResult.error;

@@ -7,7 +7,11 @@
 //   re-challenge — INV-2). Uses node:crypto; lives OUTSIDE src/models to
 //   respect the models purity contract.
 // - evaluateShipAuditChallenge: the gate the handler consults before
-//   ShipProposalUseCase. Never mutates proposal state.
+//   ShipProposalUseCase. Never mutates proposal state. The challenge binds
+//   the decision fingerprint AND the ship options (cascade): changing the
+//   operation between challenge and confirmation re-issues the challenge.
+//   The read→transition→write sequence runs under an exclusive cross-process
+//   claim, so one confirmation can never authorize concurrent ships (INV-6).
 
 import { createHash } from "node:crypto";
 import {
@@ -44,6 +48,21 @@ export function computeShipFingerprint(proposal: Proposal): string {
   return createHash("sha256").update(canonical).digest("hex");
 }
 
+/**
+ * The challenge binds the decision fingerprint plus the operation options:
+ * a single-proposal command must not morph into a cascading execution (or
+ * the reverse) under one confirmation.
+ */
+function requestSignature(fingerprint: string, options: { cascade?: boolean }): string {
+  return createHash("sha256")
+    .update(`${fingerprint}|${JSON.stringify({ cascade: options.cascade === true })}`)
+    .digest("hex");
+}
+
+export interface ShipAuditGateOptions {
+  cascade?: boolean;
+}
+
 export type ShipAuditGateResult =
   | { proceed: true; note?: string; consume?: () => Promise<void> }
   | { proceed: false; message: string };
@@ -63,7 +82,7 @@ function snapshotOf(actor: ShipAuditActor, count: number): ShipAuditSnapshot {
 
 /**
  * Rebuild a live actor from a persisted snapshot by deterministic replay:
- * challenged = one request with the persisted fingerprint, confirmed = two.
+ * challenged = one request with the persisted signature, confirmed = two.
  * Terminal contexts never block later cycles (review: cycle semantics) — a
  * new ship call on a still-controlled proposal starts fresh.
  */
@@ -84,11 +103,13 @@ function hydrate(persisted: ShipAuditSnapshot | null, proposalId: number): { act
 /**
  * The deterministic ship gate (models/ship-audit.md):
  * - challenge disabled → proceed unchanged (N1)
- * - force → human bypass, recorded (N6)
+ * - force → human bypass, recorded (N6) — the record MUST persist, so a
+ *   store failure blocks the bypass instead of silently losing evidence
  * - first call → AUDIT_REQUIRED, nothing executes (N2)
- * - unchanged call → proceed, with a `consume()` that spends the single
- *   confirmation after the execution attempt (N3, INV-6)
- * - changed decision → re-challenge (N4)
+ * - unchanged call (same decision AND same options) → proceed, with a
+ *   `consume()` that spends the single confirmation (N3, INV-6)
+ * - changed decision or options → re-challenge (N4)
+ * - concurrent gate for the same proposal → blocked while claimed (INV-6)
  */
 export async function evaluateShipAuditChallenge(input: {
   proposal: Proposal;
@@ -96,13 +117,35 @@ export async function evaluateShipAuditChallenge(input: {
   challengeEnabled: boolean;
   force?: boolean;
   forceReason?: string;
+  options?: ShipAuditGateOptions;
   occurredAt?: string;
 }): Promise<ShipAuditGateResult> {
   if (!input.challengeEnabled) return { proceed: true };
 
+  const claim = await input.store.claim(input.proposal.id);
+  if (!claim.acquired) {
+    return {
+      proceed: false,
+      message: `A concurrent ship gate for proposal #${input.proposal.id} is in flight; retry once it completes.`,
+    };
+  }
+  try {
+    return await gate(input);
+  } finally {
+    await claim.release();
+  }
+}
+
+async function gate(input: {
+  proposal: Proposal;
+  store: ShipAuditStorePort;
+  force?: boolean;
+  forceReason?: string;
+  options?: ShipAuditGateOptions;
+  occurredAt?: string;
+}): Promise<ShipAuditGateResult> {
   const persisted = await input.store.load(input.proposal.id).catch(() => null);
   const { actor, count } = hydrate(persisted, input.proposal.id);
-  const save = async () => input.store.save(snapshotOf(actor, count)).catch(() => undefined);
 
   if (input.force) {
     actor.send({
@@ -111,15 +154,17 @@ export async function evaluateShipAuditChallenge(input: {
       reason: input.forceReason ?? "operator force",
       occurredAt: input.occurredAt ?? new Date().toISOString(),
     });
-    await save();
+    // A bypass is only as good as its record: fail closed if it cannot persist.
+    await input.store.save(snapshotOf(actor, count));
     return { proceed: true, note: "ship audit bypassed by force (recorded)" };
   }
 
   const fingerprint = computeShipFingerprint(input.proposal);
-  actor.send({ ...REQUEST(fingerprint), occurredAt: input.occurredAt ?? new Date().toISOString() });
+  const signature = requestSignature(fingerprint, input.options ?? {});
+  actor.send({ ...REQUEST(signature), occurredAt: input.occurredAt ?? new Date().toISOString() });
   // The historical challenge counter lives here (the actor's own counter is
   // per-cycle): a new challenge — first of a cycle or a re-challenge after a
-  // changed decision — increments it; a confirmation does not.
+  // changed decision or options — increments it; a confirmation does not.
   const stateAfterRequest = String(actor.getSnapshot().value);
   const liveCount = stateAfterRequest === "challenged" ? count + 1 : count;
   await input.store.save(snapshotOf(actor, liveCount));
@@ -142,8 +187,8 @@ export async function evaluateShipAuditChallenge(input: {
     proceed: false,
     message: [
       `AUDIT_REQUIRED — ship challenge ${liveCount} for proposal #${input.proposal.id}.`,
-      "The first call never executes. Re-read the proposal and the control results, then call dao_ship again unchanged.",
-      `Fingerprint: ${fingerprint.slice(0, 12)}… — any change to the decision (votes, gates, scope) re-issues the challenge.`,
+      "The first call never executes. Re-read the proposal and the control results, then call dao_ship again unchanged — the same decision AND the same options (cascade).",
+      `Fingerprint: ${fingerprint.slice(0, 12)}… — any change to the decision (votes, gates, scope) or the options re-issues the challenge.`,
     ].join("\n"),
   };
 }

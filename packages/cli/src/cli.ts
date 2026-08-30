@@ -444,6 +444,7 @@ async function cmdShip(cwd: string, positional: string[], flags: Record<string, 
       challengeEnabled: true,
       force,
       forceReason: force ? "swarm-dao ship --force" : undefined,
+      options: { cascade },
     });
     if (!gate.proceed) {
       info(`🛑 Ship audit — do not proceed yet:\n\n${gate.message}`);
@@ -458,7 +459,9 @@ async function cmdShip(cwd: string, positional: string[], flags: Record<string, 
     repository,
     clock: systemClock,
     workspace,
-  }).execute({ proposalId: id, actor: "cli", cascade, force });
+    // With the challenge enabled, force bypasses the audit ONLY —
+    // dependency checks still run.
+  }).execute({ proposalId: id, actor: "cli", cascade, force: auditConsume ? undefined : force });
   await auditConsume?.();
   if (!result.ok) {
     if (result.error.includes("unexecuted dependencies found")) {

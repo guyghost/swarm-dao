@@ -40,6 +40,25 @@ export class FsShipAuditStore implements ShipAuditStorePort {
     await fs.writeFile(file, `${JSON.stringify(snapshot, null, 2)}\n`, "utf8");
   }
 
+  public async claim(proposalId: number): Promise<{ acquired: boolean; release: () => Promise<void> }> {
+    const lock = this.#fileFor(proposalId).replace(/\.json$/, ".lock");
+    await fs.mkdir(this.#directory, { recursive: true });
+    try {
+      // O_EXCL ('wx'): exactly one concurrent caller across processes wins.
+      const handle = await fs.open(lock, "wx");
+      await handle.write(`${process.pid}\n`);
+      await handle.close();
+      return {
+        acquired: true,
+        release: async () => {
+          await fs.rm(lock, { force: true }).catch(() => undefined);
+        },
+      };
+    } catch {
+      return { acquired: false, release: async () => undefined };
+    }
+  }
+
   #fileFor(proposalId: number): string {
     const name = String(proposalId);
     if (!SAFE_ID.test(name)) throw new Error("proposalId must be a positive integer");

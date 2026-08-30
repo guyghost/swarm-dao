@@ -75,7 +75,7 @@ describe("ship-audit wiring", () => {
     await fs.rm(path.dirname(daoRoot), { recursive: true, force: true });
   });
 
-  async function gate(force = false) {
+  async function gate(force = false, options: { cascade?: boolean } = {}) {
     const proposal = repository.get().proposals.find((p) => p.id === proposalId);
     if (!proposal) throw new Error("proposal missing");
     return evaluateShipAuditChallenge({
@@ -84,6 +84,7 @@ describe("ship-audit wiring", () => {
       challengeEnabled: true,
       force,
       forceReason: force ? "operator override" : undefined,
+      options,
     });
   }
 
@@ -179,5 +180,101 @@ describe("ship-audit wiring", () => {
       weight: 1,
     });
     expect(computeShipFingerprint(proposal)).not.toBe(fp);
+  });
+
+  test("changed ship options re-challenge (cascade is part of the confirmation)", async () => {
+    await gate();
+    // Same decision, same options → confirm.
+    const sameOptions = await gate(false, { cascade: false });
+    expect(sameOptions.proceed).toBe(true);
+    await sameOptions.consume?.();
+    // New cycle: challenge, then confirm with DIFFERENT options → re-challenge.
+    await gate();
+    const morphed = await gate(false, { cascade: true });
+    expect(morphed.proceed).toBe(false);
+    if (morphed.proceed) return;
+    expect(morphed.message).toContain("options");
+  });
+
+  test("a concurrent gate for the same proposal is blocked by the claim", async () => {
+    const store = new FsShipAuditStore(path.dirname(daoRoot));
+    const claim = await store.claim(proposalId);
+    expect(claim.acquired).toBe(true);
+    try {
+      const decision = await gate();
+      expect(decision.proceed).toBe(false);
+      if (decision.proceed) return;
+      expect(decision.message).toContain("concurrent");
+    } finally {
+      await claim.release();
+    }
+    // Released → the gate works again.
+    const after = await gate();
+    expect(after.proceed).toBe(false);
+    if (after.proceed) return;
+    expect(after.message).toContain("AUDIT_REQUIRED");
+  });
+
+  test("a force bypass fails closed when its record cannot persist", async () => {
+    await gate();
+    const brokenStore: import("@guyghost/swarm-dao-core").ShipAuditStorePort = {
+      load: async () => null,
+      save: async () => {
+        throw new Error("disk full");
+      },
+      claim: async () => ({ acquired: true, release: async () => undefined }),
+    };
+    const proposal = repository.get().proposals.find((p) => p.id === proposalId);
+    if (!proposal) throw new Error("missing");
+    await expect(
+      evaluateShipAuditChallenge({
+        proposal,
+        store: brokenStore,
+        challengeEnabled: true,
+        force: true,
+        forceReason: "test",
+      }),
+    ).rejects.toThrow("disk full");
+    // Nothing executed.
+    expect(repository.get().proposals.find((p) => p.id === proposalId)?.status).toBe("controlled");
+  });
+
+  test("the audited force path still enforces dependencies", async () => {
+    // Give the proposal an unexecuted dependency.
+    const state = repository.get();
+    const dep = await new CreateProposalUseCase({ repository, clock: systemClock }).execute({
+      title: "Dependency",
+      type: "technical-change",
+      description: "d",
+      proposedBy: "test",
+    });
+    if (!dep.ok) throw new Error(dep.error);
+    const main = await new CreateProposalUseCase({ repository, clock: systemClock }).execute({
+      title: "Dependent",
+      type: "product-feature",
+      description: "d",
+      proposedBy: "test",
+      dependsOn: [dep.proposal.id],
+    });
+    if (!main.ok) throw new Error(main.error);
+    void state;
+    // Force-bypassing the audit must NOT skip the dependency check: the
+    // proposal is open, so shipping is refused by the use-case itself.
+    const proposal = repository.get().proposals.find((p) => p.id === main.proposal.id);
+    if (!proposal) throw new Error("missing");
+    const gate = await evaluateShipAuditChallenge({
+      proposal,
+      store: new FsShipAuditStore(path.dirname(daoRoot)),
+      challengeEnabled: true,
+      force: true,
+      forceReason: "test",
+    });
+    expect(gate.proceed).toBe(true);
+    const result = await new ShipProposalUseCase({ repository, clock: systemClock }).execute({
+      proposalId: main.proposal.id,
+      actor: "test",
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/dependencies|Must be controlled/);
   });
 });
