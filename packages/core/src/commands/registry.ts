@@ -249,7 +249,7 @@ export const DAO_COMMANDS: readonly DaoCommand[] = [
     summary: "Configure the GitHub integration",
     tool: "dao_config_github",
     args: "--token <t> --owner <o> --repo <r>",
-    hosts: ["mcp", "claude", "copilot", "codex"],
+    hosts: ["mcp", "claude", "copilot", "codex", "pi", "opencode"],
   },
   {
     id: "github-branch",
@@ -257,7 +257,7 @@ export const DAO_COMMANDS: readonly DaoCommand[] = [
     summary: "Create a GitHub branch for a proposal",
     tool: "dao_github_create_branch",
     args: "proposalId",
-    hosts: ["mcp", "claude", "copilot", "codex"],
+    hosts: ["mcp", "claude", "copilot", "codex", "pi", "opencode"],
   },
   {
     id: "github-pr",
@@ -265,7 +265,7 @@ export const DAO_COMMANDS: readonly DaoCommand[] = [
     summary: "Open a GitHub pull request for a proposal",
     tool: "dao_github_open_pr",
     args: "proposalId --head-branch <b>",
-    hosts: ["mcp", "claude", "copilot", "codex"],
+    hosts: ["mcp", "claude", "copilot", "codex", "pi", "opencode"],
   },
 
   // ── Meta (CLI-native) ─────────────────────────────────────────

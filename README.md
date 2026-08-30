@@ -382,10 +382,11 @@ Auto-generated for every approved proposal:
 
 ## GitHub Integration
 
-Available via the CLI (see above) and the MCP tools (`dao_config_github`,
+Available on every host surface: the CLI (`swarm-dao github-config` /
+`github-branch` / `github-pr`), the MCP tools (`dao_config_github`,
 `dao_github_create_branch`, `dao_github_open_pr` — exposed by
-`@guyghost/swarm-dao-mcp` and the Copilot/Claude/Codex adapters). **Not**
-currently exposed as tools on the Pi extension or the OpenCode plugin.
+`@guyghost/swarm-dao-mcp` and the Copilot/Claude/Codex adapters), and the
+Pi extension and OpenCode plugin (registered as native tools).
 
 ```bash
 # Via an MCP host (Claude, Codex, Copilot, or a generic MCP client)

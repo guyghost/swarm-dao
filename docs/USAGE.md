@@ -321,9 +321,9 @@ opencode
 
 > **Note:** `dao_config_github`, `dao_github_create_branch`, and
 > `dao_github_open_pr` are exposed by the MCP tools (`@guyghost/swarm-dao-mcp`
-> and the Copilot/Claude/Codex adapters) and by the standalone CLI
-> (`swarm-dao github-config` / `github-branch` / `github-pr`). They are not
-> registered as tools on the Pi extension or the OpenCode plugin.
+> and the Copilot/Claude/Codex adapters), by the standalone CLI
+> (`swarm-dao github-config` / `github-branch` / `github-pr`), and as native
+> tools on the Pi extension and the OpenCode plugin.
 
 ```
 # Configure

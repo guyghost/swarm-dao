@@ -113,15 +113,16 @@ describe("getDaoCommands / getDaoCommandsByPhase", () => {
     expect(mcp.some((c) => c.id === "github-config")).toBe(true);
   });
 
-  it("filters OpenCode commands correctly (excludes rate, update-proposal, github-*, ship)", () => {
+  it("filters OpenCode commands correctly (excludes rate, update-proposal, ship)", () => {
     const opencode = getDaoCommands("opencode");
     // OpenCode does NOT have these tools
     expect(opencode.some((c) => c.id === "rate")).toBe(false);
     expect(opencode.some((c) => c.id === "update-proposal")).toBe(false);
     expect(opencode.some((c) => c.id === "ship")).toBe(false);
-    expect(opencode.some((c) => c.id === "github-config")).toBe(false);
-    expect(opencode.some((c) => c.id === "github-branch")).toBe(false);
-    expect(opencode.some((c) => c.id === "github-pr")).toBe(false);
+    // GitHub integration is exposed on every host surface
+    expect(opencode.some((c) => c.id === "github-config")).toBe(true);
+    expect(opencode.some((c) => c.id === "github-branch")).toBe(true);
+    expect(opencode.some((c) => c.id === "github-pr")).toBe(true);
     // OpenCode DOES have these
     expect(opencode.some((c) => c.id === "help")).toBe(true);
     expect(opencode.some((c) => c.id === "propose")).toBe(true);
@@ -130,14 +131,15 @@ describe("getDaoCommands / getDaoCommandsByPhase", () => {
     expect(opencode.some((c) => c.id === "agents")).toBe(true);
   });
 
-  it("filters Pi commands correctly (excludes record-outputs, propose-amendment, github-*)", () => {
+  it("filters Pi commands correctly (excludes record-outputs, propose-amendment)", () => {
     const pi = getDaoCommands("pi");
     // Pi does NOT register these tools and does not handle them inline
     expect(pi.some((c) => c.id === "record-outputs")).toBe(false);
     expect(pi.some((c) => c.id === "propose-amendment")).toBe(false);
-    expect(pi.some((c) => c.id === "github-config")).toBe(false);
-    expect(pi.some((c) => c.id === "github-branch")).toBe(false);
-    expect(pi.some((c) => c.id === "github-pr")).toBe(false);
+    // GitHub integration is exposed on every host surface
+    expect(pi.some((c) => c.id === "github-config")).toBe(true);
+    expect(pi.some((c) => c.id === "github-branch")).toBe(true);
+    expect(pi.some((c) => c.id === "github-pr")).toBe(true);
     // Pi fulfils these inline via its /dao dispatcher (no dedicated tool needed)
     expect(pi.some((c) => c.id === "help")).toBe(true);
     expect(pi.some((c) => c.id === "list")).toBe(true);

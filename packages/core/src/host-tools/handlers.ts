@@ -418,10 +418,10 @@ export async function handleDaoProposeAmendment(
 }
 
 export async function handleDaoConfigGithub(
-  _ctx: DaoToolContext,
+  ctx: DaoToolContext,
   args: { token: string; owner: string; repo: string },
 ): Promise<string> {
-  const state = getState();
+  const state = repositoryOrLegacy(ctx.repository).get();
   await saveGitHubConfigToDaoRoot(state.daoRoot, args);
   return [
     `# GitHub Configured`,
@@ -434,12 +434,13 @@ export async function handleDaoConfigGithub(
   ].join("\n");
 }
 
-export async function handleDaoGithubCreateBranch(_ctx: DaoToolContext, proposalId: number): Promise<string> {
-  const notReady = requireInitialized();
+export async function handleDaoGithubCreateBranch(ctx: DaoToolContext, proposalId: number): Promise<string> {
+  const repository = repositoryOrLegacy(ctx.repository);
+  const notReady = requireInitialized(ctx.repository);
   if (notReady) return notReady;
-  const proposal = getProposal(proposalId);
+  const proposal = repository.get().proposals.find((candidate) => candidate.id === proposalId);
   if (!proposal) return `Proposal #${proposalId} not found.`;
-  const configured = await loadGitHubConfigFromDaoRoot(getState().daoRoot);
+  const configured = await loadGitHubConfigFromDaoRoot(repository.get().daoRoot);
   if (!configured || !isGitHubEnabled()) {
     return "GitHub not configured. Run `dao_config_github` with token, owner, and repo.";
   }
@@ -450,16 +451,17 @@ export async function handleDaoGithubCreateBranch(_ctx: DaoToolContext, proposal
 }
 
 export async function handleDaoGithubOpenPr(
-  _ctx: DaoToolContext,
+  ctx: DaoToolContext,
   proposalId: number,
   headBranch: string,
 ): Promise<string> {
-  const notReady = requireInitialized();
+  const repository = repositoryOrLegacy(ctx.repository);
+  const notReady = requireInitialized(ctx.repository);
   if (notReady) return notReady;
-  const proposal = getProposal(proposalId);
+  const proposal = repository.get().proposals.find((candidate) => candidate.id === proposalId);
   if (!proposal) return `Proposal #${proposalId} not found.`;
   if (!headBranch) return "headBranch is required";
-  const configured = await loadGitHubConfigFromDaoRoot(getState().daoRoot);
+  const configured = await loadGitHubConfigFromDaoRoot(repository.get().daoRoot);
   if (!configured || !isGitHubEnabled()) {
     return "GitHub not configured. Run `dao_config_github` with token, owner, and repo.";
   }
