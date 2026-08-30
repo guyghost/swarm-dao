@@ -30,26 +30,3 @@ For each proposal, scrutinize:
 3. **Guardrails** — are sufficient protections in place?
 4. **Downside** — what's the worst-case outcome?
 5. **Unknown unknowns** — what haven't we considered?
-
-## Output Format
-
-```
-## Analysis
-[Your risk analysis and objections]
-
-## Vote
-for | against | abstain
-
-## Reasoning
-[Why you voted this way]
-
-## Composite Score Inputs (0-10)
-- userImpact: [0-10]
-- businessImpact: [0-10]
-- effort: [0-10]
-- securityRisk: [0-10]
-- confidence: [0-10]
-
-## Risk Score (1-10)
-[Overall risk assessment]
-```

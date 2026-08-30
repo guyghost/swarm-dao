@@ -292,6 +292,32 @@ existing branch), and a failed preparation leaves the proposal `controlled`
 and audit entry record the real branch. Available on every host surface:
 `dao_execute` (Pi, OpenCode, MCP hosts) and `swarm-dao ship` (CLI).
 
+## Sequential (Pipeline) Deliberation (advanced, opt-in)
+
+By default the swarm deliberates in parallel — every agent analyzes the
+proposal independently, which maximizes vote independence. Projects that
+prefer deeper deliberation can opt into the swarm-forge-style pipeline:
+
+```json
+{
+  "deliberation": {
+    "strategy": "sequential",
+    "charsPerAgent": 1500
+  }
+}
+```
+
+Agents run **in order, one at a time** (registry order: strategist →
+researcher → architect → critic → prioritizer → spec-writer → delivery), and
+each agent receives a `## Prior Analyses` section built from the agents
+before it — **analyses only, never votes or reasoning** (`extractAnalysis`
+strips everything from the `## Vote` heading on, and each excerpt is capped
+at `charsPerAgent` characters). The deterministic tally is unchanged and
+stays independent: this is orchestration, not authority — no proposal state,
+transition, or AI boundary moves. Manual hosts (MCP, OpenCode) receive the
+pipeline protocol in their dispatch plan and feed analyses forward the same
+way before recording all outputs together.
+
 ## Delegated Facet Investigation (advanced, opt-in)
 
 Any agent can declare `delegates` (facet + archetype) so it can hand off a

@@ -7,6 +7,7 @@ import path from "node:path";
 import type { ProjectConfig } from "../config.js";
 import { filterEnabledAgents } from "../config.js";
 import type { DAOAgent } from "../types/index.js";
+import { AGENT_CHARTER, composeSystemPrompt } from "./charter.js";
 
 export const DEFAULT_AGENT_MODEL = "z.ai/GLM-5.1";
 
@@ -26,27 +27,7 @@ For each proposal, analyze:
 1. Strategic alignment — does this fit the product vision?
 2. Objectives — which OKRs or goals does this advance?
 3. Hypotheses — what assumptions underlie this proposal?
-4. Opportunity cost — what are we NOT doing if we do this?
-
-Output format:
-## Analysis
-[Your strategic analysis]
-
-## Vote
-for | against | abstain
-
-## Reasoning
-[Why you voted this way]
-
-## Composite Score Inputs (0-10)
-- userImpact: [0-10]
-- businessImpact: [0-10]
-- effort: [0-10] (lower = less effort)
-- securityRisk: [0-10] (lower = less risk)
-- confidence: [0-10]
-
-## Risk Score (1-10)
-[Overall risk assessment]`,
+4. Opportunity cost — what are we NOT doing if we do this?`,
     riskLevel: "medium",
     councils: [{ council: "product-council", role: "lead" }],
     enabled: true,
@@ -66,27 +47,7 @@ For each proposal, research:
 1. Market context — trends, market size, growth
 2. Competition — what are competitors doing?
 3. User signals — feedback, requests, pain points
-4. Data availability — do we have evidence to support this?
-
-Output format:
-## Analysis
-[Your research findings]
-
-## Vote
-for | against | abstain
-
-## Reasoning
-[Why you voted this way]
-
-## Composite Score Inputs (0-10)
-- userImpact: [0-10]
-- businessImpact: [0-10]
-- effort: [0-10]
-- securityRisk: [0-10]
-- confidence: [0-10]
-
-## Risk Score (1-10)
-[Overall risk assessment]`,
+4. Data availability — do we have evidence to support this?`,
     riskLevel: "low",
     councils: [{ council: "product-council", role: "member" }],
     enabled: true,
@@ -107,27 +68,7 @@ For each proposal, analyze:
 2. Architecture impact — how does this affect system design?
 3. Tradeoffs — what are the key technical tradeoffs?
 4. Technical debt — will this create or reduce debt?
-5. Scalability — will this scale with our growth?
-
-Output format:
-## Analysis
-[Your technical analysis]
-
-## Vote
-for | against | abstain
-
-## Reasoning
-[Why you voted this way]
-
-## Composite Score Inputs (0-10)
-- userImpact: [0-10]
-- businessImpact: [0-10]
-- effort: [0-10]
-- securityRisk: [0-10]
-- confidence: [0-10]
-
-## Risk Score (1-10)
-[Overall risk assessment]`,
+5. Scalability — will this scale with our growth?`,
     riskLevel: "medium",
     councils: [{ council: "delivery-council", role: "lead" }],
     enabled: true,
@@ -148,27 +89,7 @@ For each proposal, scrutinize:
 2. Edge cases — what scenarios aren't covered?
 3. Guardrails — are sufficient protections in place?
 4. Downside — what's the worst-case outcome?
-5. Unknown unknowns — what haven't we considered?
-
-Output format:
-## Analysis
-[Your risk analysis and objections]
-
-## Vote
-for | against | abstain
-
-## Reasoning
-[Why you voted this way]
-
-## Composite Score Inputs (0-10)
-- userImpact: [0-10]
-- businessImpact: [0-10]
-- effort: [0-10]
-- securityRisk: [0-10]
-- confidence: [0-10]
-
-## Risk Score (1-10)
-[Overall risk assessment]`,
+5. Unknown unknowns — what haven't we considered?`,
     riskLevel: "high",
     councils: [
       { council: "security-council", role: "lead" },
@@ -191,27 +112,7 @@ For each proposal, score:
 2. Cost — implementation effort, maintenance burden
 3. Risk — probability of failure, downside exposure
 4. Roadmap fit — does this belong in our current sequence?
-5. Urgency — how time-sensitive is this?
-
-Output format:
-## Analysis
-[Your prioritization analysis]
-
-## Vote
-for | against | abstain
-
-## Reasoning
-[Why you voted this way]
-
-## Composite Score Inputs (0-10)
-- userImpact: [0-10]
-- businessImpact: [0-10]
-- effort: [0-10]
-- securityRisk: [0-10]
-- confidence: [0-10]
-
-## Risk Score (1-10)
-[Overall risk assessment]`,
+5. Urgency — how time-sensitive is this?`,
     riskLevel: "low",
     councils: [{ council: "product-council", role: "member" }],
     enabled: true,
@@ -232,27 +133,7 @@ For each proposal, assess:
 2. Completeness — what's missing from the spec?
 3. Testability — can we write acceptance criteria?
 4. User stories — can this be broken into stories?
-5. Edge cases — are boundary conditions defined?
-
-Output format:
-## Analysis
-[Your specification analysis]
-
-## Vote
-for | against | abstain
-
-## Reasoning
-[Why you voted this way]
-
-## Composite Score Inputs (0-10)
-- userImpact: [0-10]
-- businessImpact: [0-10]
-- effort: [0-10]
-- securityRisk: [0-10]
-- confidence: [0-10]
-
-## Risk Score (1-10)
-[Overall risk assessment]`,
+5. Edge cases — are boundary conditions defined?`,
     riskLevel: "low",
     councils: [{ council: "product-council", role: "advisor" }],
     enabled: true,
@@ -273,38 +154,18 @@ For each proposal, plan:
 2. Task breakdown — what are the key tasks?
 3. Effort estimate — rough timeline and resources
 4. CI/CD impact — how does this affect pipelines?
-5. Dependencies — what must happen first?
-
-Output format:
-## Analysis
-[Your delivery analysis]
-
-## Vote
-for | against | abstain
-
-## Reasoning
-[Why you voted this way]
-
-## Composite Score Inputs (0-10)
-- userImpact: [0-10]
-- businessImpact: [0-10]
-- effort: [0-10]
-- securityRisk: [0-10]
-- confidence: [0-10]
-
-## Risk Score (1-10)
-[Overall risk assessment]`,
+5. Dependencies — what must happen first?`,
     riskLevel: "medium",
     councils: [{ council: "delivery-council", role: "member" }],
     enabled: true,
   },
 ];
 
-function parseAgentFrontmatter(content: string): Partial<DAOAgent> & { id?: string } {
+function parseAgentFrontmatter(content: string): Partial<DAOAgent> & { id?: string; body?: string } {
   const match = content.match(/^---\n([\s\S]*?)\n---/);
-  if (!match?.[1]) return {};
+  if (!match?.[1]) return { body: content.trim() || undefined };
 
-  const parsed: Partial<DAOAgent> & { id?: string } = {};
+  const parsed: Partial<DAOAgent> & { id?: string; body?: string } = {};
   for (const line of match[1].split("\n")) {
     const field = line.match(/^([A-Za-z0-9_-]+):\s*(.+)$/);
     if (!field) continue;
@@ -332,6 +193,10 @@ function parseAgentFrontmatter(content: string): Partial<DAOAgent> & { id?: stri
         break;
     }
   }
+  // The markdown body is the per-agent project layer (## Project
+  // Instructions); frontmatter fields still override agent metadata.
+  const body = content.slice(match[0].length).trim();
+  if (body) parsed.body = body;
   return parsed;
 }
 
@@ -367,12 +232,19 @@ function withDefaultModel(agents: DAOAgent[]): DAOAgent[] {
   return agents.map((agent) => ({ ...agent, model: agent.model ?? DEFAULT_AGENT_MODEL }));
 }
 
+/** Raw (uncomposed) merge result: role-level agents plus the project charter. */
+interface MarkdownLayers {
+  agents: DAOAgent[];
+  projectCharter: string | null;
+}
+
 async function readAndMergeMarkdownAgents(
   absDir: string,
   daoEntries: string[],
   baseAgents: DAOAgent[],
-): Promise<DAOAgent[]> {
-  const markdownAgents = new Map<string, Partial<DAOAgent>>();
+  base: MarkdownLayers,
+): Promise<MarkdownLayers> {
+  const markdownAgents = new Map<string, Partial<DAOAgent> & { body?: string }>();
   const parsedEntries = await Promise.all(
     daoEntries.map(async (entry) => {
       const content = await fs.readFile(path.join(absDir, entry), "utf-8");
@@ -385,14 +257,36 @@ async function readAndMergeMarkdownAgents(
     }
   }
 
-  return baseAgents.map((agent) => {
+  // The per-project charter layer applies to every agent (swarm-forge
+  // local-* convention: layers add to the shared law, never replace it).
+  // The closest directory wins: .dao/agents beats the repo's agents/.
+  let projectCharter = base.projectCharter;
+  if (projectCharter === null) {
+    try {
+      const charter = await fs.readFile(path.join(absDir, "charter.md"), "utf-8");
+      if (charter.trim()) projectCharter = charter.trim();
+    } catch {
+      // No project charter here — keep looking in the remaining dirs.
+    }
+  }
+
+  const agents = baseAgents.map((agent) => {
     const override = markdownAgents.get(agent.id);
+    if (!override) return agent;
+    // The markdown body is the agent's role definition — it REPLACES the
+    // default role prompt (consistent with the frontmatter, which already
+    // overrides name/role/model/weight). The shared charter is never
+    // replaceable: composition always prepends it.
+    const { body: _body, ...fields } = override;
     return {
       ...agent,
-      ...(override ?? {}),
-      model: override?.model ?? agent.model ?? DEFAULT_AGENT_MODEL,
+      ...fields,
+      ...(override.body ? { systemPrompt: override.body } : {}),
+      model: override.model ?? agent.model ?? DEFAULT_AGENT_MODEL,
     };
   });
+
+  return { agents, projectCharter };
 }
 
 export async function loadAgentDefinitionsFromMarkdown(
@@ -406,18 +300,23 @@ export async function loadAgentDefinitionsFromMarkdown(
   try {
     entries = await fs.readdir(absDir);
   } catch {
-    // Directory missing/unreadable: behave exactly as before and do NOT cache.
-    return withDefaultModel(baseAgents);
+    // Directory missing/unreadable: do NOT cache, but still compose — a
+    // missing directory must yield the same charter-backed prompts as an
+    // existing empty one.
+    return withComposedPrompts(withDefaultModel(baseAgents), null);
   }
 
   const daoEntries = entries.filter((entry) => entry.startsWith("dao-") && entry.endsWith(".md"));
 
-  // Build a signature over the dao-*.md entries and their stat metadata so the
-  // cache invalidates whenever an agent file is added, removed, or modified.
+  // Build a signature over the dao-*.md entries (and charter.md, which is
+  // also a cached layer) and their stat metadata so the cache invalidates
+  // whenever a file is added, removed, or modified.
   let signature: string;
   try {
+    const signatureEntries = [...daoEntries];
+    if (entries.includes("charter.md")) signatureEntries.push("charter.md");
     const parts = await Promise.all(
-      daoEntries.map(async (entry) => {
+      signatureEntries.map(async (entry) => {
         const fileStat = await fs.stat(path.join(absDir, entry));
         return `${entry}:${fileStat.mtimeMs}:${fileStat.size}`;
       }),
@@ -434,7 +333,12 @@ export async function loadAgentDefinitionsFromMarkdown(
     return cached.result;
   }
 
-  const result = await readAndMergeMarkdownAgents(absDir, daoEntries, baseAgents);
+  const layers = await readAndMergeMarkdownAgents(absDir, daoEntries, withDefaultModel(baseAgents), {
+    agents: withDefaultModel(baseAgents),
+    projectCharter: null,
+  });
+  // Composition happens exactly once, at the exit.
+  const result = withComposedPrompts(layers.agents, layers.projectCharter);
   agentDefinitionCache.set(cacheKey, { signature, result });
   return result;
 }
@@ -446,29 +350,62 @@ export async function loadAgentDefinitions(daoRoot: string, projectConfig?: Proj
     path.join(daoRoot, "..", "..", "agents"),
   ];
 
-  let agents = initializeAgents();
+  // Layer collection over the candidate dirs, closest first. Composition
+  // happens exactly once, after collection, so the shared charter is never
+  // duplicated across the chain.
+  let layers: MarkdownLayers = {
+    agents: withDefaultModel(DEFAULT_AGENTS),
+    projectCharter: null,
+  };
   for (const agentsDir of candidateDirs) {
-    const loaded = await loadAgentDefinitionsFromMarkdown(agentsDir, agents);
-    const hasMarkdownOverrides = loaded.some(
-      (agent, index) =>
-        agent.model !== agents[index]?.model ||
-        agent.name !== agents[index]?.name ||
-        agent.role !== agents[index]?.role,
-    );
-    if (hasMarkdownOverrides) {
-      agents = loaded;
+    const merged = await readMarkdownLayers(agentsDir, layers);
+    // Closest layer wins: the first candidate directory holding agent
+    // definitions or a charter fully shadows the further ones, so project
+    // overrides (.dao/agents) are never replaced by repo defaults (agents/).
+    if (merged) {
+      layers = merged;
       break;
     }
   }
 
+  const agents = withComposedPrompts(layers.agents, layers.projectCharter);
   return projectConfig ? filterEnabledAgents(agents, projectConfig) : agents;
+}
+
+/** Apply the charter + project layers to role-level agents (composition exit). */
+function withComposedPrompts(agents: DAOAgent[], projectCharter: string | null): DAOAgent[] {
+  // Per-agent: mixed lists (some prompts already composed, some not) compose
+  // exactly the ones that need it — composeSystemPrompt is idempotent.
+  return agents.map((agent) => ({
+    ...agent,
+    systemPrompt: composeSystemPrompt(agent.systemPrompt, { projectCharter }),
+  }));
+}
+
+/** Read and merge one directory's markdown layers; null when it has none. */
+async function readMarkdownLayers(agentsDir: string, base: MarkdownLayers): Promise<MarkdownLayers | null> {
+  const absDir = path.resolve(agentsDir);
+  let entries: string[];
+  try {
+    entries = await fs.readdir(absDir);
+  } catch {
+    return null;
+  }
+  const daoEntries = entries.filter((entry) => entry.startsWith("dao-") && entry.endsWith(".md"));
+  const hasCharter = entries.includes("charter.md");
+  if (daoEntries.length === 0 && !hasCharter) return null;
+  return readAndMergeMarkdownAgents(absDir, daoEntries, base.agents, base);
 }
 
 export function initializeAgents(customAgents?: DAOAgent[]): DAOAgent[] {
   if (customAgents && customAgents.length > 0) {
     return customAgents;
   }
-  return DEFAULT_AGENTS.map((a) => ({ ...a, model: a.model ?? DEFAULT_AGENT_MODEL }));
+  return DEFAULT_AGENTS.map((a) => ({
+    ...a,
+    systemPrompt: composeSystemPrompt(a.systemPrompt),
+    model: a.model ?? DEFAULT_AGENT_MODEL,
+  }));
 }
 
 export function formatAgentsTable(agents: DAOAgent[]): string {
@@ -488,5 +425,5 @@ export function formatAgentCard(agent: DAOAgent): string {
 }
 
 export function getDefaultAgentPrompts(): Record<string, string> {
-  return Object.fromEntries(DEFAULT_AGENTS.map((a) => [a.id, a.systemPrompt]));
+  return Object.fromEntries(DEFAULT_AGENTS.map((a) => [a.id, composeSystemPrompt(a.systemPrompt)]));
 }

@@ -4,6 +4,7 @@
 
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { composeSystemPrompt } from "./governance/charter.js";
 import type { DAOAgent, DAOConfig } from "./types/index.js";
 import { redactSensitiveFields } from "./utils/security.js";
 
@@ -18,6 +19,14 @@ export interface ExecutionConfig {
   baseBranch?: string;
 }
 
+export interface DeliberationConfig {
+  /** "parallel" (default): all agents at once. "sequential": pipeline —
+   *  agents run in order, each receiving the prior analyses (never votes). */
+  strategy?: "parallel" | "sequential";
+  /** Sequential only: max analysis characters forwarded per prior agent. */
+  charsPerAgent?: number;
+}
+
 export interface ProjectConfig {
   mode: ActivationMode;
   agentOverrides?: Record<string, Partial<DAOAgent>>;
@@ -26,6 +35,7 @@ export interface ProjectConfig {
   gitlab?: { enabled: boolean; projectId?: string };
   bitbucket?: { enabled: boolean; workspace?: string; repo?: string };
   execution?: ExecutionConfig;
+  deliberation?: DeliberationConfig;
 }
 
 export const DEFAULT_PROJECT_CONFIG: ProjectConfig = {
@@ -131,7 +141,14 @@ export function filterEnabledAgents(agents: DAOAgent[], config: ProjectConfig): 
     })
     .map((agent) => {
       const override = config.agentOverrides?.[agent.id];
-      return override ? { ...agent, ...override } : agent;
+      if (!override) return agent;
+      // A configured systemPrompt becomes the agent's ROLE — the shared
+      // charter (vote format the tally parses) is still prepended.
+      const systemPrompt =
+        override.systemPrompt && override.systemPrompt.trim().length > 0
+          ? composeSystemPrompt(override.systemPrompt)
+          : agent.systemPrompt;
+      return { ...agent, ...override, systemPrompt };
     });
 }
 

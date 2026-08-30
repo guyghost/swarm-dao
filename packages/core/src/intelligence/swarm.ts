@@ -70,13 +70,25 @@ Evaluate this proposal carefully. Provide your analysis, vote, and scoring.`;
   });
 }
 
-export function formatDispatchPlan(proposal: Proposal, instructions: DispatchInstruction[]): string {
+export function formatDispatchPlan(
+  proposal: Proposal,
+  instructions: DispatchInstruction[],
+  options: { strategy?: "parallel" | "sequential"; charsPerAgent?: number } = {},
+): string {
+  const sequentialNote =
+    options.strategy === "sequential"
+      ? `## Sequential Pipeline
+
+This project deliberates sequentially. Run the agents **in the listed order, one at a time**. Before spawning agent N, append to its prompt a \`## Prior Analyses\` section built from agents 1..N-1: each entry is the agent's id, name, and its analysis (content up to the \`## Vote\` heading${options.charsPerAgent ? `, capped at ${options.charsPerAgent} characters` : ""}). **Never forward votes or reasoning** — the tally must stay independent. Collect every output and record them together via \`dao_record_outputs\`.
+
+`
+      : "";
   return `# 🐝 Swarm Dispatch Plan — Proposal #${proposal.id}
 
 **Title:** ${proposal.title}
 **Agents to spawn:** ${instructions.length}
 
-## Instructions
+${sequentialNote}## Instructions
 ${instructions
   .map(
     (inst) => `### @${inst.agentId} (${inst.agentName})
