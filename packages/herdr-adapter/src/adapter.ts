@@ -26,7 +26,6 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import type { AgentOutput, DAOAgent, HostAdapter, Proposal } from "@guyghost/swarm-dao-core";
-
 /** Minimal command surface the adapter needs (node:child_process-backed by default). */
 export interface HerdrRunner {
   exec(
@@ -70,6 +69,45 @@ export function sanitizeHerdrName(raw: string): string {
     .replace(/-+$/g, "");
   if (cleaned.length === 0) return "agent";
   return /^[a-z]/.test(cleaned) ? cleaned : `a-${cleaned}`.slice(0, 32);
+}
+
+/** herdr kinds are identifiers — anything else is refused, never interpolated. */
+const SAFE_KIND = /^[a-z][a-z0-9_-]{0,31}$/;
+
+/** Short stable suffix so truncated names stay unique per agent id. */
+function stableSuffix(value: string, length: number): string {
+  let hash = 0;
+  for (let i = 0; i < value.length; i++) {
+    hash = (hash * 31 + value.charCodeAt(i)) | 0;
+  }
+  return (hash >>> 0).toString(36).padStart(length, "0").slice(-length);
+}
+
+/**
+ * Build a per-agent herdr name that ALWAYS keeps the agent-specific suffix
+ * unique: the prefix is capped so `p<id>-<agent>-<hash>` fits 32 chars even
+ * for long ids (truncation can never merge two agents into one name).
+ */
+export function herdrAgentName(prefix: string, proposalId: number, agentId: string): string {
+  const cappedPrefix = sanitizeHerdrName(prefix).slice(0, 10);
+  const idPart = `p${proposalId}`;
+  const agent = sanitizeHerdrName(agentId);
+  const hash = stableSuffix(agentId, 4);
+  const room = 32 - cappedPrefix.length - idPart.length - hash.length - 2;
+  const agentPart = room > 0 ? agent.slice(0, room) : "";
+  const name = `${cappedPrefix}-${idPart}-${agentPart}-${hash}`.replace(/-+/g, "-");
+  return /^[a-z]/.test(name) ? name.slice(0, 32) : sanitizeHerdrName(name);
+}
+
+/**
+ * Terminals ECHO the submitted prompt, so the harvested transcript contains
+ * the charter's output-format template — including the literal line
+ * `for | against | abstain`, which the tally's vote parser would read as a
+ * vote for "for". Strip those template lines: a real vote line never
+ * contains pipes.
+ */
+export function stripEchoedVoteTemplates(content: string): string {
+  return content.replace(/^\s*for\s*\|\s*against\s*\|\s*abstain\s*$/gim, "");
 }
 
 export interface HerdrAdapterOptions {
@@ -137,16 +175,34 @@ export function createHerdrHostAdapter(options: HerdrAdapterOptions): HostAdapte
   const readLines = options.readLines ?? DEFAULT_READ_LINES;
   const prefix = sanitizeHerdrName(options.prefix ?? "swarm-dao");
   const keepPanes = options.keepPanes === true;
-  const extraArgs = (options.agentArgs ?? []).join(" ").trim();
+  const extraArgs = (options.agentArgs ?? []).map((arg) => quote(arg)).join(" ");
 
-  /** Resolve adapter file access against workDir, contained (like other hosts). */
-  const containedPath = (file: string): string => {
-    const resolved = path.resolve(options.workDir, file);
-    const root = path.resolve(options.workDir);
+  /** Resolve the deepest EXISTING ancestor's realpath, then rejoin the rest —
+   * containment must hold even for files that do not exist yet. */
+  const realPathOf = async (target: string): Promise<string> => {
+    let current = target;
+    const tail: string[] = [];
+    for (;;) {
+      const real = await fs.realpath(current).catch(() => null);
+      if (real !== null) {
+        return tail.length === 0 ? real : path.join(real, ...[...tail].reverse());
+      }
+      const parent = path.dirname(current);
+      if (parent === current) return target;
+      tail.push(path.basename(current));
+      current = parent;
+    }
+  };
+
+  /** Resolve adapter file access against workDir, contained (like other hosts).
+   * Symlinks are resolved: a repo symlink cannot escape the root. */
+  const containedPath = async (file: string): Promise<string> => {
+    const root = await fs.realpath(path.resolve(options.workDir)).catch(() => path.resolve(options.workDir));
+    const resolved = await realPathOf(path.resolve(root, file));
     if (resolved !== root && !resolved.startsWith(`${root}${path.sep}`)) {
       throw new Error(`path escapes the working directory: ${file}`);
     }
-    return resolved;
+    return path.resolve(root, file);
   };
 
   const harvest = async (
@@ -156,23 +212,32 @@ export function createHerdrHostAdapter(options: HerdrAdapterOptions): HostAdapte
     timeoutMs: number,
     startedAt: number,
   ): Promise<AgentOutput> => {
-    const base: AgentOutput = {
+    // Duration is stamped at RETURN time — base carries only identity.
+    const base = (): Omit<AgentOutput, "durationMs"> => ({
       agentId: agent.id,
       agentName: agent.name,
       role: agent.role,
       content: "",
+    });
+    const finish = (fields: Partial<AgentOutput>): AgentOutput => ({
+      ...base(),
+      content: "",
+      ...fields,
       durationMs: Date.now() - startedAt,
-    };
+    });
 
     if (!options.kind || options.kind.trim().length === 0) {
-      return {
-        ...base,
+      return finish({
         error:
           'herdr.kind is not configured: set { "herdr": { "kind": "pi" } } in .dao/config.json (a supported herdr agent kind whose executable is installed).',
-      };
+      });
+    }
+    if (!SAFE_KIND.test(options.kind)) {
+      // Never interpolate an arbitrary value into the shell command line.
+      return finish({ error: `herdr.kind '${options.kind}' is not a valid agent kind identifier.` });
     }
 
-    const name = `${prefix}-p${proposal.id}-${sanitizeHerdrName(agent.id)}`.slice(0, 32);
+    const name = herdrAgentName(prefix, proposal.id, agent.id);
     let workspaceId: string | null = null;
 
     try {
@@ -181,18 +246,16 @@ export function createHerdrHostAdapter(options: HerdrAdapterOptions): HostAdapte
         `herdr workspace create --cwd ${quote(options.workDir)} --label ${quote(name)} --no-focus`,
       );
       if (created.exitCode !== 0) {
-        return {
-          ...base,
+        return finish({
           error: `herdr workspace create failed: ${herdrErrorDetail(created.stderr, created.stdout)} (is the herdr server running? start it with \`herdr\`)`,
-        };
+        });
       }
       const paneId = parseHerdrJson(created.stdout)?.result?.root_pane?.pane_id ?? null;
       workspaceId = parseHerdrJson(created.stdout)?.result?.workspace?.workspace_id ?? null;
       if (!paneId || !workspaceId) {
-        return {
-          ...base,
+        return finish({
           error: `herdr workspace create returned no pane/workspace id: ${created.stdout.slice(0, 200)}`,
-        };
+        });
       }
 
       // 2. Start the agent (blocks until herdr detects it ready for input).
@@ -200,34 +263,34 @@ export function createHerdrHostAdapter(options: HerdrAdapterOptions): HostAdapte
         `herdr agent start ${name} --kind ${options.kind} --pane ${paneId} --timeout ${startTimeoutMs}${extraArgs ? ` -- ${extraArgs}` : ""}`,
       );
       if (started.exitCode !== 0) {
-        return {
-          ...base,
+        return finish({
           error: `herdr agent start (${options.kind}) failed: ${herdrErrorDetail(started.stderr, started.stdout)}`,
-        };
+        });
       }
 
       // 3. Prompt and wait for a settled state (idle | done | blocked).
       const prompted = await runner.exec(`herdr agent prompt ${name} ${quote(prompt)} --wait --timeout ${timeoutMs}`);
       if (prompted.exitCode !== 0) {
         const detail = herdrErrorDetail(prompted.stderr, prompted.stdout);
-        return { ...base, error: `herdr agent prompt failed (likely timeout): ${detail}` };
+        return finish({ error: `herdr agent prompt failed (likely timeout): ${detail}` });
       }
       const state = agentState(parseHerdrJson(prompted.stdout)?.result);
       if (state === "blocked") {
-        return {
-          ...base,
+        return finish({
           error: `herdr agent ${agent.id} is blocked (approval/question UI) — it never produced a votable answer. Attach with \`herdr\` to inspect.`,
-        };
+        });
       }
 
       // 4. Harvest the ANSI-stripped terminal output.
       const read = await runner.exec(`herdr agent read ${name} --source recent-unwrapped --lines ${readLines}`);
       if (read.exitCode !== 0) {
-        return { ...base, error: `herdr agent read failed: ${herdrErrorDetail(read.stderr, read.stdout)}` };
+        return finish({ error: `herdr agent read failed: ${herdrErrorDetail(read.stderr, read.stdout)}` });
       }
-      return { ...base, content: read.stdout.replace(/\n+$/, "\n") };
+      // The terminal echoes the submitted prompt: strip the charter's literal
+      // vote template so the tally can never parse the echo as a vote.
+      return finish({ content: stripEchoedVoteTemplates(read.stdout.replace(/\n+$/, "\n")) });
     } catch (error) {
-      return { ...base, error: error instanceof Error ? error.message : String(error) };
+      return finish({ error: error instanceof Error ? error.message : String(error) });
     } finally {
       // 5. Cleanup — unless the operator wants to inspect the workspace.
       if (!keepPanes && workspaceId) {
@@ -257,8 +320,8 @@ export function createHerdrHostAdapter(options: HerdrAdapterOptions): HostAdapte
       await fs.appendFile(path.join(options.workDir, ".dao", "herdr.log"), `${line}\n`, "utf8").catch(() => undefined);
     },
     getWorkingDirectory: () => options.workDir,
-    readFile: async (file) => fs.readFile(containedPath(file), "utf8"),
-    writeFile: async (file, content) => fs.writeFile(containedPath(file), content, "utf8"),
+    readFile: async (file) => fs.readFile(await containedPath(file), "utf8"),
+    writeFile: async (file, content) => fs.writeFile(await containedPath(file), content, "utf8"),
     exec: (command, execOptions) => runner.exec(command, execOptions),
     hasCapability: (capability) => capability === "parallel-spawn",
   };

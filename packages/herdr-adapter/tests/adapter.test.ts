@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import type { DAOAgent, Proposal } from "@guyghost/swarm-dao-core";
 import { createInitialState } from "@guyghost/swarm-dao-core";
-import { createHerdrHostAdapter, sanitizeHerdrName } from "../src/adapter.js";
+import { createHerdrHostAdapter, herdrAgentName, sanitizeHerdrName, stripEchoedVoteTemplates } from "../src/adapter.js";
 
 type Call = { command: string; options?: { cwd?: string } };
 type Response = { stdout?: string; stderr?: string; exitCode: number };
@@ -96,12 +96,12 @@ describe("herdr host adapter", () => {
     expect(commands[0]).toContain("herdr workspace create");
     expect(commands[0]).toContain("--cwd");
     expect(commands[0]).toContain("--no-focus");
-    expect(commands[1]).toContain("herdr agent start swarm-dao-p1-critic --kind pi --pane w9:p1");
+    expect(commands[1]).toMatch(/herdr agent start swarm-dao-p1-critic-\w{4} --kind pi --pane w9:p1/);
     expect(commands[1]).toContain("--timeout");
-    expect(commands[2]).toContain("herdr agent prompt swarm-dao-p1-critic");
+    expect(commands[2]).toMatch(/herdr agent prompt swarm-dao-p1-critic-\w{4} /);
     expect(commands[2]).toContain("PROMPT-critic");
     expect(commands[2]).toContain("--wait");
-    expect(commands[3]).toContain("herdr agent read swarm-dao-p1-critic --source recent-unwrapped");
+    expect(commands[3]).toMatch(/herdr agent read swarm-dao-p1-critic-\w{4} --source recent-unwrapped/);
     expect(commands[4]).toContain("herdr workspace close w9");
 
     expect(output.error).toBeUndefined();
@@ -238,7 +238,7 @@ describe("herdr host adapter", () => {
     });
     const start = fake.calls.find((call) => call.command.includes("agent start"));
     expect(start?.command).toContain("--kind pi --pane");
-    expect(start?.command).toMatch(/agent start swarm-dao-p9-weird-id-99( |$)/);
+    expect(start?.command).toMatch(/agent start swarm-dao-p9-weird-id-99-\w{4} /);
   });
 
   test("readFile/writeFile are contained under workDir and reject asynchronously", async () => {
@@ -276,5 +276,118 @@ describe("herdr host adapter", () => {
     expect(sanitizeHerdrName("123numeric")).toMatch(/^[a-z]/);
     expect(sanitizeHerdrName("A_VERY_LONG_AGENT_IDENTIFIER_EXCEEDING_LIMITS")).toHaveLength(32);
     expect(sanitizeHerdrName("")).toMatch(/^[a-z][a-z0-9_-]{0,31}$/);
+  });
+
+  test("long ids never collide: the agent-specific hash always survives truncation", () => {
+    const prefix = "a-very-long-custom-prefix";
+    const names = new Set<string>();
+    for (let i = 0; i < 20; i++) {
+      const name = herdrAgentName(prefix, 123456789, `agent-with-a-very-long-identifier-${i}`);
+      expect(name).toMatch(/^[a-z][a-z0-9_-]{0,31}$/);
+      names.add(name);
+    }
+    expect(names.size).toBe(20);
+    // Different agents on the same proposal never share a name.
+    expect(herdrAgentName("swarm-dao", 1, "strategist")).not.toBe(herdrAgentName("swarm-dao", 1, "critic"));
+  });
+
+  test("echoed vote templates are stripped from the harvest (tally poisoning)", async () => {
+    const transcript = [
+      "## Analysis",
+      "[Your analysis]", // echoed charter template
+      "",
+      "## Vote",
+      "for | against | abstain", // ← the tally would parse this as "for"!
+      "",
+      "## Reasoning",
+      "[Why you voted this way]",
+      "",
+      "— the agent's real answer —",
+      "## Analysis",
+      "Solid but small.",
+      "",
+      "## Vote",
+      "against",
+      "",
+      "## Reasoning",
+      "Too broad for now.",
+    ].join("\n");
+    const cleaned = stripEchoedVoteTemplates(transcript);
+    expect(cleaned).not.toContain("for | against | abstain");
+    expect(cleaned).toContain("against");
+    // And through the adapter: the harvested content is template-free.
+    const fake = fakeHerdr([
+      { stdout: WORKSPACE_CREATED, exitCode: 0 },
+      { stdout: AGENT_SETTLED("working"), exitCode: 0 },
+      { stdout: AGENT_SETTLED("idle"), exitCode: 0 },
+      { exitCode: 0 },
+    ]);
+    fake.pane(transcript);
+    const adapter = createHerdrHostAdapter({ workDir, runner: fake.runner, kind: "pi" });
+    const output = await adapter.spawnAgent({ agent: agent("critic"), proposal: proposal(11), systemPrompt: "P" });
+    expect(output.content).not.toContain("for | against | abstain");
+    // The real vote survives and is now the ONLY votable line.
+    const { parseVoteFromOutput } = await import("@guyghost/swarm-dao-core");
+    const vote = parseVoteFromOutput("critic", "Critic", 1, output.content);
+    expect(vote?.position).toBe("against");
+  });
+
+  test("durations reflect the actual agent runtime, not setup time", async () => {
+    const fake = fakeHerdr([
+      { stdout: WORKSPACE_CREATED, exitCode: 0 },
+      { stdout: AGENT_SETTLED("working"), exitCode: 0 },
+      { stdout: AGENT_SETTLED("idle"), exitCode: 0 },
+      { exitCode: 0 },
+    ]);
+    const adapter = createHerdrHostAdapter({ workDir, runner: fake.runner, kind: "pi" });
+    // Simulate the agent taking ~40ms across the herdr commands.
+    const originalExec = fake.runner.exec;
+    fake.runner.exec = async (command: string, options?: { cwd?: string }) => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      return originalExec(command, options);
+    };
+    const output = await adapter.spawnAgent({ agent: agent("slow"), proposal: proposal(12), systemPrompt: "P" });
+    // Duration covers the herdr command runtime (4 simulated delays ≥ 10ms each).
+    expect(output.durationMs).toBeGreaterThanOrEqual(30);
+  });
+
+  test("a hostile kind is refused, never interpolated into the shell", async () => {
+    const fake = fakeHerdr([{ exitCode: 0 }]);
+    const adapter = createHerdrHostAdapter({ workDir, runner: fake.runner, kind: "pi; rm -rf /" });
+    const output = await adapter.spawnAgent({ agent: agent("x"), proposal: proposal(13), systemPrompt: "P" });
+    expect(output.error).toContain("not a valid agent kind");
+    expect(fake.calls.every((call) => !call.command.includes("rm -rf"))).toBe(true);
+  });
+
+  test("agentArgs are quoted as single argv elements", async () => {
+    const fake = fakeHerdr([
+      { stdout: WORKSPACE_CREATED, exitCode: 0 },
+      { stdout: AGENT_SETTLED("working"), exitCode: 0 },
+      { stdout: AGENT_SETTLED("idle"), exitCode: 0 },
+      { exitCode: 0 },
+    ]);
+    const adapter = createHerdrHostAdapter({
+      workDir,
+      runner: fake.runner,
+      kind: "codex",
+      agentArgs: ["-m", "o3; touch /tmp/pwned"],
+    });
+    await adapter.spawnAgent({ agent: agent("x"), proposal: proposal(14), systemPrompt: "P" });
+    const start = fake.calls.find((call) => call.command.includes("agent start"));
+    expect(start?.command).toContain("-- '-m' 'o3; touch /tmp/pwned'");
+  });
+
+  test("symlinks cannot bypass workspace containment", async () => {
+    const fake = fakeHerdr([{ exitCode: 0 }]);
+    const adapter = createHerdrHostAdapter({ workDir, runner: fake.runner, kind: "pi" });
+    const outside = await fs.mkdtemp(path.join(tmpdir(), "swarm-dao-herdr-out-"));
+    try {
+      await fs.symlink(outside, path.join(workDir, "escape"));
+      await expect(adapter.readFile("escape/secret.txt")).rejects.toThrow("escapes");
+      await expect(adapter.writeFile("escape/secret.txt", "x")).rejects.toThrow("escapes");
+    } finally {
+      await fs.rm(path.join(workDir, "escape"), { force: true });
+      await fs.rm(outside, { recursive: true, force: true });
+    }
   });
 });
