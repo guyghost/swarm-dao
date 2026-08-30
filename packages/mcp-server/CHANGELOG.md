@@ -1,5 +1,12 @@
 # @guyghost/swarm-dao-mcp
 
+## 0.3.2
+
+### Patch Changes
+
+- Updated dependencies [886824e]
+  - @guyghost/swarm-dao-core@0.7.0
+
 ## 0.3.1
 
 ### Patch Changes
