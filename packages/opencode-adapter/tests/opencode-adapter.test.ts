@@ -122,6 +122,7 @@ describe("opencode-adapter", () => {
         "dao_config_github",
         "dao_github_create_branch",
         "dao_github_open_pr",
+        "dao_check_edit",
       ];
 
       for (const toolName of expectedTools) {

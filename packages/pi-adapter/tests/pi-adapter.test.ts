@@ -90,6 +90,7 @@ const EXPECTED_TOOLS = [
   "dao_config_github",
   "dao_github_create_branch",
   "dao_github_open_pr",
+  "dao_check_edit",
 ];
 
 const DAO_ROOT = path.join(process.cwd(), ".dao");

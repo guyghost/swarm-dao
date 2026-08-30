@@ -16,7 +16,7 @@ import {
 } from "@guyghost/swarm-dao-core";
 import { InMemoryDaoStateRepository } from "../src/adapters/persistence/in-memory-dao-state.repository.js";
 import type { DaoToolContext } from "../src/host-tools/handlers.js";
-import { handleDaoExecute, handleDaoShip } from "../src/host-tools/handlers.js";
+import { handleDaoCheckEdit, handleDaoExecute, handleDaoShip } from "../src/host-tools/handlers.js";
 import type { AgentOutput, HostAdapter } from "../src/types/index.js";
 
 type ExecCall = { command: string; options?: { cwd?: string } };
@@ -125,6 +125,57 @@ describe("host tools: execution isolation wiring", () => {
       .auditLog.filter((entry) => entry.proposalId === proposalId && entry.layer === "delivery")
       .at(-1);
     expect(audit?.details).toContain(`dao/${proposalId}-wired-feature`);
+  });
+
+  test("dao_check_edit applies the configured mode from the project config", async () => {
+    const enforceRoot = path.join(await fs.mkdtemp(path.join(tmpdir(), "swarm-dao-editgate-")), ".dao");
+    await fs.mkdir(enforceRoot, { recursive: true });
+    await fs.writeFile(
+      path.join(enforceRoot, "config.json"),
+      JSON.stringify({ mode: "enforce", criticalPaths: ["src/auth/**", "src/payment/**"] }),
+    );
+    try {
+      const repository = new InMemoryDaoStateRepository(createInitialState(enforceRoot));
+      await new InitializeDaoUseCase({ repository }).execute({ agents: DEFAULT_AGENTS });
+      const created = await new CreateProposalUseCase({ repository, clock: systemClock }).execute({
+        title: "Auth Refactor",
+        type: "technical-change",
+        description: "d",
+        proposedBy: "test",
+        affectedPaths: ["src/auth/**"],
+      });
+      if (!created.ok) throw new Error(created.error);
+      // Approved via the machine (deliberation → approved) — no control needed.
+      const host = recordingHost([]);
+      const deliberation = await new DeliberateProposalUseCase({
+        repository,
+        worker: host,
+        clock: systemClock,
+      }).execute({ proposalId: created.proposal.id });
+      if (!deliberation.ok) throw new Error(deliberation.error);
+
+      const calls: ExecCall[] = [];
+      const ctx = {
+        adapter: recordingHost(calls),
+        workDir: "/repo",
+        deliberationMode: "auto" as const,
+        controlToolName: "dao_check" as const,
+        repository,
+      };
+
+      // Covered critical path → allowed; uncovered critical path → blocked.
+      const decision = await handleDaoCheckEdit(ctx, ["src/auth/login.ts", "src/payment/charge.ts"]);
+      expect(decision).toContain("src/auth/login.ts");
+      expect(decision).toContain("#" + created.proposal.id);
+      expect(decision).toContain("Blocked");
+      expect(decision).toContain("src/payment/charge.ts");
+
+      // Empty input is rejected with guidance.
+      const empty = await handleDaoCheckEdit(ctx, []);
+      expect(empty).toContain("No paths provided");
+    } finally {
+      await fs.rm(path.dirname(enforceRoot), { recursive: true, force: true });
+    }
   });
 
   test("unsafe isolation config blocks host shipping without running commands", async () => {

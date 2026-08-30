@@ -108,6 +108,7 @@ For example, `vote` is CLI-only (deterministic), and the GitHub commands are MCP
 ### Governance
 | Command | Args | Tool | Summary |
 |---|---|---|---|
+| `/dao check-edit` | `paths` | `dao_check_edit` | Check whether paths may be edited under the configured mode |
 | `/dao propose-amendment` | `title description amendmentType [agentId] [agentChanges] [configChanges] [addGates] [removeGates]` | `dao_propose_amendment` | Propose an amendment (agents, config, quorum, gates) |
 
 ### GitHub

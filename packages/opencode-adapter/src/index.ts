@@ -21,6 +21,7 @@ import {
   getPlan,
   getProposal,
   getState,
+  handleDaoCheckEdit,
   handleDaoConfigGithub,
   handleDaoControl,
   handleDaoDeliberate,
@@ -519,6 +520,26 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
             ? getAllAuditLog().filter((e) => e.proposalId === args.proposalId)
             : getAllAuditLog();
           return formatAuditTrail(entries, args.proposalId);
+        },
+      }),
+
+      // ── dao_check_edit ─────────────────────────────────────
+      dao_check_edit: tool({
+        description: "Check whether paths may be edited under the configured mode (opt-in/suggest/enforce)",
+        args: { paths: schema.array(schema.string()) },
+        // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
+        async execute(args: any, _context: any) {
+          const adapter = createOpenCodeHostAdapter(ctx);
+          return handleDaoCheckEdit(
+            {
+              adapter,
+              workDir: directory,
+              deliberationMode: "manual",
+              controlToolName: "dao_control",
+              repository,
+            },
+            Array.isArray(args.paths) ? args.paths.map(String) : [],
+          );
         },
       }),
 

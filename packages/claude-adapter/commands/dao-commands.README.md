@@ -40,6 +40,7 @@
 - [`/dao:roundtable`](dao:roundtable.md) — Ask every agent to suggest a proposal idea
 
 ## Governance
+- [`/dao:check-edit`](dao:check-edit.md) `paths` — Check whether paths may be edited under the configured mode
 - [`/dao:propose-amendment`](dao:propose-amendment.md) `title description amendmentType [agentId] [agentChanges] [configChanges] [addGates] [removeGates]` — Propose an amendment (agents, config, quorum, gates)
 
 ## GitHub

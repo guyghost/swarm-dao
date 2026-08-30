@@ -19,6 +19,7 @@ import { formatAuditTrail } from "../control/audit.js";
 import { formatAllArtefacts, generateAllArtefacts } from "../delivery/artefacts.js";
 import { formatPlan, getPlan } from "../delivery/plans.js";
 import { formatAgentsTable, initializeAgents, loadAgentDefinitions } from "../governance/agents.js";
+import { evaluateEditGate, formatEditGate } from "../governance/edit-gate.js";
 import { computeHealthScore, formatHealthScore, generateDashboard } from "../health-score.js";
 import { ghBranchNameFor, ghCreateBranch, ghCreatePullRequest, isGitHubEnabled } from "../integrations/github.js";
 import { formatRoundTableResults } from "../intelligence/roundtable.js";
@@ -212,6 +213,29 @@ export async function handleDaoShip(
     if (proposal) recordProposalExecuted(proposal.id, proposal.type);
   }
   return presentShip(result);
+}
+
+export async function handleDaoCheckEdit(ctx: DaoToolContext, paths: readonly string[]): Promise<string> {
+  const repository = repositoryOrLegacy(ctx.repository);
+  const notReady = requireInitialized(ctx.repository);
+  if (notReady) return notReady;
+
+  const cleaned = [...new Set(paths.map((path) => path.trim()).filter(Boolean))].slice(0, 200);
+  if (cleaned.length === 0) return "No paths provided. Pass the files you are about to edit.";
+
+  const state = repository.get();
+  const projectConfig = await loadConfig(state.daoRoot);
+  const decision = evaluateEditGate({
+    paths: cleaned,
+    mode: projectConfig.mode,
+    criticalPaths: projectConfig.criticalPaths ?? [],
+    approved: state.proposals.map((proposal) => ({
+      proposalId: proposal.id,
+      affectedPaths: proposal.affectedPaths,
+      status: proposal.status,
+    })),
+  });
+  return formatEditGate(decision);
 }
 
 export async function handleDaoList(): Promise<string> {

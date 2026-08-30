@@ -31,6 +31,7 @@ import {
   getPlan,
   getProposal,
   getState,
+  handleDaoCheckEdit,
   handleDaoConfigGithub,
   handleDaoControl,
   handleDaoDeliberate,
@@ -491,6 +492,8 @@ interface DaoGithubPrParams {
   headBranch: string;
 }
 
+type DaoCheckEditParams = { paths: string[] };
+
 // ── Main Extension Export ────────────────────────────────────
 
 export default function swarmDaoExtension(pi: ExtensionAPI) {
@@ -862,6 +865,30 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
             rollbackConditions: params.rollbackConditions,
           },
           repository,
+        ),
+      );
+    },
+  });
+
+  // ── Tool: dao_check_edit ─────────────────────────────────
+  pi.registerTool({
+    name: "dao_check_edit",
+    label: "DAO Check Edit",
+    description: "Check whether paths may be edited under the configured mode (opt-in/suggest/enforce)",
+    parameters: Type.Object({
+      paths: Type.Array(Type.String(), { description: "Files about to be edited" }),
+    }),
+    async execute(_id, params: DaoCheckEditParams) {
+      return toolResult(
+        await handleDaoCheckEdit(
+          {
+            adapter: createPiHostAdapter(pi),
+            workDir: process.cwd(),
+            deliberationMode: "auto",
+            controlToolName: "dao_check",
+            repository,
+          },
+          params.paths,
         ),
       );
     },

@@ -233,6 +233,14 @@ export const DAO_COMMANDS: readonly DaoCommand[] = [
     hosts: ["mcp", "claude", "copilot", "codex", "pi"],
   },
   {
+    id: "check-edit",
+    phase: "governance",
+    summary: "Check whether paths may be edited under the configured mode",
+    tool: "dao_check_edit",
+    args: "paths",
+    hosts: ["mcp", "claude", "copilot", "codex", "pi", "opencode"],
+  },
+  {
     id: "propose-amendment",
     phase: "governance",
     summary: "Propose an amendment (agents, config, quorum, gates)",
