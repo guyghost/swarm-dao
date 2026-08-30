@@ -358,7 +358,13 @@ export async function handleDaoDashboard(repository?: DaoStateRepositoryPort): P
   const notReady = requireInitialized(repository);
   if (notReady) return notReady;
   const state = repositoryOrLegacy(repository).get();
-  const dashboard = generateDashboard(state.proposals, state.outcomes, state.agents, state.healthSnapshots);
+  const dashboard = generateDashboard(
+    state.proposals,
+    state.outcomes,
+    state.agents,
+    state.healthSnapshots,
+    state.config.healthWeights,
+  );
   const health = computeHealthScore(state.proposals, state.outcomes, state.config.healthWeights);
   return `${dashboard}\n\n${formatHealthScore(health)}`;
 }
