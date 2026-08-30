@@ -92,6 +92,35 @@ describe("benchmark harness", () => {
     expect(formatComparisons(slower)).toContain("REGRESSION");
   });
 
+  it("tolerates large relative jitter when the absolute delta is below the noise floor", () => {
+    // 0.006ms vs 0.004ms is +50% but only 2µs — timer noise, not a regression.
+    const baseline = report([{ suite: "artefacts", name: "decision brief", meanMs: 0.004 }]);
+    const jitter = compareReports(
+      report([{ suite: "artefacts", name: "decision brief", meanMs: 0.006 }]),
+      baseline,
+      0.25,
+    );
+    expect(jitter[0]?.status).toBe("ok");
+    expect(jitter[0]?.changeRatio).toBe(0.5);
+
+    // 0.3ms vs 0.1ms is +200% and +0.2ms — above the floor, a real regression.
+    const real = compareReports(
+      report([{ suite: "s", name: "a", meanMs: 0.3 }]),
+      report([{ suite: "s", name: "a", meanMs: 0.1 }]),
+      0.25,
+    );
+    expect(real[0]?.status).toBe("regression");
+
+    // A custom floor of zero restores pure-ratio behavior.
+    const strict = compareReports(
+      report([{ suite: "artefacts", name: "decision brief", meanMs: 0.006 }]),
+      baseline,
+      0.25,
+      0,
+    );
+    expect(strict[0]?.status).toBe("regression");
+  });
+
   it("marks measurements missing from the baseline as new", () => {
     const comparisons = compareReports(report([{ suite: "s", name: "b", meanMs: 3 }]), report([]), 0.25);
     expect(comparisons[0]?.status).toBe("new");

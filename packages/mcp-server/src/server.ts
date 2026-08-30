@@ -7,6 +7,7 @@ import {
   handleDaoAgents,
   handleDaoArtefacts,
   handleDaoAudit,
+  handleDaoCheckEdit,
   handleDaoConfigGithub,
   handleDaoControl,
   handleDaoDashboard,
@@ -243,6 +244,16 @@ export function createSwarmDaoMcpServer(workDir = resolveDaoRoot(), repository?:
         },
       },
       {
+        name: "dao_check_edit",
+        description:
+          "Check whether paths may be edited under the configured mode (opt-in/suggest/enforce) before touching files",
+        inputSchema: {
+          type: "object",
+          required: ["paths"],
+          properties: { paths: { type: "array", items: { type: "string" } } },
+        },
+      },
+      {
         name: "dao_config_github",
         description: "Configure GitHub integration for branch/PR tools",
         inputSchema: {
@@ -385,6 +396,8 @@ export function createSwarmDaoMcpServer(workDir = resolveDaoRoot(), repository?:
               repository,
             ),
           );
+        case "dao_check_edit":
+          return textResult(await handleDaoCheckEdit(ctx, Array.isArray(args.paths) ? args.paths.map(String) : []));
         case "dao_config_github":
           return textResult(
             await handleDaoConfigGithub(ctx, {

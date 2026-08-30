@@ -11,7 +11,16 @@ export async function loadGitHubConfigFromDaoRoot(daoRoot: string): Promise<bool
     };
     const github = configData.github;
     if (github?.owner && github?.repo) {
-      configureGitHub({ ...github, enabled: github.enabled ?? true });
+      // The persisted token is redacted on save; the live token comes from
+      // DAO_GITHUB_TOKEN (the mechanism the config output advertises). A
+      // redacted literal must never be sent as a credential.
+      const persisted = typeof github.token === "string" ? github.token : undefined;
+      const token = persisted && persisted !== "[REDACTED]" ? persisted : process.env.DAO_GITHUB_TOKEN;
+      if (!token) {
+        logger.debug("loadGitHubConfigFromDaoRoot: token redacted and DAO_GITHUB_TOKEN not set");
+        return false;
+      }
+      configureGitHub({ owner: github.owner, repo: github.repo, token, enabled: github.enabled ?? true });
       return isGitHubEnabled();
     }
   } catch (error) {

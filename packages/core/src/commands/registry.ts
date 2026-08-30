@@ -233,6 +233,14 @@ export const DAO_COMMANDS: readonly DaoCommand[] = [
     hosts: ["mcp", "claude", "copilot", "codex", "pi"],
   },
   {
+    id: "check-edit",
+    phase: "governance",
+    summary: "Check whether paths may be edited under the configured mode",
+    tool: "dao_check_edit",
+    args: "paths",
+    hosts: ["mcp", "claude", "copilot", "codex", "pi", "opencode"],
+  },
+  {
     id: "propose-amendment",
     phase: "governance",
     summary: "Propose an amendment (agents, config, quorum, gates)",
@@ -249,7 +257,7 @@ export const DAO_COMMANDS: readonly DaoCommand[] = [
     summary: "Configure the GitHub integration",
     tool: "dao_config_github",
     args: "--token <t> --owner <o> --repo <r>",
-    hosts: ["mcp", "claude", "copilot", "codex"],
+    hosts: ["mcp", "claude", "copilot", "codex", "pi", "opencode"],
   },
   {
     id: "github-branch",
@@ -257,7 +265,7 @@ export const DAO_COMMANDS: readonly DaoCommand[] = [
     summary: "Create a GitHub branch for a proposal",
     tool: "dao_github_create_branch",
     args: "proposalId",
-    hosts: ["mcp", "claude", "copilot", "codex"],
+    hosts: ["mcp", "claude", "copilot", "codex", "pi", "opencode"],
   },
   {
     id: "github-pr",
@@ -265,7 +273,7 @@ export const DAO_COMMANDS: readonly DaoCommand[] = [
     summary: "Open a GitHub pull request for a proposal",
     tool: "dao_github_open_pr",
     args: "proposalId --head-branch <b>",
-    hosts: ["mcp", "claude", "copilot", "codex"],
+    hosts: ["mcp", "claude", "copilot", "codex", "pi", "opencode"],
   },
 
   // ── Meta (CLI-native) ─────────────────────────────────────────

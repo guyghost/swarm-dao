@@ -74,7 +74,7 @@ for the pattern all non-native hosts share).
 | Package | Description |
 |---------|-------------|
 | `@guyghost/swarm-dao-core` | Pure business logic + shared `host-tools` handlers |
-| `@guyghost/swarm-dao-mcp` | Swarm DAO as a stdio MCP server (23 tools) |
+| `@guyghost/swarm-dao-mcp` | Swarm DAO as a stdio MCP server (24 tools) |
 | `@guyghost/swarm-dao-copilot-adapter` | GitHub Copilot plugin (MCP + instructions) |
 | `@guyghost/swarm-dao-claude-adapter` | Claude Code plugin (MCP + slash commands) |
 | `@guyghost/swarm-dao-codex-adapter` | OpenAI Codex plugin (MCP + AGENTS.md) |
@@ -252,10 +252,29 @@ Per-project config in `.dao/config.json`:
 ```
 
 `mode` declares intent (`opt-in` *(default)*, `suggest`, `enforce`) and
-`criticalPaths` declares the paths that matter — today only `agentOverrides`
-is actively applied (agents are filtered/overridden on every `dao_deliberate`
-call). `mode`-based edit blocking and path-based suggestions are not wired
-into any host yet; treat them as reserved schema for now.
+`criticalPaths` declares the paths that matter. `agentOverrides` filters
+and overrides agents on every `dao_deliberate` call; `mode` and
+`criticalPaths` are enforced through the **edit gate** — agents call
+`dao_check_edit` with the files they are about to touch before editing:
+
+- **opt-in**: everything is allowed; critical paths are flagged
+  informationally.
+- **suggest**: everything is allowed; uncovered critical paths produce a
+  non-blocking nudge toward `dao_propose`.
+- **enforce**: a critical path is only editable when an `approved`,
+  `controlled`, or `executed` proposal declares it in `affectedPaths`;
+  otherwise the gate blocks the edit and explains how to get approval.
+
+Paths are lexically normalized before matching (absolute paths,
+  backslashes, `./` prefixes, and `a/../b` segments are refused or
+  resolved), so the gate cannot be evaded by spelling variants — an
+  unmatchable path is refused in every mode. Requests over 200 paths are
+  rejected outright.
+
+`dao_check_edit` is exposed on every agent-facing host (MCP and the
+Copilot/Claude/Codex adapters, Pi, OpenCode). It is a deterministic,
+read-only decision — the gate never edits files and never transitions
+proposal state.
 
 ### Execution isolation (worktrees)
 
@@ -382,10 +401,11 @@ Auto-generated for every approved proposal:
 
 ## GitHub Integration
 
-Available via the CLI (see above) and the MCP tools (`dao_config_github`,
+Available on every host surface: the CLI (`swarm-dao github-config` /
+`github-branch` / `github-pr`), the MCP tools (`dao_config_github`,
 `dao_github_create_branch`, `dao_github_open_pr` — exposed by
-`@guyghost/swarm-dao-mcp` and the Copilot/Claude/Codex adapters). **Not**
-currently exposed as tools on the Pi extension or the OpenCode plugin.
+`@guyghost/swarm-dao-mcp` and the Copilot/Claude/Codex adapters), and the
+Pi extension and OpenCode plugin (registered as native tools).
 
 ```bash
 # Via an MCP host (Claude, Codex, Copilot, or a generic MCP client)

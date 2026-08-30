@@ -19,6 +19,7 @@ import { formatAuditTrail } from "../control/audit.js";
 import { formatAllArtefacts, generateAllArtefacts } from "../delivery/artefacts.js";
 import { formatPlan, getPlan } from "../delivery/plans.js";
 import { formatAgentsTable, initializeAgents, loadAgentDefinitions } from "../governance/agents.js";
+import { evaluateEditGate, formatEditGate } from "../governance/edit-gate.js";
 import { computeHealthScore, formatHealthScore, generateDashboard } from "../health-score.js";
 import { ghBranchNameFor, ghCreateBranch, ghCreatePullRequest, isGitHubEnabled } from "../integrations/github.js";
 import { formatRoundTableResults } from "../intelligence/roundtable.js";
@@ -212,6 +213,34 @@ export async function handleDaoShip(
     if (proposal) recordProposalExecuted(proposal.id, proposal.type);
   }
   return presentShip(result);
+}
+
+export async function handleDaoCheckEdit(ctx: DaoToolContext, paths: readonly string[]): Promise<string> {
+  const repository = repositoryOrLegacy(ctx.repository);
+  const notReady = requireInitialized(ctx.repository);
+  if (notReady) return notReady;
+
+  const cleaned = [...new Set(paths.map((path) => path.trim()).filter(Boolean))];
+  // Refuse oversized requests outright: silently truncating could let a
+  // protected file ride just past the cutoff and come back as allowed.
+  if (cleaned.length > 200) {
+    return `Too many paths provided (${cleaned.length}). Pass at most 200 paths per edit check.`;
+  }
+  if (cleaned.length === 0) return "No paths provided. Pass the files you are about to edit.";
+
+  const state = repository.get();
+  const projectConfig = await loadConfig(state.daoRoot);
+  const decision = evaluateEditGate({
+    paths: cleaned,
+    mode: projectConfig.mode,
+    criticalPaths: projectConfig.criticalPaths ?? [],
+    approved: state.proposals.map((proposal) => ({
+      proposalId: proposal.id,
+      affectedPaths: proposal.affectedPaths,
+      status: proposal.status,
+    })),
+  });
+  return formatEditGate(decision);
 }
 
 export async function handleDaoList(): Promise<string> {
@@ -418,10 +447,10 @@ export async function handleDaoProposeAmendment(
 }
 
 export async function handleDaoConfigGithub(
-  _ctx: DaoToolContext,
+  ctx: DaoToolContext,
   args: { token: string; owner: string; repo: string },
 ): Promise<string> {
-  const state = getState();
+  const state = repositoryOrLegacy(ctx.repository).get();
   await saveGitHubConfigToDaoRoot(state.daoRoot, args);
   return [
     `# GitHub Configured`,
@@ -434,12 +463,13 @@ export async function handleDaoConfigGithub(
   ].join("\n");
 }
 
-export async function handleDaoGithubCreateBranch(_ctx: DaoToolContext, proposalId: number): Promise<string> {
-  const notReady = requireInitialized();
+export async function handleDaoGithubCreateBranch(ctx: DaoToolContext, proposalId: number): Promise<string> {
+  const repository = repositoryOrLegacy(ctx.repository);
+  const notReady = requireInitialized(ctx.repository);
   if (notReady) return notReady;
-  const proposal = getProposal(proposalId);
+  const proposal = repository.get().proposals.find((candidate) => candidate.id === proposalId);
   if (!proposal) return `Proposal #${proposalId} not found.`;
-  const configured = await loadGitHubConfigFromDaoRoot(getState().daoRoot);
+  const configured = await loadGitHubConfigFromDaoRoot(repository.get().daoRoot);
   if (!configured || !isGitHubEnabled()) {
     return "GitHub not configured. Run `dao_config_github` with token, owner, and repo.";
   }
@@ -450,16 +480,17 @@ export async function handleDaoGithubCreateBranch(_ctx: DaoToolContext, proposal
 }
 
 export async function handleDaoGithubOpenPr(
-  _ctx: DaoToolContext,
+  ctx: DaoToolContext,
   proposalId: number,
   headBranch: string,
 ): Promise<string> {
-  const notReady = requireInitialized();
+  const repository = repositoryOrLegacy(ctx.repository);
+  const notReady = requireInitialized(ctx.repository);
   if (notReady) return notReady;
-  const proposal = getProposal(proposalId);
+  const proposal = repository.get().proposals.find((candidate) => candidate.id === proposalId);
   if (!proposal) return `Proposal #${proposalId} not found.`;
   if (!headBranch) return "headBranch is required";
-  const configured = await loadGitHubConfigFromDaoRoot(getState().daoRoot);
+  const configured = await loadGitHubConfigFromDaoRoot(repository.get().daoRoot);
   if (!configured || !isGitHubEnabled()) {
     return "GitHub not configured. Run `dao_config_github` with token, owner, and repo.";
   }

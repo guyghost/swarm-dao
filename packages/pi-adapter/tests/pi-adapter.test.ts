@@ -87,6 +87,10 @@ const EXPECTED_TOOLS = [
   "dao_rollback",
   "dao_roundtable",
   "dao_update_proposal",
+  "dao_config_github",
+  "dao_github_create_branch",
+  "dao_github_open_pr",
+  "dao_check_edit",
 ];
 
 const DAO_ROOT = path.join(process.cwd(), ".dao");
@@ -607,6 +611,59 @@ describe("swarmDaoExtension", () => {
   });
 
   // ── dao_propose tool ─────────────────────────────────────
+
+  describe("github tools", () => {
+    it("dao_config_github stores the configuration and confirms", async () => {
+      const { initStorage, setState, getOrCreateState, initializeAgents } = await import("@guyghost/swarm-dao-core");
+      await initStorage(process.cwd());
+      const state = getOrCreateState(process.cwd());
+      state.initialized = true;
+      state.agents = initializeAgents();
+      setState(state);
+
+      const mod = await import("@guyghost/swarm-dao-pi-adapter");
+      const pi = createMockPi();
+      mod.default(pi);
+
+      // biome-ignore lint/style/noNonNullAssertion: test expects tool to be registered
+      const tool = pi.tools.find((t) => t.name === "dao_config_github")!;
+      const result = await tool.execute("test-id", { token: "ghp_test", owner: "acme", repo: "app" });
+
+      const text = result.content[0]?.text;
+      expect(text).toContain("GitHub Configured");
+      expect(text).toContain("acme/app");
+    });
+
+    it("dao_github_create_branch reports clearly when GitHub is not configured", async () => {
+      const { initStorage, setState, getOrCreateState, initializeAgents } = await import("@guyghost/swarm-dao-core");
+      await initStorage(process.cwd());
+      const state = getOrCreateState(process.cwd());
+      state.initialized = true;
+      state.agents = initializeAgents();
+      state.proposals.push({
+        id: state.nextProposalId++,
+        title: "Branch Feature",
+        type: "product-feature",
+        description: "d",
+        proposedBy: "pi-test",
+        status: "open",
+        votes: [],
+        agentOutputs: [],
+      } as never);
+      setState(state);
+
+      const mod = await import("@guyghost/swarm-dao-pi-adapter");
+      const pi = createMockPi();
+      mod.default(pi);
+
+      // biome-ignore lint/style/noNonNullAssertion: test expects tool to be registered
+      const tool = pi.tools.find((t) => t.name === "dao_github_create_branch")!;
+      const result = await tool.execute("test-id", { proposalId: 1 });
+
+      const text = result.content[0]?.text;
+      expect(text).toContain("GitHub not configured");
+    });
+  });
 
   describe("dao_propose tool", () => {
     it("rejects proposal creation when DAO is not initialized", async () => {

@@ -119,12 +119,52 @@ describe("opencode-adapter", () => {
         "dao_roundtable",
         "dao_audit",
         "dao_propose_amendment",
+        "dao_config_github",
+        "dao_github_create_branch",
+        "dao_github_open_pr",
+        "dao_check_edit",
       ];
 
       for (const toolName of expectedTools) {
         expect(plugin.tool[toolName]).toBeDefined();
         expect(typeof plugin.tool[toolName].execute).toBe("function");
       }
+    });
+  });
+
+  describe("github tools", () => {
+    let testDir: string;
+
+    beforeEach(async () => {
+      testDir = path.join(tmpdir(), `swarm-oc-gh-${Date.now()}`);
+      await fs.mkdir(testDir, { recursive: true });
+    });
+
+    afterEach(async () => {
+      setState(null);
+      await fs.rm(testDir, { recursive: true, force: true });
+    });
+
+    it("dao_config_github stores the configuration and confirms", async () => {
+      const { plugin } = await setupPlugin(testDir);
+      const result = await plugin.tool.dao_config_github.execute(
+        { token: "ghp_test", owner: "acme", repo: "app" },
+        { directory: testDir },
+      );
+      expect(result).toContain("GitHub Configured");
+      expect(result).toContain("acme/app");
+    });
+
+    it("dao_github_create_branch reports clearly when GitHub is not configured", async () => {
+      const { plugin } = await setupPlugin(testDir);
+      await plugin.tool.dao_setup.execute({}, { directory: testDir });
+      await plugin.tool.dao_propose.execute(
+        { title: "Branch Feature", type: "product-feature", description: "d" },
+        { directory: testDir },
+      );
+
+      const result = await plugin.tool.dao_github_create_branch.execute({ proposalId: 1 }, { directory: testDir });
+      expect(result).toContain("GitHub not configured");
     });
   });
 

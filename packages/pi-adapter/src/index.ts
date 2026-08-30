@@ -31,10 +31,14 @@ import {
   getPlan,
   getProposal,
   getState,
+  handleDaoCheckEdit,
+  handleDaoConfigGithub,
   handleDaoControl,
   handleDaoDeliberate,
   handleDaoDryRun,
   handleDaoExecute,
+  handleDaoGithubCreateBranch,
+  handleDaoGithubOpenPr,
   handleDaoPropose,
   handleDaoRate,
   handleDaoRollback,
@@ -473,6 +477,23 @@ interface DaoUpdateProposalParams {
   rollbackConditions?: string[];
 }
 
+interface DaoConfigGithubParams {
+  token: string;
+  owner: string;
+  repo: string;
+}
+
+interface DaoGithubBranchParams {
+  proposalId: number;
+}
+
+interface DaoGithubPrParams {
+  proposalId: number;
+  headBranch: string;
+}
+
+type DaoCheckEditParams = { paths: string[] };
+
 // ── Main Extension Export ────────────────────────────────────
 
 export default function swarmDaoExtension(pi: ExtensionAPI) {
@@ -844,6 +865,104 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
             rollbackConditions: params.rollbackConditions,
           },
           repository,
+        ),
+      );
+    },
+  });
+
+  // ── Tool: dao_check_edit ─────────────────────────────────
+  pi.registerTool({
+    name: "dao_check_edit",
+    label: "DAO Check Edit",
+    description: "Check whether paths may be edited under the configured mode (opt-in/suggest/enforce)",
+    parameters: Type.Object({
+      paths: Type.Array(Type.String(), { description: "Files about to be edited" }),
+    }),
+    async execute(_id, params: DaoCheckEditParams) {
+      return toolResult(
+        await handleDaoCheckEdit(
+          {
+            adapter: createPiHostAdapter(pi),
+            workDir: process.cwd(),
+            deliberationMode: "auto",
+            controlToolName: "dao_check",
+            repository,
+          },
+          params.paths,
+        ),
+      );
+    },
+  });
+
+  // ── Tool: dao_config_github ─────────────────────────────
+  pi.registerTool({
+    name: "dao_config_github",
+    label: "DAO GitHub Config",
+    description: "Configure the GitHub integration (token, owner, repo)",
+    parameters: Type.Object({
+      token: Type.String({ description: "GitHub personal access token" }),
+      owner: Type.String({ description: "Repository owner (user or org)" }),
+      repo: Type.String({ description: "Repository name" }),
+    }),
+    async execute(_id, params: DaoConfigGithubParams) {
+      return toolResult(
+        await handleDaoConfigGithub(
+          {
+            adapter: createPiHostAdapter(pi),
+            workDir: process.cwd(),
+            deliberationMode: "auto",
+            controlToolName: "dao_check",
+            repository,
+          },
+          params,
+        ),
+      );
+    },
+  });
+
+  // ── Tool: dao_github_create_branch ──────────────────────
+  pi.registerTool({
+    name: "dao_github_create_branch",
+    label: "DAO GitHub Branch",
+    description: "Create a GitHub branch (dao/<id>-<slug>) for a proposal",
+    parameters: Type.Object({ proposalId: Type.Number() }),
+    async execute(_id, params: DaoGithubBranchParams) {
+      return toolResult(
+        await handleDaoGithubCreateBranch(
+          {
+            adapter: createPiHostAdapter(pi),
+            workDir: process.cwd(),
+            deliberationMode: "auto",
+            controlToolName: "dao_check",
+            repository,
+          },
+          params.proposalId,
+        ),
+      );
+    },
+  });
+
+  // ── Tool: dao_github_open_pr ────────────────────────────
+  pi.registerTool({
+    name: "dao_github_open_pr",
+    label: "DAO GitHub PR",
+    description: "Open a GitHub pull request for a proposal",
+    parameters: Type.Object({
+      proposalId: Type.Number(),
+      headBranch: Type.String({ description: "Branch containing the work" }),
+    }),
+    async execute(_id, params: DaoGithubPrParams) {
+      return toolResult(
+        await handleDaoGithubOpenPr(
+          {
+            adapter: createPiHostAdapter(pi),
+            workDir: process.cwd(),
+            deliberationMode: "auto",
+            controlToolName: "dao_check",
+            repository,
+          },
+          params.proposalId,
+          params.headBranch,
         ),
       );
     },

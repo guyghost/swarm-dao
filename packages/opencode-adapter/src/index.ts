@@ -21,10 +21,14 @@ import {
   getPlan,
   getProposal,
   getState,
+  handleDaoCheckEdit,
+  handleDaoConfigGithub,
   handleDaoControl,
   handleDaoDeliberate,
   handleDaoDryRun,
   handleDaoExecute,
+  handleDaoGithubCreateBranch,
+  handleDaoGithubOpenPr,
   handleDaoPropose,
   handleDaoProposeAmendment,
   handleDaoRecordOutputs,
@@ -516,6 +520,94 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
             ? getAllAuditLog().filter((e) => e.proposalId === args.proposalId)
             : getAllAuditLog();
           return formatAuditTrail(entries, args.proposalId);
+        },
+      }),
+
+      // ── dao_check_edit ─────────────────────────────────────
+      dao_check_edit: tool({
+        description: "Check whether paths may be edited under the configured mode (opt-in/suggest/enforce)",
+        args: { paths: schema.array(schema.string()) },
+        // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
+        async execute(args: any, _context: any) {
+          const adapter = createOpenCodeHostAdapter(ctx);
+          return handleDaoCheckEdit(
+            {
+              adapter,
+              workDir: directory,
+              deliberationMode: "manual",
+              controlToolName: "dao_control",
+              repository,
+            },
+            Array.isArray(args.paths) ? args.paths.map(String) : [],
+          );
+        },
+      }),
+
+      // ── dao_config_github ─────────────────────────────────
+      dao_config_github: tool({
+        description: "Configure the GitHub integration (token, owner, repo)",
+        args: {
+          token: schema.string({ description: "GitHub personal access token" }),
+          owner: schema.string({ description: "Repository owner (user or org)" }),
+          repo: schema.string({ description: "Repository name" }),
+        },
+        // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
+        async execute(args: any, _context: any) {
+          const adapter = createOpenCodeHostAdapter(ctx);
+          return handleDaoConfigGithub(
+            {
+              adapter,
+              workDir: directory,
+              deliberationMode: "manual",
+              controlToolName: "dao_control",
+              repository,
+            },
+            { token: String(args.token), owner: String(args.owner), repo: String(args.repo) },
+          );
+        },
+      }),
+
+      // ── dao_github_create_branch ──────────────────────────
+      dao_github_create_branch: tool({
+        description: "Create a GitHub branch (dao/<id>-<slug>) for a proposal",
+        args: { proposalId: schema.number() },
+        // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
+        async execute(args: any, _context: any) {
+          const adapter = createOpenCodeHostAdapter(ctx);
+          return handleDaoGithubCreateBranch(
+            {
+              adapter,
+              workDir: directory,
+              deliberationMode: "manual",
+              controlToolName: "dao_control",
+              repository,
+            },
+            Number(args.proposalId),
+          );
+        },
+      }),
+
+      // ── dao_github_open_pr ────────────────────────────────
+      dao_github_open_pr: tool({
+        description: "Open a GitHub pull request for a proposal",
+        args: {
+          proposalId: schema.number(),
+          headBranch: schema.string({ description: "Branch containing the work" }),
+        },
+        // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
+        async execute(args: any, _context: any) {
+          const adapter = createOpenCodeHostAdapter(ctx);
+          return handleDaoGithubOpenPr(
+            {
+              adapter,
+              workDir: directory,
+              deliberationMode: "manual",
+              controlToolName: "dao_control",
+              repository,
+            },
+            Number(args.proposalId),
+            String(args.headBranch),
+          );
         },
       }),
 
