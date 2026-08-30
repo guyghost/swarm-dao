@@ -1,6 +1,6 @@
 {
   "name": "@guyghost/swarm-dao-benchmarks",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Performance benchmarks for Swarm DAO core operations",
   "private": true,
   "type": "module",
