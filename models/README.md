@@ -125,6 +125,25 @@ abandonment, verification retry, contact-relay authorization, and cancellation.
 | `bun run product:regression` | regression |
 
 
+## Ship audit challenge (ship confirmation)
+
+`ship-audit.md` and `ship-audit.graph.json` define the swarm-forge-style
+`AUDIT_REQUIRED` gate for proposal shipping: with `ship.auditChallenge`
+enabled in `.dao/config.json`, the first `dao_ship` call challenges instead
+of executing; only an unchanged second call executes (fingerprint-bound to
+the decision content); `--force` is an audited human bypass. Its executable
+model lives in `packages/core/src/models/ship-audit.machine.ts`. It never
+owns proposal state (`proposalStateAuthority: "none"`) and has no AI role —
+confirmation is a deterministic property of two identical requests.
+
+| command | anchor |
+| --- | --- |
+| `bun run shipaudit:validate` | audit-model-contract |
+| `bun test packages/core/tests/ship-audit.machine.test.ts tools/ship-audit/tests` | audit-graph-tests |
+| `bun test packages/core/tests/ship-audit.wiring.test.ts` | audit-wiring-contract |
+| `bun run shipaudit:regression` | audit-regression |
+| `bun run shipaudit:demo` | audit-runtime-scenario |
+
 ## Review checklist
 
 Before adding or changing a workflow, cover:

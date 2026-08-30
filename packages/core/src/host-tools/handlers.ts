@@ -1,5 +1,6 @@
 import { createExecutionWorkspace } from "../adapters/git-workspace.js";
 import { LegacyDaoStateRepository } from "../adapters/persistence/legacy-dao-state.repository.js";
+import { FsShipAuditStore } from "../adapters/ship-audit/fs-ship-audit.store.js";
 import { InitializeDaoUseCase } from "../application/initialize-dao.use-case.js";
 import { ControlProposalUseCase } from "../application/proposals/control-proposal.use-case.js";
 import { CreateAmendmentProposalUseCase } from "../application/proposals/create-amendment-proposal.use-case.js";
@@ -18,6 +19,7 @@ import { loadConfig } from "../config.js";
 import { formatAuditTrail } from "../control/audit.js";
 import { formatAllArtefacts, generateAllArtefacts } from "../delivery/artefacts.js";
 import { formatPlan, getPlan } from "../delivery/plans.js";
+import { evaluateShipAuditChallenge } from "../delivery/ship-audit.js";
 import { formatAgentsTable, initializeAgents, loadAgentDefinitions } from "../governance/agents.js";
 import { evaluateEditGate, formatEditGate } from "../governance/edit-gate.js";
 import { computeHealthScore, formatHealthScore, generateDashboard } from "../health-score.js";
@@ -198,11 +200,48 @@ export async function handleDaoShip(
   const notReady = requireInitialized(ctx.repository);
   if (notReady) return notReady;
   const repository = repositoryOrLegacy(ctx.repository);
+  // Ship audit challenge (opt-in): the first call challenges instead of
+  // executing; only an unchanged second call proceeds (models/ship-audit.md).
+  const shipConfig = await loadConfig(repository.get().daoRoot);
+  if (shipConfig.ship?.auditChallenge === true) {
+    const proposal = repository.get().proposals.find((candidate) => candidate.id === proposalId);
+    if (!proposal) return `Proposal #${proposalId} not found.`;
+    const gate = await evaluateShipAuditChallenge({
+      proposal,
+      store: new FsShipAuditStore(ctx.workDir),
+      challengeEnabled: true,
+      force: options?.force === true,
+      forceReason: options?.force === true ? "dao_ship --force" : undefined,
+    });
+    if (!gate.proceed)
+      return `# 🛑 Ship Audit — Do Not Proceed
+
+${gate.message}
+
+Force with an explicit reason when genuinely required: re-run with \`force=true\` (recorded as a human bypass).`;
+    // Shipping executes controlled proposals, so it must honour the same
+    // execution isolation as dao_execute — otherwise host shipping would
+    // bypass a configured worktree.
+    const workspace = createExecutionWorkspace(shipConfig.execution, ctx.adapter, ctx.workDir);
+    const auditedUseCase = new ShipProposalUseCase({ repository, clock: systemClock, workspace });
+    const auditedResult = await auditedUseCase.execute({
+      proposalId,
+      actor: ctx.adapter.hostId,
+      cascade: options?.cascade,
+      force: options?.force,
+    });
+    await gate.consume?.();
+    if (!auditedResult.ok) return auditedResult.error;
+    for (const id of auditedResult.shipped) {
+      const shipped = repository.get().proposals.find((candidate) => candidate.id === id);
+      if (shipped) recordProposalExecuted(shipped.id, shipped.type);
+    }
+    return `${presentShip(auditedResult)}${gate.note ? `\n\n*${gate.note}*` : ""}`;
+  }
   // Shipping executes controlled proposals, so it must honour the same
   // execution isolation as dao_execute — otherwise host shipping would
   // bypass a configured worktree.
-  const projectConfig = await loadConfig(repository.get().daoRoot);
-  const workspace = createExecutionWorkspace(projectConfig.execution, ctx.adapter, ctx.workDir);
+  const workspace = createExecutionWorkspace(shipConfig.execution, ctx.adapter, ctx.workDir);
   const useCase = new ShipProposalUseCase({ repository, clock: systemClock, workspace });
   const result = await useCase.execute({
     proposalId,

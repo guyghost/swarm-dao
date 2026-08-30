@@ -61,13 +61,9 @@ const driveNominalPath = async (runner: Awaited<ReturnType<typeof createProductR
     },
     ["permissions: none required"],
   );
-  await sub(
-    "VOTE_OPENED",
-    "tool",
-    "vote-tally",
-    { config: { quorum: 3, kind: "standard", expiryHours: 72 } },
-    ["vote opened"],
-  );
+  await sub("VOTE_OPENED", "tool", "vote-tally", { config: { quorum: 3, kind: "standard", expiryHours: 72 } }, [
+    "vote opened",
+  ]);
   await sub("VOTE_CAST", "tool", "vote-tally", { favorable: 3 }, ["3 favorable votes"]);
   await sub("VOTE_EVALUATE", "system", "product-runner");
   await sub(
@@ -169,9 +165,7 @@ describe("product runner — nominal path (scenario 1)", () => {
 
       // QUALIFICATION_RUN without permission fields is rejected by signal
       // validation (permissionCleared is required).
-      const rejected = await runner.submit(
-        signal(runId, "QUALIFICATION_RUN", "tool", "qualifier"),
-      );
+      const rejected = await runner.submit(signal(runId, "QUALIFICATION_RUN", "tool", "qualifier"));
       expect(rejected.accepted).toBe(false);
       expect(rejected.issues.join("\n")).toMatch(/permissionCleared/);
       // Machine stays in proposition.
@@ -325,9 +319,7 @@ describe("product runner — observation rollback scenario (scenario 2)", () => 
       expect(runner.snapshot().state).toBe("rollback");
 
       // The rollback-opener tool opens a corrective proposition.
-      const corrective = await runner.submit(
-        signal(runId, "CORRECTIVE_PROPOSITION_OPENED", "tool", "rollback-opener"),
-      );
+      const corrective = await runner.submit(signal(runId, "CORRECTIVE_PROPOSITION_OPENED", "tool", "rollback-opener"));
       expect(corrective.accepted).toBe(true);
       expect(runner.snapshot().state).toBe("proposition");
     } finally {

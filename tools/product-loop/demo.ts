@@ -172,9 +172,7 @@ const driveToObservation = async (
   //    disk before sealing the anchor.
   const rollbackArtifactPath = resolve(root, baseDraft.rollbackArtifact);
   if (!existsSync(rollbackArtifactPath)) {
-    throw new Error(
-      `rollback-path-exists anchor cannot be sealed: artifact not found at ${rollbackArtifactPath}`,
-    );
+    throw new Error(`rollback-path-exists anchor cannot be sealed: artifact not found at ${rollbackArtifactPath}`);
   }
   await submit(
     makeSignal(
