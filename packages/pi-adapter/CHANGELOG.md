@@ -1,5 +1,11 @@
 # @guyghost/swarm-dao-pi-adapter
 
+## 0.3.2
+
+### Patch Changes
+
+- 7a84b8d: Pi adapter audit — fixes and hardening. The `dao` slash command is now registered without a leading slash, matching Pi's `registerCommand` convention (the old `"/dao"` name was only invocable via `//dao`, since Pi strips one slash before lookup). The system prompt advertises exactly the 19 registered tools — the ghost `dao_verify` entry is gone and `dao_roundtable`, `dao_update_proposal`, `dao_check_edit`, and the GitHub tools are listed, with a drift test locking the list to actual registrations. `session_start` and `before_agent_start` survive a corrupt `state.json` (warn + minimal prompt instead of an extension error on every turn). `spawnAgents` honors `maxConcurrent` with batched fan-out instead of one unbounded `Promise.all`. `/dao` renders the same full dashboard as the `dao_dashboard` tool (pipeline + health metrics + score) and offers first-token subcommand completion via `getArgumentCompletions`. The `pi` subprocess escalates SIGTERM to SIGKILL after a 5 s grace period and caps combined output at 4 M chars.
+
 ## 0.3.1
 
 ### Patch Changes
