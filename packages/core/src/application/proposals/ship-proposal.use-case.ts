@@ -1,6 +1,7 @@
 import { getUnexecutedDependencies } from "../../delivery/dependencies.js";
 import type { ClockPort } from "../../ports/clock.js";
 import type { DaoStateRepositoryPort } from "../../ports/repository.js";
+import type { ExecutionWorkspacePort } from "../../ports/workspace.js";
 import { ExecuteProposalUseCase } from "./execute-proposal.use-case.js";
 
 export type ShipProposalResult = { ok: true; shipped: number[] } | { ok: false; error: string };
@@ -10,6 +11,8 @@ export class ShipProposalUseCase {
     private readonly dependencies: {
       repository: DaoStateRepositoryPort;
       clock: ClockPort;
+      /** Optional isolated execution workspace, forwarded to ExecuteProposalUseCase. */
+      workspace?: ExecutionWorkspacePort;
     },
   ) {}
 

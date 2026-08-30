@@ -1,3 +1,4 @@
+import { createExecutionWorkspace } from "../adapters/git-workspace.js";
 import { LegacyDaoStateRepository } from "../adapters/persistence/legacy-dao-state.repository.js";
 import { InitializeDaoUseCase } from "../application/initialize-dao.use-case.js";
 import { ControlProposalUseCase } from "../application/proposals/control-proposal.use-case.js";
@@ -172,12 +173,18 @@ export async function handleDaoControl(ctx: DaoToolContext, proposalId: number):
   return presentControl(result.control);
 }
 
-export async function handleDaoExecute(proposalId: number, repository?: DaoStateRepositoryPort): Promise<string> {
-  const useCase = new ExecuteProposalUseCase({ repository: repositoryOrLegacy(repository), clock: systemClock });
+export async function handleDaoExecute(ctx: DaoToolContext, proposalId: number): Promise<string> {
+  const repository = repositoryOrLegacy(ctx.repository);
+  const projectConfig = await loadConfig(repository.get().daoRoot);
+  const workspace = createExecutionWorkspace(projectConfig.execution, ctx.adapter, ctx.workDir);
+  const useCase = new ExecuteProposalUseCase({ repository, clock: systemClock, workspace });
   const result = await useCase.execute({ proposalId, actor: "user" });
   if (!result.ok) return result.error;
   recordProposalExecuted(result.proposal.id, result.proposal.type);
-  return presentExecution(result);
+  const isolationNote = result.snapshot.branch.startsWith("dao/")
+    ? `\n**Isolated execution branch:** ${result.snapshot.branch}`
+    : "";
+  return `${presentExecution(result)}${isolationNote}`;
 }
 
 export async function handleDaoShip(

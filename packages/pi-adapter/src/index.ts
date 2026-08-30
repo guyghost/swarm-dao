@@ -670,7 +670,18 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
     description: "Execute a controlled proposal",
     parameters: Type.Object({ proposalId: Type.Number() }),
     async execute(_id, params: DaoExecuteParams) {
-      return toolResult(await handleDaoExecute(params.proposalId, repository));
+      return toolResult(
+        await handleDaoExecute(
+          {
+            adapter: createPiHostAdapter(pi),
+            workDir: process.cwd(),
+            deliberationMode: "auto",
+            controlToolName: "dao_check",
+            repository,
+          },
+          params.proposalId,
+        ),
+      );
     },
   });
 

@@ -2,6 +2,7 @@ import { generateDeliveryPlan } from "../../delivery/plans.js";
 import { dispatchProposalEvent } from "../../governance/proposal.utils.js";
 import type { ClockPort } from "../../ports/clock.js";
 import type { DaoStateRepositoryPort } from "../../ports/repository.js";
+import type { ExecutionWorkspacePort } from "../../ports/workspace.js";
 import type { AuditEntry, DeliveryPlan, ExecutionSnapshot, Proposal } from "../../types/index.js";
 
 export type ExecuteProposalResult =
@@ -13,6 +14,8 @@ export class ExecuteProposalUseCase {
     private readonly dependencies: {
       repository: DaoStateRepositoryPort;
       clock: ClockPort;
+      /** Optional isolated execution workspace (e.g. git worktree). */
+      workspace?: ExecutionWorkspacePort;
     },
   ) {}
 
@@ -32,10 +35,24 @@ export class ExecuteProposalUseCase {
     const now = this.dependencies.clock.now();
     const plan = state.deliveryPlans[proposal.id] ?? generateDeliveryPlan(proposal, { now });
     state.deliveryPlans[proposal.id] = plan;
+
+    // Provision the isolated workspace (if configured) BEFORE any state
+    // transition: a failed preparation must leave the proposal controlled.
+    let executionBranch: string | undefined;
+    let workspacePath: string | null | undefined;
+    if (this.dependencies.workspace) {
+      const prepared = await this.dependencies.workspace.prepare(proposal);
+      if (!prepared.ok) {
+        return { ok: false, error: `Execution workspace preparation failed: ${prepared.error}` };
+      }
+      executionBranch = prepared.branch;
+      workspacePath = prepared.path;
+    }
+
     const snapshot: ExecutionSnapshot = {
       proposalId: proposal.id,
       timestamp: now,
-      branch: plan.branchStrategy,
+      branch: executionBranch ?? plan.branchStrategy,
       commitSha: "unknown",
       filesChanged: [],
       stateSnapshot: JSON.stringify({ agents: state.agents.length, proposals: state.proposals.length }),
@@ -44,7 +61,7 @@ export class ExecuteProposalUseCase {
 
     const transition = dispatchProposalEvent(proposal, { type: "EXECUTE_SUCCESS" }, { clock: this.dependencies.clock });
     if (!transition.ok) return transition;
-    proposal.executionResult = `Executed with delivery plan: ${plan.branchStrategy}`;
+    proposal.executionResult = `Executed with delivery plan: ${executionBranch ?? plan.branchStrategy}`;
     const audit: AuditEntry = {
       id: state.nextAuditId++,
       timestamp: this.dependencies.clock.now(),
@@ -52,7 +69,11 @@ export class ExecuteProposalUseCase {
       layer: "delivery",
       action: command.auditAction ?? "proposal_executed",
       actor: command.actor,
-      details: command.auditDetails ?? `Executed #${proposal.id}`,
+      details:
+        command.auditDetails ??
+        (workspacePath
+          ? `Executed #${proposal.id} in isolation on ${executionBranch} (${workspacePath})`
+          : `Executed #${proposal.id}`),
     };
     state.auditLog.push(audit);
     await this.dependencies.repository.persist();

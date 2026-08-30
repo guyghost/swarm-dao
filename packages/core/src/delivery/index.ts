@@ -4,4 +4,5 @@ export * from "./artefacts.js";
 export * from "./dependencies.js";
 export * from "./dry-run.js";
 export * from "./execution.js";
+export * from "./execution-isolation.js";
 export * from "./plans.js";

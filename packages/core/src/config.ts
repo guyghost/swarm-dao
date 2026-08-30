@@ -9,6 +9,15 @@ import { redactSensitiveFields } from "./utils/security.js";
 
 export type ActivationMode = "opt-in" | "suggest" | "enforce";
 
+export interface ExecutionConfig {
+  /** "none" (default) or "worktree": execute each proposal in an isolated git worktree. */
+  isolation?: "none" | "worktree";
+  /** Directory (relative to the repository root) holding execution worktrees. */
+  worktreeRoot?: string;
+  /** Base branch for execution branches; omit to let git use HEAD. */
+  baseBranch?: string;
+}
+
 export interface ProjectConfig {
   mode: ActivationMode;
   agentOverrides?: Record<string, Partial<DAOAgent>>;
@@ -16,6 +25,7 @@ export interface ProjectConfig {
   github?: { enabled: boolean; owner?: string; repo?: string };
   gitlab?: { enabled: boolean; projectId?: string };
   bitbucket?: { enabled: boolean; workspace?: string; repo?: string };
+  execution?: ExecutionConfig;
 }
 
 export const DEFAULT_PROJECT_CONFIG: ProjectConfig = {

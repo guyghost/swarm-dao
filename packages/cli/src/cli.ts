@@ -4,9 +4,11 @@
 // Swarm DAO — Standalone CLI
 // ============================================================
 
+import { exec } from "node:child_process";
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import type { ProposalType, VotePosition } from "@guyghost/swarm-dao-core";
+import { promisify } from "node:util";
+import type { CommandRunnerPort, ProposalType, VotePosition } from "@guyghost/swarm-dao-core";
 import {
   ATTENTION_SOURCES,
   type AttentionSource,
@@ -14,6 +16,7 @@ import {
   CreateProposalUseCase,
   collectAttention,
   configureGitHub,
+  createExecutionWorkspace,
   FileDaoStateRepository,
   FsAttentionStore,
   formatAttention,
@@ -29,6 +32,7 @@ import {
   initializeAgents,
   isGitHubEnabled,
   listProposals,
+  loadConfig,
   PROPOSAL_TYPES,
   recordAudit,
   ShipProposalUseCase,
@@ -45,6 +49,30 @@ function err(msg: string): never {
 }
 function info(msg: string): void {
   process.stdout.write(`${msg}\n`);
+}
+
+const execAsync = promisify(exec);
+
+/** CommandRunnerPort backed by the local shell, for git workspace effects. */
+function cliRunner(): CommandRunnerPort {
+  return {
+    exec: async (command, options) => {
+      try {
+        const { stdout, stderr } = await execAsync(command, {
+          cwd: options?.cwd,
+          timeout: options?.timeout,
+        });
+        return { stdout, stderr, exitCode: 0 };
+      } catch (error) {
+        const failure = error as { stdout?: string; stderr?: string; message?: string; code?: number };
+        return {
+          stdout: failure.stdout ?? "",
+          stderr: failure.stderr ?? failure.message ?? "command failed",
+          exitCode: failure.code ?? 1,
+        };
+      }
+    },
+  };
 }
 
 function parseFlags(args: string[]): { flags: Record<string, string | true>; positional: string[] } {
@@ -400,9 +428,12 @@ async function cmdShip(cwd: string, positional: string[], flags: Record<string, 
   const force = flags.force === true;
 
   const repository = await ensureLoaded(cwd);
+  const projectConfig = await loadConfig(getDaoRoot(cwd));
+  const workspace = createExecutionWorkspace(projectConfig.execution, cliRunner(), cwd);
   const result = await new ShipProposalUseCase({
     repository,
     clock: systemClock,
+    workspace,
   }).execute({ proposalId: id, actor: "cli", cascade, force });
   if (!result.ok) {
     if (result.error.includes("unexecuted dependencies found")) {
