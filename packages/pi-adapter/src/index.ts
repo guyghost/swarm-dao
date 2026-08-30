@@ -1098,6 +1098,80 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
     return Number.isNaN(n) ? undefined : n;
   };
 
+  /** Greedy word-wrap of a single line to `maxWidth`, hard-splitting unbreakable runs. */
+  const wrapDaoLine = (line: string, maxWidth: number): string[] => {
+    if (line.length <= maxWidth) return [line];
+    const words = line.split(/\s+/);
+    const out: string[] = [];
+    let current = "";
+    for (const word of words) {
+      if (word.length > maxWidth) {
+        if (current) {
+          out.push(current);
+          current = "";
+        }
+        for (let i = 0; i < word.length; i += maxWidth) out.push(word.slice(i, i + maxWidth));
+        continue;
+      }
+      if (current.length === 0) current = word;
+      else if (current.length + 1 + word.length <= maxWidth) current += ` ${word}`;
+      else {
+        out.push(current);
+        current = word;
+      }
+    }
+    if (current) out.push(current);
+    return out;
+  };
+
+  /** Frame the command output in a bordered panel with a close hint. */
+  const frameDaoPanel = (title: string, body: string, width: number): string[] => {
+    const inner = Math.max(20, Math.min(width - 4, 100));
+    const header = ` ${title} `;
+    const lines: string[] = [`┌${header}${"─".repeat(Math.max(0, inner + 2 - header.length))}┐`];
+    for (const raw of body.split("\n")) {
+      for (const wrapped of wrapDaoLine(raw, inner)) {
+        lines.push(`│ ${wrapped.padEnd(inner)} │`);
+      }
+    }
+    const hint = " Press Enter or Esc to close ";
+    lines.push(`│${" ".repeat(inner + 2)}│`);
+    lines.push(`│ ${hint.trim().padEnd(inner)} │`);
+    lines.push(`└${"─".repeat(inner + 2)}┘`);
+    return lines;
+  };
+
+  /**
+   * Display `/dao` command output. Pi discards handler return values, so the
+   * output must be rendered explicitly. Interactive sessions get a focused
+   * bordered panel (Enter/Esc closes). Headless hosts (print mode) expose a
+   * `ui.custom` that resolves without ever invoking the factory — that signal
+   * selects the terminal fallback, since process writes are the only channel
+   * those hosts leave visible.
+   */
+  const displayDaoOutput = async (ctx: ExtensionCommandContext | undefined, title: string, body: string) => {
+    const ui = ctx?.ui;
+    if (ui && typeof ui.custom === "function") {
+      let factoryInvoked = false;
+      await ui.custom((_tui, _theme, _keybindings, done) => {
+        factoryInvoked = true;
+        return {
+          render: (width: number) => frameDaoPanel(title, body, width),
+          invalidate: () => {},
+          handleInput: (data: string) => {
+            if (data === "\r" || data === "\n" || data === "\x1b") done(undefined);
+          },
+        };
+      });
+      if (factoryInvoked) return;
+      // ui.custom was a silent no-op (headless host) — fall through to stdout.
+    } else if (ui && typeof ui.notify === "function") {
+      ui.notify(`${title}\n\n${body}`, "info");
+      return;
+    }
+    process.stdout.write(`${body}\n`);
+  };
+
   // Subcommands offered by argument completion: inline-handled built-ins
   // plus every id/alias the Pi projection of the command registry accepts.
   const daoSubcommands = [
@@ -1125,62 +1199,67 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
       const matches = daoSubcommands.filter((s) => s.startsWith(typed));
       return matches.length > 0 ? matches.map((value) => ({ value, label: value })) : null;
     },
-    handler: async (args, _ctx) => {
-      const raw = args.trim();
-      const tokens = raw.split(/\s+/).filter(Boolean);
-      const subcommand = (tokens[0] ?? "").toLowerCase();
-      const rest = tokens.slice(1);
-
-      // `/dao help`
-      if (subcommand === "help" || subcommand === "-h" || subcommand === "--help") {
-        return buildDaoCommandHelp({ host: "pi" });
-      }
-
-      // `/dao setup` / `/dao init` (works even before storage exists)
-      if (subcommand === "setup" || subcommand === "init") {
-        return await runDaoSetup();
-      }
-
-      // Everything else needs initialized state.
-      let state: ReturnType<typeof getState>;
-      try {
-        state = getState();
-      } catch {
-        return PI_ONBOARDING_MESSAGE;
-      }
-      if (!state.initialized) return PI_ONBOARDING_MESSAGE;
-
-      // `/dao` or `/dao status` → dashboard
-      if (subcommand === "" || subcommand === "status" || subcommand === "dashboard") {
-        return renderDashboard(state);
-      }
-
-      // Read-only commands the slash command fulfils inline (arguments preserved).
-      if (subcommand === "list") return renderProposalList(state, parseListFilters(rest));
-      if (subcommand === "agents") return renderAgentList(state);
-      if (subcommand === "audit") {
-        const proposalId = parseProposalId(rest[0]);
-        if (rest[0] !== undefined && proposalId === undefined) {
-          return `Invalid proposal ID: \`${rest[0]}\`.\n\nUsage: \`/dao audit [proposalId]\``;
-        }
-        const entries =
-          proposalId !== undefined ? getAllAuditLog().filter((e) => e.proposalId === proposalId) : getAllAuditLog();
-        return formatAuditTrail(entries, proposalId);
-      }
-
-      // Registry resolution for the rest.
-      const cmd = resolveDaoCommand(subcommand, "pi");
-      if (!cmd) return suggestDaoCommand(subcommand, "pi");
-
-      // Known command → route to its Pi tool (slash commands can't call tools).
-      // Pi registers the quality-control tool as `dao_check`, so map the registry's
-      // canonical `dao_control` (and the `check` alias) onto it.
-      if (cmd.tool) {
-        const tool = cmd.tool === "dao_control" ? "dao_check" : cmd.tool;
-        const argHint = cmd.args ? ` — e.g. \`${tool} ${cmd.args}\`` : "";
-        return `${cmd.summary}.\n\n→ Run the \`${tool}\` tool${argHint}.\n\n(\`/dao ${cmd.id}\` is the discovery alias; Pi executes it via the \`${tool}\` tool.)`;
-      }
-      return suggestDaoCommand(subcommand, "pi");
+    handler: async (args, ctx) => {
+      await displayDaoOutput(ctx, "Swarm DAO", await runDaoCommand(args));
     },
   });
+
+  /** Pure dispatcher for the `/dao` command surface — returns the output text. */
+  const runDaoCommand = async (args: string): Promise<string> => {
+    const raw = args.trim();
+    const tokens = raw.split(/\s+/).filter(Boolean);
+    const subcommand = (tokens[0] ?? "").toLowerCase();
+    const rest = tokens.slice(1);
+
+    // `/dao help`
+    if (subcommand === "help" || subcommand === "-h" || subcommand === "--help") {
+      return buildDaoCommandHelp({ host: "pi" });
+    }
+
+    // `/dao setup` / `/dao init` (works even before storage exists)
+    if (subcommand === "setup" || subcommand === "init") {
+      return await runDaoSetup();
+    }
+
+    // Everything else needs initialized state.
+    let state: ReturnType<typeof getState>;
+    try {
+      state = getState();
+    } catch {
+      return PI_ONBOARDING_MESSAGE;
+    }
+    if (!state.initialized) return PI_ONBOARDING_MESSAGE;
+
+    // `/dao` or `/dao status` → dashboard
+    if (subcommand === "" || subcommand === "status" || subcommand === "dashboard") {
+      return renderDashboard(state);
+    }
+
+    // Read-only commands the slash command fulfils inline (arguments preserved).
+    if (subcommand === "list") return renderProposalList(state, parseListFilters(rest));
+    if (subcommand === "agents") return renderAgentList(state);
+    if (subcommand === "audit") {
+      const proposalId = parseProposalId(rest[0]);
+      if (rest[0] !== undefined && proposalId === undefined) {
+        return `Invalid proposal ID: \`${rest[0]}\`.\n\nUsage: \`/dao audit [proposalId]\``;
+      }
+      const entries =
+        proposalId !== undefined ? getAllAuditLog().filter((e) => e.proposalId === proposalId) : getAllAuditLog();
+      return formatAuditTrail(entries, proposalId);
+    }
+
+    // Registry resolution for the rest.
+    const cmd = resolveDaoCommand(subcommand, "pi");
+    if (!cmd) return suggestDaoCommand(subcommand, "pi");
+
+    // Known command → route to its Pi tool (slash commands can't call tools).
+    // Pi registers the quality-control tool as `dao_check`, so map the registry's
+    // canonical `dao_control` (and the `check` alias) onto it.
+    if (cmd.tool) {
+      const tool = cmd.tool === "dao_control" ? "dao_check" : cmd.tool;
+      const argHint = cmd.args ? ` — e.g. \`${tool} ${cmd.args}\`` : "";
+      return `${cmd.summary}.\n\n→ Run the \`${tool}\` tool${argHint}.\n\n(\`/dao ${cmd.id}\` is the discovery alias; Pi executes it via the \`${tool}\` tool.)`;
+    }
+    return suggestDaoCommand(subcommand, "pi");
+  };
 }
