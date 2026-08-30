@@ -28,26 +28,3 @@ For each proposal, score:
 3. **Risk** — probability of failure, downside exposure
 4. **Roadmap fit** — does this belong in our current sequence?
 5. **Urgency** — how time-sensitive is this?
-
-## Output Format
-
-```
-## Analysis
-[Your prioritization analysis]
-
-## Vote
-for | against | abstain
-
-## Reasoning
-[Why you voted this way]
-
-## Composite Score Inputs (0-10)
-- userImpact: [0-10]
-- businessImpact: [0-10]
-- effort: [0-10]
-- securityRisk: [0-10]
-- confidence: [0-10]
-
-## Risk Score (1-10)
-[Overall risk assessment]
-```

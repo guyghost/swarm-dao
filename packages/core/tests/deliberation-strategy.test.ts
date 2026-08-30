@@ -1,16 +1,16 @@
 // Deliberation strategy: the sequential pipeline must produce the same
 // deterministic outcome (tally decides) while chaining analyses forward —
 // and never votes.
-import { describe, test, expect } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
   CreateProposalUseCase,
+  createInitialState,
   DEFAULT_AGENTS,
   DeliberateProposalUseCase,
   InitializeDaoUseCase,
-  createInitialState,
   systemClock,
 } from "@guyghost/swarm-dao-core";
 import { InMemoryDaoStateRepository } from "../src/adapters/persistence/in-memory-dao-state.repository.js";
@@ -117,10 +117,7 @@ describe("deliberation strategy", () => {
     const root = await fs.mkdtemp(path.join(tmpdir(), "swarm-dao-seqcfg-"));
     const daoRoot = path.join(root, ".dao");
     await fs.mkdir(daoRoot, { recursive: true });
-    await fs.writeFile(
-      path.join(daoRoot, "config.json"),
-      JSON.stringify({ deliberation: { strategy: "sequential" } }),
-    );
+    await fs.writeFile(path.join(daoRoot, "config.json"), JSON.stringify({ deliberation: { strategy: "sequential" } }));
     try {
       const repository = new InMemoryDaoStateRepository(createInitialState(daoRoot));
       await new InitializeDaoUseCase({ repository }).execute({ agents: DEFAULT_AGENTS });

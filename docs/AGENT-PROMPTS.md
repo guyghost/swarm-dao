@@ -4,12 +4,19 @@
 
 ## Prompt Structure
 
-Each agent has a **system prompt** that defines:
-- Its mission and role
-- Its analysis framework
-- Its output format (Vote, Score, Reasoning)
+Every agent's system prompt is **composed from layers** (the swarm-forge
+constitution pattern — layers add up, the shared law is never replaceable):
 
-Prompts live in `agents/<agent-id>.md` with YAML frontmatter.
+1. **Shared charter** (`AGENT_CHARTER`, defined once in
+   `packages/core/src/governance/charter.ts`): deliberation conduct plus the
+   exact output format the tally parses (`## Analysis` / `## Vote` /
+   `## Reasoning` / scores). Binding on every agent.
+2. **Role layer**: the agent's mission and analysis framework — the inline
+   default, or the markdown body of its `dao-<id>.md` (the body REPLACES the
+   default role prompt, consistent with the frontmatter overriding
+   name/role/model/weight).
+3. **Project charter addendum** (`.dao/agents/charter.md`): appended to
+   EVERY agent — per-project law, additive only.
 
 ## Default Prompts
 
@@ -24,6 +31,31 @@ Prompts live in `agents/<agent-id>.md` with YAML frontmatter.
 | Delivery Agent | `agents/dao-delivery.md` | Execution |
 
 ## Customizing Prompts
+
+### Via markdown (per project or per repo)
+
+Place `dao-<id>.md` files in `.dao/agents/` (per project) or `agents/`
+(the repo's shared definitions). Frontmatter fields override agent
+metadata; the markdown body replaces the role prompt (the charter is always
+prepended and cannot be replaced):
+
+```markdown
+---
+id: strategist
+weight: 5
+---
+
+## Mission
+
+Evaluate proposals with a bias toward reversible changes.
+
+## Analysis Framework
+...
+```
+
+A `charter.md` next to the agent files is appended to every agent as a
+`## Project Charter Addendum` — per-project law such as "this project values
+shipping small reversible changes".
 
 ### Via config (per project)
 

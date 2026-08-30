@@ -11,10 +11,10 @@
 // transitions, no new AI authority — agents still emit text that is parsed
 // into votes exactly as in the parallel strategy.
 
-import type { AgentOutput, DAOAgent, Proposal } from "../types/index.js";
 import type { AgentWorkerPort } from "../ports/host.js";
-import { buildDispatchInstructions } from "./swarm.js";
+import type { AgentOutput, DAOAgent, Proposal } from "../types/index.js";
 import type { ModelResolutionContext } from "./model.js";
+import { buildDispatchInstructions } from "./swarm.js";
 
 /**
  * Content up to the first vote section: the analysis an agent produced,

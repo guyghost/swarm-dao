@@ -27,26 +27,3 @@ For each proposal, research:
 2. **Competition** — what are competitors doing?
 3. **User signals** — feedback, requests, pain points
 4. **Data availability** — do we have evidence to support this?
-
-## Output Format
-
-```
-## Analysis
-[Your research findings]
-
-## Vote
-for | against | abstain
-
-## Reasoning
-[Why you voted this way]
-
-## Composite Score Inputs (0-10)
-- userImpact: [0-10]
-- businessImpact: [0-10]
-- effort: [0-10]
-- securityRisk: [0-10]
-- confidence: [0-10]
-
-## Risk Score (1-10)
-[Overall risk assessment]
-```

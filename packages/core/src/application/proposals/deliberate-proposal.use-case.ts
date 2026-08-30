@@ -1,9 +1,9 @@
 import { dispatchProposalEvent } from "../../governance/proposal.utils.js";
 import { calculateCompositeScore } from "../../governance/scoring.js";
 import { parseVoteFromOutput, tallyVotes } from "../../governance/voting.js";
+import { dispatchSequentialSwarm } from "../../intelligence/sequential.js";
 import type { SwarmProgressUpdate } from "../../intelligence/swarm.js";
 import { createDispatchModelContext, dispatchSwarm } from "../../intelligence/swarm.js";
-import { dispatchSequentialSwarm } from "../../intelligence/sequential.js";
 import { synthesize } from "../../intelligence/synthesis.js";
 import type { ClockPort } from "../../ports/clock.js";
 import type { AgentWorkerPort } from "../../ports/host.js";

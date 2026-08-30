@@ -1,15 +1,12 @@
-import { describe, test, expect } from "bun:test";
-import {
-  buildPriorAnalysesSection,
-  dispatchSequentialSwarm,
-  extractAnalysis,
-} from "../src/intelligence/sequential.js";
+import { describe, expect, test } from "bun:test";
 import type { AgentOutput, DAOAgent, Proposal } from "@guyghost/swarm-dao-core";
+import { buildPriorAnalysesSection, dispatchSequentialSwarm, extractAnalysis } from "../src/intelligence/sequential.js";
 import { createDispatchModelContext } from "../src/intelligence/swarm.js";
-import { createInitialState } from "../src/types/index.js";
 import type { AgentWorkerPort } from "../src/ports/host.js";
+import { createInitialState } from "../src/types/index.js";
 
-const AGENT_CONTENT = "## Analysis\nThe caching layer needs invalidation keys.\n\n## Vote\nfor\n\n## Reasoning\nLow risk.";
+const AGENT_CONTENT =
+  "## Analysis\nThe caching layer needs invalidation keys.\n\n## Vote\nfor\n\n## Reasoning\nLow risk.";
 
 describe("extractAnalysis", () => {
   test("keeps everything before the vote section and drops vote/reasoning", () => {
