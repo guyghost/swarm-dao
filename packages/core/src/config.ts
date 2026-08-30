@@ -4,6 +4,7 @@
 
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { composeSystemPrompt } from "./governance/charter.js";
 import type { DAOAgent, DAOConfig } from "./types/index.js";
 import { redactSensitiveFields } from "./utils/security.js";
 
@@ -140,7 +141,14 @@ export function filterEnabledAgents(agents: DAOAgent[], config: ProjectConfig): 
     })
     .map((agent) => {
       const override = config.agentOverrides?.[agent.id];
-      return override ? { ...agent, ...override } : agent;
+      if (!override) return agent;
+      // A configured systemPrompt becomes the agent's ROLE — the shared
+      // charter (vote format the tally parses) is still prepended.
+      const systemPrompt =
+        override.systemPrompt && override.systemPrompt.trim().length > 0
+          ? composeSystemPrompt(override.systemPrompt)
+          : agent.systemPrompt;
+      return { ...agent, ...override, systemPrompt };
     });
 }
 

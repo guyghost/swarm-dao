@@ -19,9 +19,12 @@ import { buildDispatchInstructions } from "./swarm.js";
 /**
  * Content up to the first vote section: the analysis an agent produced,
  * stripped of its vote and reasoning so later voters stay independent.
+ * Accepts exactly the heading variants the tally parser accepts
+ * (VOTE_PATTERN in governance/voting.ts) — a vote the tally can parse must
+ * never leak downstream.
  */
 export function extractAnalysis(content: string): string {
-  const voteIndex = content.indexOf("## Vote");
+  const voteIndex = content.search(/##\s*Vote\s*\n/i);
   const analysis = voteIndex === -1 ? content : content.slice(0, voteIndex);
   return analysis.trim();
 }

@@ -20,6 +20,13 @@ describe("extractAnalysis", () => {
   test("handles empty content", () => {
     expect(extractAnalysis("")).toBe("");
   });
+
+  test("accepts exactly the heading variants the tally parser accepts", () => {
+    for (const variant of ["## vote\nfor", "##Vote\nfor", "##   Vote\nfor", "## VOTE\nagainst"]) {
+      const content = `## Analysis\nKeep this.\n\n${variant}\nsecret reasoning`;
+      expect(extractAnalysis(content)).toBe("## Analysis\nKeep this.");
+    }
+  });
 });
 
 describe("buildPriorAnalysesSection", () => {

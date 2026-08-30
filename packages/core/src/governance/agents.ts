@@ -300,8 +300,10 @@ export async function loadAgentDefinitionsFromMarkdown(
   try {
     entries = await fs.readdir(absDir);
   } catch {
-    // Directory missing/unreadable: behave exactly as before and do NOT cache.
-    return withDefaultModel(baseAgents);
+    // Directory missing/unreadable: do NOT cache, but still compose — a
+    // missing directory must yield the same charter-backed prompts as an
+    // existing empty one.
+    return withComposedPrompts(withDefaultModel(baseAgents), null);
   }
 
   const daoEntries = entries.filter((entry) => entry.startsWith("dao-") && entry.endsWith(".md"));
@@ -357,7 +359,13 @@ export async function loadAgentDefinitions(daoRoot: string, projectConfig?: Proj
   };
   for (const agentsDir of candidateDirs) {
     const merged = await readMarkdownLayers(agentsDir, layers);
-    if (merged) layers = merged;
+    // Closest layer wins: the first candidate directory holding agent
+    // definitions or a charter fully shadows the further ones, so project
+    // overrides (.dao/agents) are never replaced by repo defaults (agents/).
+    if (merged) {
+      layers = merged;
+      break;
+    }
   }
 
   const agents = withComposedPrompts(layers.agents, layers.projectCharter);
@@ -366,9 +374,8 @@ export async function loadAgentDefinitions(daoRoot: string, projectConfig?: Proj
 
 /** Apply the charter + project layers to role-level agents (composition exit). */
 function withComposedPrompts(agents: DAOAgent[], projectCharter: string | null): DAOAgent[] {
-  // Guard: prompts that are already composed (e.g. callers passing agents
-  // obtained from initializeAgents) must not be re-composed.
-  if (agents.some((agent) => agent.systemPrompt.startsWith(AGENT_CHARTER))) return agents;
+  // Per-agent: mixed lists (some prompts already composed, some not) compose
+  // exactly the ones that need it — composeSystemPrompt is idempotent.
   return agents.map((agent) => ({
     ...agent,
     systemPrompt: composeSystemPrompt(agent.systemPrompt, { projectCharter }),

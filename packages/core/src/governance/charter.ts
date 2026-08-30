@@ -56,6 +56,10 @@ export interface PromptLayers {
  * replace — the shared charter or the role mission.
  */
 export function composeSystemPrompt(rolePrompt: string, layers: PromptLayers = {}): string {
+  // Idempotent: an already-composed prompt (e.g. re-composition across the
+  // candidate-dir chain or a user-supplied prompt that embeds the charter)
+  // passes through unchanged rather than nesting a second charter.
+  if (rolePrompt.startsWith(AGENT_CHARTER)) return rolePrompt;
   const trimmedRole = rolePrompt.trim();
   const parts = [AGENT_CHARTER, trimmedRole];
   const projectCharter = layers.projectCharter?.trim();

@@ -6,6 +6,7 @@ import {
   __resetAgentDefinitionCache,
   getDefaultAgentPrompts,
   initializeAgents,
+  loadAgentDefinitions,
   loadAgentDefinitionsFromMarkdown,
 } from "../src/governance/agents.js";
 import { AGENT_CHARTER, composeSystemPrompt } from "../src/governance/charter.js";
@@ -53,6 +54,86 @@ describe("layered default agents", () => {
     const strategist = agents.find((agent) => agent.id === "strategist");
     expect(strategist?.systemPrompt).toContain("Product Strategist");
     expect(strategist?.systemPrompt.match(/## Vote/g)?.length).toBe(1);
+  });
+
+  test("composeSystemPrompt is idempotent (no nested charters)", () => {
+    const once = composeSystemPrompt("ROLE TEXT");
+    expect(composeSystemPrompt(once)).toBe(once);
+    expect(composeSystemPrompt(once, { projectCharter: "MORE LAW" })).toBe(once);
+  });
+
+  test("a missing agents directory still yields charter-backed prompts", async () => {
+    const agents = await loadAgentDefinitionsFromMarkdown("/nonexistent/agents-dir");
+    expect(agents.length).toBeGreaterThan(0);
+    for (const agent of agents) {
+      expect(agent.systemPrompt.startsWith(AGENT_CHARTER)).toBe(true);
+    }
+  });
+
+  test("mixed base lists compose per agent, not all-or-nothing", async () => {
+    const dir = await fs.mkdtemp(path.join(tmpdir(), "swarm-dao-mixed-"));
+    try {
+      await fs.writeFile(path.join(dir, "dao-critic.md"), "---\nid: critic\n---\n\nMixed critic role.\n");
+      __resetAgentDefinitionCache();
+      // A fully composed base plus one markdown override: every agent ends
+      // up charter-backed, and only the overridden agent changes role.
+      const composed = initializeAgents();
+      const agents = await loadAgentDefinitionsFromMarkdown(dir, composed);
+      for (const agent of agents) {
+        expect(agent.systemPrompt.startsWith(AGENT_CHARTER)).toBe(true);
+      }
+      const critic = agents.find((agent) => agent.id === "critic");
+      expect(critic?.systemPrompt).toContain("Mixed critic role.");
+      const strategist = agents.find((agent) => agent.id === "strategist");
+      expect(strategist?.systemPrompt).toBe(composed.find((agent) => agent.id === "strategist")?.systemPrompt);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+      __resetAgentDefinitionCache();
+    }
+  });
+
+  test("closest agent directory wins and shadows further ones", async () => {
+    const root = await fs.mkdtemp(path.join(tmpdir(), "swarm-dao-prec-"));
+    try {
+      const project = path.join(root, "project");
+      const daoRoot = path.join(project, ".dao");
+      await fs.mkdir(path.join(daoRoot, "agents"), { recursive: true });
+      await fs.mkdir(path.join(project, "agents"), { recursive: true });
+      // Project layer (closest): a weight override for the critic.
+      await fs.writeFile(
+        path.join(daoRoot, "agents", "dao-critic.md"),
+        "---\nid: critic\nweight: 9\n---\n\nProject critic role.\n",
+      );
+      // Repo layer (further): a different strategist role.
+      await fs.writeFile(
+        path.join(project, "agents", "dao-strategist.md"),
+        "---\nid: strategist\nweight: 1\n---\n\nRepo strategist role.\n",
+      );
+      __resetAgentDefinitionCache();
+      const agents = await loadAgentDefinitions(daoRoot);
+      const critic = agents.find((agent) => agent.id === "critic");
+      const strategist = agents.find((agent) => agent.id === "strategist");
+      expect(critic?.weight).toBe(9);
+      expect(critic?.systemPrompt).toContain("Project critic role.");
+      // The further directory is shadowed entirely.
+      expect(strategist?.weight).not.toBe(1);
+      expect(strategist?.systemPrompt).not.toContain("Repo strategist role.");
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+      __resetAgentDefinitionCache();
+    }
+  });
+
+  test("configured systemPrompt overrides keep the charter", async () => {
+    const { filterEnabledAgents } = await import("../src/config.js");
+    const agents = initializeAgents();
+    const filtered = filterEnabledAgents(agents, {
+      mode: "opt-in",
+      agentOverrides: { strategist: { systemPrompt: "You are a B2B SaaS strategist." } },
+    });
+    const strategist = filtered.find((agent) => agent.id === "strategist");
+    expect(strategist?.systemPrompt.startsWith(AGENT_CHARTER)).toBe(true);
+    expect(strategist?.systemPrompt).toContain("You are a B2B SaaS strategist.");
   });
 
   test("getDefaultAgentPrompts returns composed prompts", () => {
