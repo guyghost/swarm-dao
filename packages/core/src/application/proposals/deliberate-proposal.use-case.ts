@@ -3,6 +3,7 @@ import { calculateCompositeScore } from "../../governance/scoring.js";
 import { parseVoteFromOutput, tallyVotes } from "../../governance/voting.js";
 import type { SwarmProgressUpdate } from "../../intelligence/swarm.js";
 import { createDispatchModelContext, dispatchSwarm } from "../../intelligence/swarm.js";
+import { dispatchSequentialSwarm } from "../../intelligence/sequential.js";
 import { synthesize } from "../../intelligence/synthesis.js";
 import type { ClockPort } from "../../ports/clock.js";
 import type { AgentWorkerPort } from "../../ports/host.js";
@@ -28,6 +29,10 @@ export class DeliberateProposalUseCase {
     parentSessionModel?: string;
     hostDefaultModel?: string;
     onUpdate?: (update: SwarmProgressUpdate) => void;
+    /** Deliberation orchestration; defaults to the parallel swarm. */
+    strategy?: "parallel" | "sequential";
+    /** Sequential only: analysis characters forwarded per prior agent. */
+    charsPerAgent?: number;
   }): Promise<DeliberateProposalResult> {
     const state = this.dependencies.repository.get();
     if (!state.initialized) return { ok: false, error: "DAO not initialized. Run dao_setup first." };
@@ -43,14 +48,20 @@ export class DeliberateProposalUseCase {
       parentSessionModel: command.parentSessionModel,
       hostDefaultModel: command.hostDefaultModel,
     });
-    const outputs = await dispatchSwarm(
-      proposal,
-      agents,
-      this.dependencies.worker,
-      state.config.maxConcurrent,
-      modelContext,
-      command.onUpdate,
-    );
+    const outputs =
+      command.strategy === "sequential"
+        ? await dispatchSequentialSwarm(proposal, agents, this.dependencies.worker, modelContext, {
+            onUpdate: command.onUpdate,
+            charsPerAgent: command.charsPerAgent,
+          })
+        : await dispatchSwarm(
+            proposal,
+            agents,
+            this.dependencies.worker,
+            state.config.maxConcurrent,
+            modelContext,
+            command.onUpdate,
+          );
     const agentById = new Map(agents.map((agent) => [agent.id, agent]));
     const votes = outputs
       .filter((output) => output.content)

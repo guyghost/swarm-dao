@@ -128,7 +128,10 @@ export async function handleDaoDeliberate(ctx: DaoToolContext, proposalId: numbe
       hostDefaultModel: ctx.hostDefaultModel,
     });
     const instructions = buildDispatchInstructions(proposal, agents, modelContext);
-    const plan = formatDispatchPlan(proposal, instructions);
+    const plan = formatDispatchPlan(proposal, instructions, {
+      strategy: projectConfig.deliberation?.strategy,
+      charsPerAgent: projectConfig.deliberation?.charsPerAgent,
+    });
     const parentModel = ctx.getSessionModel?.() ?? ctx.hostDefaultModel;
     const parentNote = parentModel ? `\n\n**Parent session model:** ${parentModel}` : "";
     return `${plan}${parentNote}`;
@@ -142,6 +145,8 @@ export async function handleDaoDeliberate(ctx: DaoToolContext, proposalId: numbe
   const result = await useCase.execute({
     proposalId,
     agents,
+    strategy: projectConfig.deliberation?.strategy,
+    charsPerAgent: projectConfig.deliberation?.charsPerAgent,
     parentSessionModel: ctx.getSessionModel?.(),
     hostDefaultModel: ctx.hostDefaultModel,
     onUpdate: (update) => ctx.onDeliberationProgress?.(update),

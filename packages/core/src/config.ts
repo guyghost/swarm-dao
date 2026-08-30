@@ -18,6 +18,14 @@ export interface ExecutionConfig {
   baseBranch?: string;
 }
 
+export interface DeliberationConfig {
+  /** "parallel" (default): all agents at once. "sequential": pipeline —
+   *  agents run in order, each receiving the prior analyses (never votes). */
+  strategy?: "parallel" | "sequential";
+  /** Sequential only: max analysis characters forwarded per prior agent. */
+  charsPerAgent?: number;
+}
+
 export interface ProjectConfig {
   mode: ActivationMode;
   agentOverrides?: Record<string, Partial<DAOAgent>>;
@@ -26,6 +34,7 @@ export interface ProjectConfig {
   gitlab?: { enabled: boolean; projectId?: string };
   bitbucket?: { enabled: boolean; workspace?: string; repo?: string };
   execution?: ExecutionConfig;
+  deliberation?: DeliberationConfig;
 }
 
 export const DEFAULT_PROJECT_CONFIG: ProjectConfig = {
