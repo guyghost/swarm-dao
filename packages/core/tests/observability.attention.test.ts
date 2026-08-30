@@ -25,11 +25,17 @@ function memoryStore(
 
 describe("attention: human-gate classification", () => {
   test("graph-engineering awaitingApproval is a human gate carrying the model hash", () => {
-    const item = classifyAttention("graph-engineering", snapshot("awaitingApproval", { modelHash: "abc123" }));
+    const item = classifyAttention(
+      "graph-engineering",
+      snapshot("awaitingApproval", { modelHash: "abc123" }, "run-42"),
+    );
     expect(item).not.toBeNull();
     expect(item?.state).toBe("awaitingApproval");
     expect(item?.detail).toBe("abc123");
     expect(item?.action).toContain("model");
+    // The suggested command targets the actual run, not a placeholder.
+    expect(item?.command).toContain("--run-id run-42");
+    expect(item?.command).not.toContain("<id>");
   });
 
   test("graph-engineering retrying awaits a human retry or cancellation", () => {
@@ -51,9 +57,10 @@ describe("attention: human-gate classification", () => {
   });
 
   test("improvement-loop adjusting carries the reference hash", () => {
-    const item = classifyAttention("improvement-loop", snapshot("adjusting", { referenceHash: "ref9" }));
+    const item = classifyAttention("improvement-loop", snapshot("adjusting", { referenceHash: "ref9" }, "cyc-7"));
     expect(item).not.toBeNull();
     expect(item?.detail).toBe("ref9");
+    expect(item?.command).toContain("--cycle-id cyc-7");
   });
 
   test("improvement-loop retrying is a human gate; working states are not", () => {

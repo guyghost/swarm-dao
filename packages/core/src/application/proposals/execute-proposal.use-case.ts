@@ -9,6 +9,20 @@ export type ExecuteProposalResult =
   | { ok: true; proposal: Proposal; plan: DeliveryPlan; snapshot: ExecutionSnapshot }
   | { ok: false; error: string };
 
+/** Caller-supplied detail is preserved; isolation facts are appended, never dropped. */
+function auditDetails(
+  command: { auditDetails?: string },
+  proposalId: number,
+  executionBranch: string | undefined,
+  workspacePath: string | null | undefined,
+): string {
+  if (!workspacePath || !executionBranch) {
+    return command.auditDetails ?? `Executed #${proposalId}`;
+  }
+  const isolation = `isolated execution on ${executionBranch} (${workspacePath})`;
+  return command.auditDetails ? `${command.auditDetails} — ${isolation}` : `Executed #${proposalId} — ${isolation}`;
+}
+
 export class ExecuteProposalUseCase {
   public constructor(
     private readonly dependencies: {
@@ -69,11 +83,7 @@ export class ExecuteProposalUseCase {
       layer: "delivery",
       action: command.auditAction ?? "proposal_executed",
       actor: command.actor,
-      details:
-        command.auditDetails ??
-        (workspacePath
-          ? `Executed #${proposal.id} in isolation on ${executionBranch} (${workspacePath})`
-          : `Executed #${proposal.id}`),
+      details: auditDetails(command, proposal.id, executionBranch, workspacePath),
     };
     state.auditLog.push(audit);
     await this.dependencies.repository.persist();

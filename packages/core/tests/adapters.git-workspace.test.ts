@@ -108,4 +108,27 @@ describe("GitWorkspace", () => {
     expect(result).toEqual({ ok: true, branch: "dao/3-plain", path: null });
     expect(calls).toHaveLength(0);
   });
+
+  test("unsafe configuration fails closed before any command runs", async () => {
+    for (const options of [
+      { worktreeRoot: "/etc" },
+      { worktreeRoot: ".." },
+      { worktreeRoot: "a;touch-pwned" },
+      { baseBranch: "main; rm -rf /" },
+      { baseBranch: "-b evil" },
+    ]) {
+      const { runner, calls } = recordingRunner([{ exitCode: 0 }]);
+      const workspace = new GitWorkspace({
+        runner,
+        repositoryRoot: "/repo",
+        isolation: "worktree",
+        ...options,
+      });
+      const result = await workspace.prepare(proposal(4, "Anything"));
+      expect(result.ok).toBe(false);
+      if (result.ok) continue;
+      expect(result.error).toContain("invalid execution isolation config");
+      expect(calls).toHaveLength(0);
+    }
+  });
 });

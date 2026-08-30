@@ -52,6 +52,11 @@ export class GitWorkspace implements ExecutionWorkspacePort {
 
   public async prepare(proposal: Pick<Proposal, "id" | "title">): Promise<ExecutionWorkspaceResult> {
     const plan = planExecutionIsolation(proposal, this.#options);
+    if (plan.mode === "invalid") {
+      // Unsafe configuration (absolute root, `..`, metacharacters, …) must
+      // never reach a shell command line. Fail closed.
+      return { ok: false, error: `invalid execution isolation config: ${plan.error}` };
+    }
     if (plan.mode === "none") {
       // No isolation: still report the deterministic branch name so the
       // execution snapshot can carry it, but change nothing on disk.

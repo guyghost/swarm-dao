@@ -181,10 +181,7 @@ export async function handleDaoExecute(ctx: DaoToolContext, proposalId: number):
   const result = await useCase.execute({ proposalId, actor: "user" });
   if (!result.ok) return result.error;
   recordProposalExecuted(result.proposal.id, result.proposal.type);
-  const isolationNote = result.snapshot.branch.startsWith("dao/")
-    ? `\n**Isolated execution branch:** ${result.snapshot.branch}`
-    : "";
-  return `${presentExecution(result)}${isolationNote}`;
+  return presentExecution(result);
 }
 
 export async function handleDaoShip(
@@ -194,7 +191,13 @@ export async function handleDaoShip(
 ): Promise<string> {
   const notReady = requireInitialized(ctx.repository);
   if (notReady) return notReady;
-  const useCase = new ShipProposalUseCase({ repository: repositoryOrLegacy(ctx.repository), clock: systemClock });
+  const repository = repositoryOrLegacy(ctx.repository);
+  // Shipping executes controlled proposals, so it must honour the same
+  // execution isolation as dao_execute — otherwise host shipping would
+  // bypass a configured worktree.
+  const projectConfig = await loadConfig(repository.get().daoRoot);
+  const workspace = createExecutionWorkspace(projectConfig.execution, ctx.adapter, ctx.workDir);
+  const useCase = new ShipProposalUseCase({ repository, clock: systemClock, workspace });
   const result = await useCase.execute({
     proposalId,
     actor: ctx.adapter.hostId,

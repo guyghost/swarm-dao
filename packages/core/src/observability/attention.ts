@@ -111,7 +111,8 @@ export function classifyAttention(source: AttentionSource, snapshot: AttentionSn
     runId,
     state: snapshot.state,
     action: gate.action,
-    command: gate.command,
+    // Substitute the run id so the suggested command is directly runnable.
+    command: gate.command ? gate.command.replaceAll("<id>", runId) : null,
     detail: gate.detail ? gate.detail(snapshot.context) : null,
   };
 }

@@ -61,4 +61,74 @@ describe("planExecutionIsolation", () => {
     const plan = planExecutionIsolation(proposal(5, "x"), { isolation: "bogus" as never });
     expect(plan.mode).toBe("none");
   });
+
+  test("absolute worktree roots are rejected", () => {
+    for (const root of ["/etc", "/tmp/worktrees", "/."]) {
+      const plan = planExecutionIsolation(proposal(6, "x"), { isolation: "worktree", worktreeRoot: root });
+      expect(plan).toMatchObject({ mode: "invalid" });
+    }
+  });
+
+  test("traversal and dot segments in worktree roots are rejected", () => {
+    for (const root of ["..", "../worktrees", "a/../b", ".", "a/./b", "a/..", "a/"]) {
+      const plan = planExecutionIsolation(proposal(7, "x"), { isolation: "worktree", worktreeRoot: root });
+      expect(plan).toMatchObject({ mode: "invalid" });
+    }
+  });
+
+  test("shell metacharacters and leading dashes in worktree roots are rejected", () => {
+    const roots = [
+      "; rm -rf /",
+      "a;touch-pwned",
+      "a$(id)",
+      "a`id`",
+      "a|b",
+      "a b",
+      "-oInject",
+      "--global",
+      "a\nb",
+      "a\\b",
+      "*'",
+    ];
+    for (const root of roots) {
+      const plan = planExecutionIsolation(proposal(8, "x"), { isolation: "worktree", worktreeRoot: root });
+      expect(plan).toMatchObject({ mode: "invalid" });
+    }
+  });
+
+  test("unsafe base branches are rejected", () => {
+    const branches = [
+      "main; rm -rf /",
+      "$(id)",
+      "`id`",
+      "-b evil",
+      "..",
+      "a/../b",
+      "origin/../evil",
+      "main..next",
+      "main ",
+      "",
+    ];
+    for (const baseBranch of branches) {
+      const plan = planExecutionIsolation(proposal(9, "x"), { isolation: "worktree", baseBranch });
+      expect(plan).toMatchObject({ mode: "invalid" });
+    }
+  });
+
+  test("legitimate roots and branch names are accepted", () => {
+    const cases: Array<{ worktreeRoot?: string; baseBranch?: string }> = [
+      { worktreeRoot: ".dao/worktrees" },
+      { worktreeRoot: ".worktrees" },
+      { worktreeRoot: "build/worktrees-2" },
+      { worktreeRoot: ".dao/worktrees", baseBranch: "main" },
+      { worktreeRoot: ".dao/worktrees", baseBranch: "develop" },
+      { worktreeRoot: ".dao/worktrees", baseBranch: "release/1.2" },
+      { worktreeRoot: ".dao/worktrees", baseBranch: "refs/heads/main" },
+      { worktreeRoot: ".dao/worktrees", baseBranch: "user/feature.x" },
+    ];
+    for (const options of cases) {
+      const plan = planExecutionIsolation(proposal(10, "Safe Title"), { isolation: "worktree", ...options });
+      expect(plan.mode).toBe("worktree");
+    }
+  });
 });

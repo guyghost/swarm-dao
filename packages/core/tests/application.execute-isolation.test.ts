@@ -7,6 +7,7 @@ import {
   DeliberateProposalUseCase,
   ExecuteProposalUseCase,
   InitializeDaoUseCase,
+  ShipProposalUseCase,
   systemClock,
 } from "@guyghost/swarm-dao-core";
 import { InMemoryDaoStateRepository } from "../src/adapters/persistence/in-memory-dao-state.repository.js";
@@ -110,5 +111,55 @@ describe("ExecuteProposalUseCase with an execution workspace", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.snapshot.branch).toBe(result.plan.branchStrategy);
+  });
+
+  test("ship-path audit details keep their own text and gain the isolation facts", async () => {
+    const repository = new InMemoryDaoStateRepository(createInitialState("/tmp/exec-ship/.dao"));
+    const proposalId = await controlledProposal(repository);
+
+    const workspace: ExecutionWorkspacePort = {
+      prepare: async (proposal) => ({
+        ok: true,
+        branch: `dao/${proposal.id}-isolated-feature`,
+        path: "/repo/.dao/worktrees/x",
+      }),
+    };
+
+    const shipped = await new ShipProposalUseCase({ repository, clock: systemClock, workspace }).execute({
+      proposalId,
+      actor: "cli",
+    });
+    expect(shipped.ok).toBe(true);
+
+    const audit = repository
+      .get()
+      .auditLog.filter((entry) => entry.proposalId === proposalId && entry.layer === "delivery")
+      .at(-1);
+    expect(audit?.details).toContain("shipped via dao_ship");
+    expect(audit?.details).toContain(`dao/${proposalId}-isolated-feature`);
+    expect(audit?.details).toContain("/repo/.dao/worktrees/x");
+  });
+
+  test("presentExecution renders the actual executed branch from the snapshot", async () => {
+    const { presentExecution } = await import("../src/presenters/proposal.presenter.js");
+    const repository = new InMemoryDaoStateRepository(createInitialState("/tmp/exec-present/.dao"));
+    const proposalId = await controlledProposal(repository);
+
+    const workspace: ExecutionWorkspacePort = {
+      prepare: async (proposal) => ({
+        ok: true,
+        branch: `dao/${proposal.id}-isolated-feature`,
+        path: "/repo/.dao/worktrees/x",
+      }),
+    };
+    const executed = await new ExecuteProposalUseCase({ repository, clock: systemClock, workspace }).execute({
+      proposalId,
+      actor: "test",
+    });
+    if (!executed.ok) throw new Error(executed.error);
+
+    const rendered = presentExecution(executed);
+    expect(rendered).toContain(`**Branch:** \`dao/${proposalId}-isolated-feature\``);
+    expect(rendered).not.toContain(executed.plan.branchStrategy);
   });
 });
