@@ -28,6 +28,7 @@ import {
   generateAllArtefacts,
   generateDashboard,
   getAllAuditLog,
+  getDaoCommands,
   getPlan,
   getProposal,
   getState,
@@ -60,6 +61,11 @@ import { Type } from "typebox";
 // ── Pi Host Adapter Implementation ───────────────────────────
 
 type SpawnAgentParams = Parameters<HostAdapter["spawnAgent"]>[0];
+
+/** Grace period before escalating a timed-out subprocess from SIGTERM to SIGKILL. */
+const PI_KILL_GRACE_MS = 5_000;
+/** Combined stdout+stderr cap for subprocess output (guards against runaway streams). */
+const PI_MAX_OUTPUT_CHARS = 4_000_000;
 
 let currentSessionModel: string | undefined = process.env.PI_MODEL;
 
@@ -144,28 +150,49 @@ async function spawnPiSubprocess(
     let stdout = "";
     let stderr = "";
     let timedOut = false;
+    let outputExceeded = false;
+    let killTimer: ReturnType<typeof setTimeout> | undefined;
     const timeout =
       typeof timeoutMs === "number" && timeoutMs > 0
         ? setTimeout(() => {
             timedOut = true;
             child.kill("SIGTERM");
+            // Escalate to SIGKILL if the child ignores SIGTERM.
+            killTimer = setTimeout(() => child.kill("SIGKILL"), PI_KILL_GRACE_MS);
           }, timeoutMs)
         : undefined;
 
+    const clearTimers = () => {
+      if (timeout) clearTimeout(timeout);
+      if (killTimer) clearTimeout(killTimer);
+    };
+    const checkOutputLimit = () => {
+      if (!outputExceeded && stdout.length + stderr.length > PI_MAX_OUTPUT_CHARS) {
+        outputExceeded = true;
+        child.kill("SIGKILL");
+      }
+    };
+
     child.stdout.on("data", (chunk) => {
       stdout += chunk.toString();
+      checkOutputLimit();
     });
     child.stderr.on("data", (chunk) => {
       stderr += chunk.toString();
+      checkOutputLimit();
     });
     child.on("error", (error) => {
-      if (timeout) clearTimeout(timeout);
+      clearTimers();
       resolve({ content: null, error: error.message });
     });
     child.on("close", (code) => {
-      if (timeout) clearTimeout(timeout);
+      clearTimers();
       if (timedOut) {
         resolve({ content: null, error: `Pi subprocess timed out after ${timeoutMs}ms` });
+        return;
+      }
+      if (outputExceeded) {
+        resolve({ content: null, error: `Pi subprocess output exceeded ${PI_MAX_OUTPUT_CHARS} chars` });
         return;
       }
       if (code !== 0) {
@@ -339,11 +366,16 @@ function createPiHostAdapter(_pi: ExtensionAPI, ctx?: ExtensionCommandContext): 
     },
 
     async spawnAgents(params): Promise<AgentOutput[]> {
-      return Promise.all(
-        params.agents.map((agent) =>
-          this.spawnAgent({ agent, proposal: params.proposal, systemPrompt: agent.systemPrompt }),
-        ),
-      );
+      const concurrency = Math.max(1, params.maxConcurrent);
+      const outputs: AgentOutput[] = [];
+      for (let i = 0; i < params.agents.length; i += concurrency) {
+        const batch = params.agents.slice(i, i + concurrency);
+        const results = await Promise.all(
+          batch.map((agent) => this.spawnAgent({ agent, proposal: params.proposal, systemPrompt: agent.systemPrompt })),
+        );
+        outputs.push(...results);
+      }
+      return outputs;
     },
 
     async log(params): Promise<void> {
@@ -501,8 +533,15 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
   // Restore state on session start
   pi.on("session_start", async (_event, _ctx) => {
     const cwd = process.cwd();
-    repository = await FileDaoStateRepository.open(cwd);
-    setRepository(repository);
+    try {
+      repository = await FileDaoStateRepository.open(cwd);
+      setRepository(repository);
+    } catch (error) {
+      // A corrupt state file must not brick the session: tools and the /dao
+      // command surface the onboarding message until storage is readable.
+      const message = error instanceof Error ? error.message : String(error);
+      logger.warn(`[pi-adapter] Failed to open DAO storage at ${cwd}: ${message}`);
+    }
     return undefined;
   });
 
@@ -512,8 +551,14 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
       currentSessionModel = event.model;
     }
 
-    const state = getState();
-    if (!state.initialized) {
+    let state: ReturnType<typeof getState> | undefined;
+    try {
+      state = getState();
+    } catch {
+      // Storage unavailable (e.g. session_start failed on a corrupt state
+      // file). Fall back to the minimal prompt instead of throwing every turn.
+    }
+    if (!state?.initialized) {
       return {
         systemPrompt:
           event.systemPrompt +
@@ -535,7 +580,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
       }
     }
     daoContext += `\n- Config: quorum=${state.config.quorumPercent}%, approval=${state.config.approvalThreshold}%, risk=${state.config.riskThreshold}/10`;
-    daoContext += `\n\nAvailable tools: dao_setup, dao_propose, dao_deliberate, dao_check, dao_plan, dao_execute, dao_ship, dao_audit, dao_artefacts, dao_verify, dao_rate, dao_dashboard, dao_dry_run, dao_rollback`;
+    daoContext += `\n\nAvailable tools: dao_setup, dao_propose, dao_deliberate, dao_check, dao_plan, dao_execute, dao_ship, dao_audit, dao_artefacts, dao_rate, dao_dashboard, dao_dry_run, dao_rollback, dao_roundtable, dao_update_proposal, dao_check_edit, dao_config_github, dao_github_create_branch, dao_github_open_pr`;
 
     return { systemPrompt: event.systemPrompt + daoContext };
   });
@@ -974,16 +1019,10 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
   // cannot invoke Pi tools directly, so mutating commands route the user to
   // the matching `dao_*` tool; read-only commands render inline.
   const renderDashboard = (state: ReturnType<typeof getState>): string => {
-    const byStatus: Record<string, number> = {};
-    for (const p of state.proposals) {
-      byStatus[p.status] = (byStatus[p.status] ?? 0) + 1;
-    }
-    let output = `# Swarm DAO Dashboard\n`;
-    output += `Agents: ${state.agents.length} | Proposals: ${state.proposals.length}\n`;
-    for (const [status, count] of Object.entries(byStatus)) {
-      output += `  ${status}: ${count}\n`;
-    }
-    return output.trim();
+    // Mirror the `dao_dashboard` tool exactly (pipeline + health metrics + score).
+    const dashboard = generateDashboard(state.proposals, state.outcomes, state.agents, state.healthSnapshots);
+    const health = computeHealthScore(state.proposals, state.outcomes, state.config.healthWeights);
+    return `${dashboard}\n\n${formatHealthScore(health)}`;
   };
 
   const runDaoSetup = async (): Promise<string> => {
@@ -1043,8 +1082,33 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
     return Number.isNaN(n) ? undefined : n;
   };
 
-  pi.registerCommand("/dao", {
+  // Subcommands offered by argument completion: inline-handled built-ins
+  // plus every id/alias the Pi projection of the command registry accepts.
+  const daoSubcommands = [
+    "help",
+    "setup",
+    "init",
+    "status",
+    "dashboard",
+    "list",
+    "agents",
+    "audit",
+    ...getDaoCommands("pi").flatMap((c) => [c.id, ...(c.aliases ?? [])]),
+  ]
+    .map((s) => s.toLowerCase())
+    .filter((s, i, arr) => arr.indexOf(s) === i);
+
+  pi.registerCommand("dao", {
     description: "DAO dispatcher — `/dao help` lists every subcommand (propose, deliberate, control, execute, ship, …)",
+    getArgumentCompletions: (argumentPrefix: string) => {
+      // Only complete the first token (the subcommand). If the host passes the
+      // full argument string, bail out once more than one token is present.
+      const tokens = argumentPrefix.trim().split(/\s+/).filter(Boolean);
+      if (tokens.length > 1) return null;
+      const typed = (tokens[0] ?? "").toLowerCase();
+      const matches = daoSubcommands.filter((s) => s.startsWith(typed));
+      return matches.length > 0 ? matches.map((value) => ({ value, label: value })) : null;
+    },
     handler: async (args, _ctx) => {
       const raw = args.trim();
       const tokens = raw.split(/\s+/).filter(Boolean);

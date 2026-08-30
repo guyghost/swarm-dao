@@ -81,7 +81,7 @@ declare module "@earendil-works/pi-coding-agent" {
    * ```ts
    * export default function myExtension(pi: ExtensionAPI) {
    *   pi.registerTool({ name: "hello", ... });
-   *   pi.registerCommand("/hello", { ... });
+   *   pi.registerCommand("hello", { ... });
    *   pi.on("session_start", async () => undefined);
    * }
    * ```
@@ -127,9 +127,10 @@ declare module "@earendil-works/pi-coding-agent" {
     // ── Command Registration ───────────────────────────────
 
     /**
-     * Register a slash-command (e.g. `/dao`).
+     * Register a slash-command. The name is registered WITHOUT the leading
+     * `/` (users invoke it as `/name`; Pi strips the slash before lookup).
      *
-     * @param name - Command name including the leading `/`
+     * @param name - Command name without the leading `/`
      * @param command - Command definition with handler
      */
     registerCommand(
@@ -137,6 +138,13 @@ declare module "@earendil-works/pi-coding-agent" {
       command: {
         /** Short description shown in command palette */
         description: string;
+        /**
+         * Optional argument auto-completion. Each item replaces the token
+         * being typed (mirrors pi-tui's AutocompleteItem: `{ value, label }`).
+         */
+        getArgumentCompletions?: (
+          argumentPrefix: string,
+        ) => Array<{ value: string; label: string }> | null | Promise<Array<{ value: string; label: string }> | null>;
         /**
          * Handle the command invocation.
          *
