@@ -146,13 +146,13 @@ declare module "@earendil-works/pi-coding-agent" {
           argumentPrefix: string,
         ) => Array<{ value: string; label: string }> | null | Promise<Array<{ value: string; label: string }> | null>;
         /**
-         * Handle the command invocation.
+         * Handle the command invocation. Pi discards the return value —
+         * display output via `ctx.ui` (custom panel, notify) or stdout.
          *
          * @param args - Raw text after the command (may be empty string)
          * @param ctx - Pi command context
-         * @returns Response text, or undefined for no output
          */
-        handler: (args: string, ctx: ExtensionCommandContext) => Promise<string | undefined>;
+        handler: (args: string, ctx: ExtensionCommandContext) => Promise<void>;
       },
     ): void;
 
@@ -213,6 +213,26 @@ declare module "@earendil-works/pi-coding-agent" {
     ui?: {
       /** Show a transient status message to the user */
       setWorkingMessage?: (message: string) => void;
+      /** Show a notification (toast-style) to the user */
+      notify?: (message: string, type?: "info" | "warning" | "error") => void;
+      /**
+       * Render a focused custom component until `done()` is called.
+       * The factory returns `{ render(width), invalidate, handleInput?, dispose? }`.
+       */
+      custom?: (
+        factory: (
+          tui: unknown,
+          theme: unknown,
+          keybindings: unknown,
+          done: (result: unknown) => void,
+        ) => {
+          render: (width: number) => string[];
+          invalidate: () => void;
+          handleInput?: (data: string) => unknown;
+          dispose?: () => void;
+        },
+        options?: Record<string, unknown>,
+      ) => Promise<unknown>;
     };
     /** Session management utilities */
     sessionManager?: {

@@ -31,7 +31,34 @@ interface MockCommand {
   description: string;
   getArgumentCompletions?: (argumentPrefix: string) => Array<{ value: string; label: string }> | null;
   // biome-ignore lint/suspicious/noExplicitAny: mock interface for test command handler
-  handler: (...args: any[]) => Promise<string | undefined>;
+  handler: (...args: any[]) => Promise<void>;
+}
+
+/**
+ * Mock command context that captures `/dao` output the way real Pi renders it:
+ * `ui.custom` runs the component factory and stores its render(100) lines,
+ * `ui.notify` stores the message. `rendered()` returns the joined output.
+ */
+function createMockCommandContext(): {
+  ctx: Record<string, unknown>;
+  rendered: () => string;
+  notified: () => string;
+} {
+  let customLines: string[] = [];
+  let notifiedMessage = "";
+  const ctx = {
+    ui: {
+      // biome-ignore lint/suspicious/noExplicitAny: mirrors Pi's ui.custom factory contract
+      custom: async (factory: any) => {
+        const component = await factory({}, {}, {}, () => {});
+        customLines = component.render(100) as string[];
+      },
+      notify: (message: string) => {
+        notifiedMessage = message;
+      },
+    },
+  };
+  return { ctx, rendered: () => customLines.join("\n"), notified: () => notifiedMessage };
 }
 
 interface MockEvent {
@@ -219,6 +246,104 @@ describe("swarmDaoExtension", () => {
       expect(typeof daoCommand?.description).toBe("string");
     });
 
+    it("displays /dao help as a framed panel through ui.custom", async () => {
+      const mod = await import("@guyghost/swarm-dao-pi-adapter");
+      const pi = createMockPi();
+      mod.default(pi);
+
+      const commandCtx = createMockCommandContext();
+      await pi.commands.find((c) => c.name === "dao")?.handler("help", commandCtx.ctx);
+
+      const rendered = commandCtx.rendered();
+      // Pi discards handler return values; output must come from ctx.ui.
+      expect(rendered).toContain("┌ Swarm DAO ");
+      expect(rendered).toContain("│");
+      expect(rendered).toContain("# /dao Help");
+      expect(rendered).toContain("Press Enter or Esc to close");
+    });
+
+    it("falls back to stdout when no ui is available (print/headless mode)", async () => {
+      const mod = await import("@guyghost/swarm-dao-pi-adapter");
+      const pi = createMockPi();
+      mod.default(pi);
+
+      const writes: string[] = [];
+      const originalWrite = process.stdout.write.bind(process.stdout);
+      // biome-ignore lint/suspicious/noExplicitAny: capturing stdout writes in test
+      (process.stdout as any).write = (chunk: string) => {
+        writes.push(chunk);
+        return true;
+      };
+      try {
+        await pi.commands.find((c) => c.name === "dao")?.handler("help", {});
+      } finally {
+        // biome-ignore lint/suspicious/noExplicitAny: restoring stdout
+        (process.stdout as any).write = originalWrite;
+      }
+      const output = writes.join("");
+      expect(output).toContain("# /dao Help");
+      expect(output).toContain("\n");
+    });
+
+    it("falls back to stdout when ui.custom resolves without invoking the factory (print mode)", async () => {
+      const mod = await import("@guyghost/swarm-dao-pi-adapter");
+      const pi = createMockPi();
+      mod.default(pi);
+
+      const writes: string[] = [];
+      const originalWrite = process.stdout.write.bind(process.stdout);
+      // biome-ignore lint/suspicious/noExplicitAny: capturing stdout writes in test
+      (process.stdout as any).write = (chunk: string) => {
+        writes.push(chunk);
+        return true;
+      };
+      try {
+        // Mirrors Pi's print mode: ui.custom exists but is a silent no-op that
+        // resolves without ever calling the component factory.
+        const ctx = {
+          ui: {
+            // biome-ignore lint/suspicious/noExplicitAny: silent no-op custom
+            custom: async (_factory: any) => {},
+            notify: (_message: string) => {},
+          },
+        };
+        await pi.commands.find((c) => c.name === "dao")?.handler("help", ctx);
+      } finally {
+        // biome-ignore lint/suspicious/noExplicitAny: restoring stdout
+        (process.stdout as any).write = originalWrite;
+      }
+      expect(writes.join("")).toContain("# /dao Help");
+    });
+
+    it("falls back to stdout when ui.custom rejects", async () => {
+      const mod = await import("@guyghost/swarm-dao-pi-adapter");
+      const pi = createMockPi();
+      mod.default(pi);
+
+      const writes: string[] = [];
+      const originalWrite = process.stdout.write.bind(process.stdout);
+      // biome-ignore lint/suspicious/noExplicitAny: capturing stdout writes in test
+      (process.stdout as any).write = (chunk: string) => {
+        writes.push(chunk);
+        return true;
+      };
+      try {
+        const ctx = {
+          ui: {
+            custom: async () => {
+              throw new Error("host custom failed");
+            },
+            notify: (_message: string) => {},
+          },
+        };
+        await pi.commands.find((c) => c.name === "dao")?.handler("help", ctx);
+      } finally {
+        // biome-ignore lint/suspicious/noExplicitAny: restoring stdout
+        (process.stdout as any).write = originalWrite;
+      }
+      expect(writes.join("")).toContain("# /dao Help");
+    });
+
     it("completes subcommands for the first token only", async () => {
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
@@ -251,7 +376,9 @@ describe("swarmDaoExtension", () => {
       mod.default(pi);
 
       const daoCommand = pi.commands.find((c) => c.name === "dao");
-      const result = await daoCommand?.handler("", {});
+      const commandCtx = createMockCommandContext();
+      await daoCommand?.handler("", commandCtx.ctx);
+      const result = commandCtx.rendered();
       expect(result).toContain("DAO not initialized");
     });
 
@@ -268,7 +395,9 @@ describe("swarmDaoExtension", () => {
       mod.default(pi);
 
       const daoCommand = pi.commands.find((c) => c.name === "dao");
-      const result = await daoCommand?.handler("", {});
+      const commandCtx = createMockCommandContext();
+      await daoCommand?.handler("", commandCtx.ctx);
+      const result = commandCtx.rendered();
       // Same rendering as the `dao_dashboard` tool (pipeline + health score).
       expect(result).toContain("# 🏛️ DAO Dashboard");
       expect(result).toContain(`**Agents:** ${state.agents.length} active`);
@@ -331,7 +460,9 @@ describe("swarmDaoExtension", () => {
       mod.default(pi);
 
       const daoCommand = pi.commands.find((c) => c.name === "dao");
-      const result = await daoCommand?.handler("status", {});
+      const commandCtx = createMockCommandContext();
+      await daoCommand?.handler("status", commandCtx.ctx);
+      const result = commandCtx.rendered();
       // Overview line and appended score section must agree (100 with these
       // weights — 80 under defaults, which is the pre-fix conflict).
       const overview = result?.match(/\*\*Health:\*\* (\d+)\/100/)?.[1];
@@ -346,7 +477,9 @@ describe("swarmDaoExtension", () => {
       mod.default(pi);
 
       const daoCommand = pi.commands.find((c) => c.name === "dao");
-      const result = await daoCommand?.handler("help", {});
+      const commandCtx = createMockCommandContext();
+      await daoCommand?.handler("help", commandCtx.ctx);
+      const result = commandCtx.rendered();
       expect(result).toContain("# /dao Help");
       expect(result).toContain("/dao setup");
       expect(result).toContain("/dao propose");
@@ -367,7 +500,9 @@ describe("swarmDaoExtension", () => {
       mod.default(pi);
 
       const daoCommand = pi.commands.find((c) => c.name === "dao");
-      const result = await daoCommand?.handler("deliberate 1", {});
+      const commandCtx = createMockCommandContext();
+      await daoCommand?.handler("deliberate 1", commandCtx.ctx);
+      const result = commandCtx.rendered();
       expect(result).toContain("dao_deliberate");
       expect(result).not.toContain("Unknown /dao subcommand");
     });
@@ -385,7 +520,9 @@ describe("swarmDaoExtension", () => {
       mod.default(pi);
 
       const daoCommand = pi.commands.find((c) => c.name === "dao");
-      const result = await daoCommand?.handler("list", {});
+      const commandCtx = createMockCommandContext();
+      await daoCommand?.handler("list", commandCtx.ctx);
+      const result = commandCtx.rendered();
       expect(result).toContain("No proposals yet");
     });
 
@@ -402,7 +539,9 @@ describe("swarmDaoExtension", () => {
       mod.default(pi);
 
       const daoCommand = pi.commands.find((c) => c.name === "dao");
-      const result = await daoCommand?.handler("control 1", {});
+      const commandCtx = createMockCommandContext();
+      await daoCommand?.handler("control 1", commandCtx.ctx);
+      const result = commandCtx.rendered();
       expect(result).toContain("dao_check");
       expect(result).not.toContain("dao_control");
     });
@@ -420,7 +559,9 @@ describe("swarmDaoExtension", () => {
       mod.default(pi);
 
       const daoCommand = pi.commands.find((c) => c.name === "dao");
-      const result = await daoCommand?.handler("check 1", {});
+      const commandCtx = createMockCommandContext();
+      await daoCommand?.handler("check 1", commandCtx.ctx);
+      const result = commandCtx.rendered();
       expect(result).toContain("dao_check");
     });
 
@@ -457,7 +598,9 @@ describe("swarmDaoExtension", () => {
       mod.default(pi);
 
       const daoCommand = pi.commands.find((c) => c.name === "dao");
-      const result = await daoCommand?.handler("audit 1", {});
+      const commandCtx = createMockCommandContext();
+      await daoCommand?.handler("audit 1", commandCtx.ctx);
+      const result = commandCtx.rendered();
       expect(result).toContain("Proposal #1");
       expect(result).toContain("action_one");
       expect(result).not.toContain("action_two");
@@ -487,7 +630,9 @@ describe("swarmDaoExtension", () => {
       mod.default(pi);
 
       const daoCommand = pi.commands.find((c) => c.name === "dao");
-      const result = await daoCommand?.handler("audit", {});
+      const commandCtx = createMockCommandContext();
+      await daoCommand?.handler("audit", commandCtx.ctx);
+      const result = commandCtx.rendered();
       expect(result).toContain("# DAO Audit Trail");
       expect(result).toContain("action_one");
     });
@@ -505,7 +650,9 @@ describe("swarmDaoExtension", () => {
       mod.default(pi);
 
       const daoCommand = pi.commands.find((c) => c.name === "dao");
-      const result = await daoCommand?.handler("audit notanumber", {});
+      const commandCtx = createMockCommandContext();
+      await daoCommand?.handler("audit notanumber", commandCtx.ctx);
+      const result = commandCtx.rendered();
       expect(result).toContain("Invalid proposal ID");
     });
 
@@ -515,10 +662,14 @@ describe("swarmDaoExtension", () => {
       mod.default(pi);
 
       const daoCommand = pi.commands.find((c) => c.name === "dao");
-      const setupResult = await daoCommand?.handler("setup", {});
+      const commandCtx = createMockCommandContext();
+      await daoCommand?.handler("setup", commandCtx.ctx);
+      const setupResult = commandCtx.rendered();
       expect(setupResult).toContain("# DAO Initialized");
 
-      const statusResult = await daoCommand?.handler("status", {});
+      const statusCtx = createMockCommandContext();
+      await daoCommand?.handler("status", statusCtx.ctx);
+      const statusResult = statusCtx.rendered();
       expect(statusResult).toContain("# 🏛️ DAO Dashboard");
     });
 
@@ -535,7 +686,9 @@ describe("swarmDaoExtension", () => {
       mod.default(pi);
 
       const daoCommand = pi.commands.find((c) => c.name === "dao");
-      const result = await daoCommand?.handler("unknown", {});
+      const commandCtx = createMockCommandContext();
+      await daoCommand?.handler("unknown", commandCtx.ctx);
+      const result = commandCtx.rendered();
       expect(result).toContain("Unknown /dao subcommand");
       expect(result).toContain("/dao help");
     });
@@ -1222,6 +1375,43 @@ describe("swarmDaoExtension", () => {
     it("rejects prompts containing null bytes", async () => {
       const { assertSafePiPrompt } = await import("../src/index.js");
       expect(() => assertSafePiPrompt("hello\0world")).toThrow("Invalid pi prompt");
+    });
+  });
+
+  // ── /dao panel rendering (narrow-terminal contract) ────────
+
+  describe("frameDaoPanel", () => {
+    it("boxed rows are exactly the viewport width for every width >= 8", async () => {
+      const { frameDaoPanel } = await import("../src/index.js");
+      const body = "# /dao Help\n".repeat(3) + "a-very-long-unbreakable-word-that-must-hard-split".repeat(3);
+      for (const width of [8, 10, 20, 24, 30, 31, 40, 80, 120, 200]) {
+        const lines = frameDaoPanel("Swarm DAO", body, width);
+        expect(lines.length).toBeGreaterThan(0);
+        for (const line of lines) {
+          expect(line.length).toBeLessThanOrEqual(width);
+        }
+      }
+    });
+
+    it("truncates title and close hint instead of overflowing narrow panels", async () => {
+      const { frameDaoPanel } = await import("../src/index.js");
+      const lines = frameDaoPanel("Swarm DAO", "short body", 24);
+      for (const line of lines) expect(line.length).toBeLessThanOrEqual(24);
+      // 24 cols → inner 20 → the 28-char hint must be truncated, not overflow.
+      expect(lines.some((l) => l.includes("Press Enter or Esc to close"))).toBe(false);
+      expect(lines.some((l) => l.includes("Press Enter or"))).toBe(true);
+    });
+
+    it("falls back to plain wrapped lines below 8 columns", async () => {
+      const { frameDaoPanel } = await import("../src/index.js");
+      for (const width of [1, 2, 3, 4, 5, 7]) {
+        const lines = frameDaoPanel("Swarm DAO", "some body text here", width);
+        expect(lines.length).toBeGreaterThan(0);
+        for (const line of lines) {
+          expect(line.length).toBeLessThanOrEqual(width);
+        }
+        expect(lines.join("")).not.toContain("│");
+      }
     });
   });
 });
