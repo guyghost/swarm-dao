@@ -173,6 +173,14 @@ describe("host tools: execution isolation wiring", () => {
       // Empty input is rejected with guidance.
       const empty = await handleDaoCheckEdit(ctx, []);
       expect(empty).toContain("No paths provided");
+
+      // Oversized requests are refused outright, never truncated.
+      const tooMany = await handleDaoCheckEdit(
+        ctx,
+        Array.from({ length: 201 }, (_, i) => `src/file-${i}.ts`),
+      );
+      expect(tooMany).toContain("Too many paths");
+      expect(tooMany).toContain("201");
     } finally {
       await fs.rm(path.dirname(enforceRoot), { recursive: true, force: true });
     }

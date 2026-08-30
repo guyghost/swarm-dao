@@ -220,7 +220,12 @@ export async function handleDaoCheckEdit(ctx: DaoToolContext, paths: readonly st
   const notReady = requireInitialized(ctx.repository);
   if (notReady) return notReady;
 
-  const cleaned = [...new Set(paths.map((path) => path.trim()).filter(Boolean))].slice(0, 200);
+  const cleaned = [...new Set(paths.map((path) => path.trim()).filter(Boolean))];
+  // Refuse oversized requests outright: silently truncating could let a
+  // protected file ride just past the cutoff and come back as allowed.
+  if (cleaned.length > 200) {
+    return `Too many paths provided (${cleaned.length}). Pass at most 200 paths per edit check.`;
+  }
   if (cleaned.length === 0) return "No paths provided. Pass the files you are about to edit.";
 
   const state = repository.get();

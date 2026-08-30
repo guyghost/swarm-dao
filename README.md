@@ -262,8 +262,14 @@ and overrides agents on every `dao_deliberate` call; `mode` and
 - **suggest**: everything is allowed; uncovered critical paths produce a
   non-blocking nudge toward `dao_propose`.
 - **enforce**: a critical path is only editable when an `approved`,
-`controlled`, or `executed` proposal declares it in `affectedPaths`;
-otherwise the gate blocks the edit and explains how to get approval.
+  `controlled`, or `executed` proposal declares it in `affectedPaths`;
+  otherwise the gate blocks the edit and explains how to get approval.
+
+Paths are lexically normalized before matching (absolute paths,
+  backslashes, `./` prefixes, and `a/../b` segments are refused or
+  resolved), so the gate cannot be evaded by spelling variants — an
+  unmatchable path is refused in every mode. Requests over 200 paths are
+  rejected outright.
 
 `dao_check_edit` is exposed on every agent-facing host (MCP and the
 Copilot/Claude/Codex adapters, Pi, OpenCode). It is a deterministic,

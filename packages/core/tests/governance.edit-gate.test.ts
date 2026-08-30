@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { evaluateEditGate } from "../src/governance/edit-gate.js";
+import { evaluateEditGate, normalizeEditPath } from "../src/governance/edit-gate.js";
 
 const CRITICAL = ["src/auth/**", "src/payment/**", ".env*"];
 const approved = (proposalId: number, affectedPaths?: string[], status = "approved") => ({
@@ -125,5 +125,54 @@ describe("evaluateEditGate", () => {
       approved: [],
     });
     expect(decision.guidance).toBeNull();
+  });
+
+  test("alias spellings are normalized before glob matching (no bypass)", () => {
+    const decision = evaluateEditGate({
+      paths: ["src/public/../auth/login.ts", "./src/auth/login.ts", "src//auth//login.ts", "src/auth/"],
+      mode: "enforce",
+      criticalPaths: CRITICAL,
+      approved: [],
+    });
+    // Every alias resolves into the critical tree and is blocked. The bare
+    // directory form normalizes to its own path and still matches src/auth/**.
+    expect(decision.verdicts.length).toBeGreaterThanOrEqual(1);
+    expect(decision.verdicts.every((v) => v.critical && !v.allowed)).toBe(true);
+    expect(decision.verdicts[0]).toMatchObject({ path: "src/auth/login.ts", critical: true, allowed: false });
+    expect(decision.allowed).toBe(false);
+  });
+
+  test("unmatchable paths are refused in every mode, never allowed", () => {
+    for (const mode of ["opt-in", "suggest", "enforce"] as const) {
+      const decision = evaluateEditGate({
+        paths: ["/etc/passwd", "C:\\Windows\\secret", "../outside/repo.ts", ".", "\\\\server\\share"],
+        mode,
+        criticalPaths: CRITICAL,
+        approved: [],
+      });
+      expect(decision.allowed).toBe(false);
+      expect(decision.verdicts.every((v) => !v.allowed)).toBe(true);
+      expect(decision.verdicts.every((v) => v.reason.startsWith("unmatchable path"))).toBe(true);
+    }
+  });
+
+  test("normalizeEditPath resolves and rejects deterministically", () => {
+    expect(normalizeEditPath("src/./a/../b/c.ts")).toEqual({ ok: true, path: "src/b/c.ts" });
+    expect(normalizeEditPath("src/a/")).toEqual({ ok: true, path: "src/a" });
+    expect(normalizeEditPath("/abs/path")).toMatchObject({ ok: false });
+    expect(normalizeEditPath("..")).toMatchObject({ ok: false });
+    expect(normalizeEditPath("")).toMatchObject({ ok: false });
+    expect(normalizeEditPath("a\\b")).toMatchObject({ ok: false });
+  });
+
+  test("unknown modes fail open to opt-in (consistent with canEditWithoutProposal)", () => {
+    const decision = evaluateEditGate({
+      paths: ["src/auth/login.ts"],
+      mode: "enforse" as never,
+      criticalPaths: CRITICAL,
+      approved: [],
+    });
+    expect(decision.mode).toBe("opt-in");
+    expect(decision.allowed).toBe(true);
   });
 });
