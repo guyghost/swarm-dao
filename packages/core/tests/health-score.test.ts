@@ -137,8 +137,9 @@ describe("health-score", () => {
       agentOutputs: [],
       createdAt: "",
     }));
-    // No agent outputs → deliberationDepth = 0; everything else = 100.
-    // Defaults (25 each) → 75; passRate-only weights → 100.
+    // No ratings and no agent outputs → avgRating = 0, deliberationDepth = 0;
+    // passRate and participation = 100. Defaults (25 each) → 50;
+    // passRate-only weights → 100.
     const weights = { passRate: 100, avgRating: 0, deliberationDepth: 0, participation: 0 };
 
     const dashboard = generateDashboard(executed, {}, [{ id: "a", name: "Agent A", weight: 3 }], undefined, weights);
