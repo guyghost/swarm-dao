@@ -315,6 +315,35 @@ describe("swarmDaoExtension", () => {
       expect(writes.join("")).toContain("# /dao Help");
     });
 
+    it("falls back to stdout when ui.custom rejects", async () => {
+      const mod = await import("@guyghost/swarm-dao-pi-adapter");
+      const pi = createMockPi();
+      mod.default(pi);
+
+      const writes: string[] = [];
+      const originalWrite = process.stdout.write.bind(process.stdout);
+      // biome-ignore lint/suspicious/noExplicitAny: capturing stdout writes in test
+      (process.stdout as any).write = (chunk: string) => {
+        writes.push(chunk);
+        return true;
+      };
+      try {
+        const ctx = {
+          ui: {
+            custom: async () => {
+              throw new Error("host custom failed");
+            },
+            notify: (_message: string) => {},
+          },
+        };
+        await pi.commands.find((c) => c.name === "dao")?.handler("help", ctx);
+      } finally {
+        // biome-ignore lint/suspicious/noExplicitAny: restoring stdout
+        (process.stdout as any).write = originalWrite;
+      }
+      expect(writes.join("")).toContain("# /dao Help");
+    });
+
     it("completes subcommands for the first token only", async () => {
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
@@ -1346,6 +1375,43 @@ describe("swarmDaoExtension", () => {
     it("rejects prompts containing null bytes", async () => {
       const { assertSafePiPrompt } = await import("../src/index.js");
       expect(() => assertSafePiPrompt("hello\0world")).toThrow("Invalid pi prompt");
+    });
+  });
+
+  // ── /dao panel rendering (narrow-terminal contract) ────────
+
+  describe("frameDaoPanel", () => {
+    it("boxed rows are exactly the viewport width for every width >= 8", async () => {
+      const { frameDaoPanel } = await import("../src/index.js");
+      const body = "# /dao Help\n".repeat(3) + "a-very-long-unbreakable-word-that-must-hard-split".repeat(3);
+      for (const width of [8, 10, 20, 24, 30, 31, 40, 80, 120, 200]) {
+        const lines = frameDaoPanel("Swarm DAO", body, width);
+        expect(lines.length).toBeGreaterThan(0);
+        for (const line of lines) {
+          expect(line.length).toBeLessThanOrEqual(width);
+        }
+      }
+    });
+
+    it("truncates title and close hint instead of overflowing narrow panels", async () => {
+      const { frameDaoPanel } = await import("../src/index.js");
+      const lines = frameDaoPanel("Swarm DAO", "short body", 24);
+      for (const line of lines) expect(line.length).toBeLessThanOrEqual(24);
+      // 24 cols → inner 20 → the 28-char hint must be truncated, not overflow.
+      expect(lines.some((l) => l.includes("Press Enter or Esc to close"))).toBe(false);
+      expect(lines.some((l) => l.includes("Press Enter or"))).toBe(true);
+    });
+
+    it("falls back to plain wrapped lines below 8 columns", async () => {
+      const { frameDaoPanel } = await import("../src/index.js");
+      for (const width of [1, 2, 3, 4, 5, 7]) {
+        const lines = frameDaoPanel("Swarm DAO", "some body text here", width);
+        expect(lines.length).toBeGreaterThan(0);
+        for (const line of lines) {
+          expect(line.length).toBeLessThanOrEqual(width);
+        }
+        expect(lines.join("")).not.toContain("│");
+      }
     });
   });
 });

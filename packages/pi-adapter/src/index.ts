@@ -526,6 +526,60 @@ interface DaoGithubPrParams {
 
 type DaoCheckEditParams = { paths: string[] };
 
+/** Greedy word-wrap of a single line to `maxWidth`, hard-splitting unbreakable runs. */
+export function wrapDaoLine(line: string, maxWidth: number): string[] {
+  if (maxWidth < 1) return [line];
+  if (line.length <= maxWidth) return [line];
+  const words = line.split(/\s+/);
+  const out: string[] = [];
+  let current = "";
+  for (const word of words) {
+    if (word.length > maxWidth) {
+      if (current) {
+        out.push(current);
+        current = "";
+      }
+      for (let i = 0; i < word.length; i += maxWidth) out.push(word.slice(i, i + maxWidth));
+      continue;
+    }
+    if (current.length === 0) current = word;
+    else if (current.length + 1 + word.length <= maxWidth) current += ` ${word}`;
+    else {
+      out.push(current);
+      current = word;
+    }
+  }
+  if (current) out.push(current);
+  return out;
+}
+
+/**
+ * Frame command output in a bordered panel with a close hint. Honors every
+ * positive width: boxed rows are exactly `width` columns (title and hint
+ * truncated to fit); below 8 columns a box cannot hold padding, so the body
+ * is returned as plain wrapped lines.
+ */
+export function frameDaoPanel(title: string, body: string, width: number): string[] {
+  if (width < 8) {
+    const lines = body.split("\n").flatMap((raw) => wrapDaoLine(raw, width));
+    lines.push("", ...wrapDaoLine("Press Enter or Esc to close", width));
+    return lines;
+  }
+  const inner = Math.max(1, Math.min(width - 4, 100));
+  const header = ` ${title} `.slice(0, inner + 2);
+  const lines: string[] = [`┌${header}${"─".repeat(inner + 2 - header.length)}┐`];
+  for (const raw of body.split("\n")) {
+    for (const wrapped of wrapDaoLine(raw, inner)) {
+      lines.push(`│ ${wrapped.padEnd(inner)} │`);
+    }
+  }
+  const hint = "Press Enter or Esc to close".slice(0, inner);
+  lines.push(`│${" ".repeat(inner + 2)}│`);
+  lines.push(`│ ${hint.padEnd(inner)} │`);
+  lines.push(`└${"─".repeat(inner + 2)}┘`);
+  return lines;
+}
+
 // ── Main Extension Export ────────────────────────────────────
 
 export default function swarmDaoExtension(pi: ExtensionAPI) {
@@ -1098,49 +1152,6 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
     return Number.isNaN(n) ? undefined : n;
   };
 
-  /** Greedy word-wrap of a single line to `maxWidth`, hard-splitting unbreakable runs. */
-  const wrapDaoLine = (line: string, maxWidth: number): string[] => {
-    if (line.length <= maxWidth) return [line];
-    const words = line.split(/\s+/);
-    const out: string[] = [];
-    let current = "";
-    for (const word of words) {
-      if (word.length > maxWidth) {
-        if (current) {
-          out.push(current);
-          current = "";
-        }
-        for (let i = 0; i < word.length; i += maxWidth) out.push(word.slice(i, i + maxWidth));
-        continue;
-      }
-      if (current.length === 0) current = word;
-      else if (current.length + 1 + word.length <= maxWidth) current += ` ${word}`;
-      else {
-        out.push(current);
-        current = word;
-      }
-    }
-    if (current) out.push(current);
-    return out;
-  };
-
-  /** Frame the command output in a bordered panel with a close hint. */
-  const frameDaoPanel = (title: string, body: string, width: number): string[] => {
-    const inner = Math.max(20, Math.min(width - 4, 100));
-    const header = ` ${title} `;
-    const lines: string[] = [`┌${header}${"─".repeat(Math.max(0, inner + 2 - header.length))}┐`];
-    for (const raw of body.split("\n")) {
-      for (const wrapped of wrapDaoLine(raw, inner)) {
-        lines.push(`│ ${wrapped.padEnd(inner)} │`);
-      }
-    }
-    const hint = " Press Enter or Esc to close ";
-    lines.push(`│${" ".repeat(inner + 2)}│`);
-    lines.push(`│ ${hint.trim().padEnd(inner)} │`);
-    lines.push(`└${"─".repeat(inner + 2)}┘`);
-    return lines;
-  };
-
   /**
    * Display `/dao` command output. Pi discards handler return values, so the
    * output must be rendered explicitly. Interactive sessions get a focused
@@ -1153,21 +1164,29 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
     const ui = ctx?.ui;
     if (ui && typeof ui.custom === "function") {
       let factoryInvoked = false;
-      await ui.custom((_tui, _theme, _keybindings, done) => {
-        factoryInvoked = true;
-        return {
-          render: (width: number) => frameDaoPanel(title, body, width),
-          invalidate: () => {},
-          handleInput: (data: string) => {
-            if (data === "\r" || data === "\n" || data === "\x1b") done(undefined);
-          },
-        };
-      });
-      if (factoryInvoked) return;
-      // ui.custom was a silent no-op (headless host) — fall through to stdout.
+      try {
+        await ui.custom((_tui, _theme, _keybindings, done) => {
+          factoryInvoked = true;
+          return {
+            render: (width: number) => frameDaoPanel(title, body, width),
+            invalidate: () => {},
+            handleInput: (data: string) => {
+              if (data === "\r" || data === "\n" || data === "\x1b") done(undefined);
+            },
+          };
+        });
+        if (factoryInvoked) return;
+        // ui.custom was a silent no-op (headless host) — fall through to stdout.
+      } catch {
+        // A rejecting ui.custom must not swallow the output — fall through.
+      }
     } else if (ui && typeof ui.notify === "function") {
-      ui.notify(`${title}\n\n${body}`, "info");
-      return;
+      try {
+        ui.notify(`${title}\n\n${body}`, "info");
+        return;
+      } catch {
+        // Fall through to the terminal write.
+      }
     }
     process.stdout.write(`${body}\n`);
   };
