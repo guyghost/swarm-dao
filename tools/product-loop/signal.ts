@@ -77,12 +77,7 @@ const PRODUCER_EMISSIONS: Readonly<
   "contact-relay": { source: "tool", emits: new Set(["CONTACT_VOTE_OPENED", "CONTACT_VOTE_QUORUM"]) },
   "human-owner": {
     source: "human",
-    emits: new Set([
-      "REVIEW_RESOLVED",
-      "RETRY_VERIFICATION_AUTHORIZED",
-      "CONTACT_RELAY_AUTHORIZED",
-      "CANCEL",
-    ]),
+    emits: new Set(["REVIEW_RESOLVED", "RETRY_VERIFICATION_AUTHORIZED", "CONTACT_RELAY_AUTHORIZED", "CANCEL"]),
   },
 };
 

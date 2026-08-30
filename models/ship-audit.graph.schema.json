@@ -1,0 +1,118 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ship-audit.graph.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "version",
+    "scope",
+    "proposalStateAuthority",
+    "evidenceRoot",
+    "owner",
+    "nodes",
+    "edges",
+    "requiredAnchors",
+    "anchorCommands",
+    "maxRetries"
+  ],
+  "properties": {
+    "$schema": { "const": "./ship-audit.graph.schema.json" },
+    "id": { "const": "swarm-dao-ship-audit" },
+    "version": { "const": 1 },
+    "scope": { "const": "ship-confirmation" },
+    "proposalStateAuthority": { "const": "none" },
+    "evidenceRoot": { "const": ".dao/ship-audits" },
+    "owner": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "authority"],
+      "properties": {
+        "id": { "const": "human-owner" },
+        "kind": { "const": "human" },
+        "authority": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "enum": ["owns_target", "force_overrides", "cancels"] }
+        }
+      }
+    },
+    "nodes": {
+      "type": "array",
+      "minItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "kind", "authority", "emits"],
+        "properties": {
+          "id": { "enum": ["ship-handler", "fingerprint-sealer", "audit-recorder"] },
+          "kind": { "const": "deterministic" },
+          "authority": { "enum": ["gate", "anchor"] },
+          "emits": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "enum": [
+                "SHIP_REQUESTED",
+                "SHIP_CONSUMED",
+                "FINGERPRINT_SEALED",
+                "CHALLENGE_RECORDED",
+                "CONFIRMATION_RECORDED",
+                "OVERRIDE_RECORDED"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "edges": {
+      "type": "array",
+      "minItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["from", "to", "type"],
+        "properties": {
+          "from": { "enum": ["ship-handler", "fingerprint-sealer", "audit-recorder", "human-owner", "state-machine"] },
+          "to": { "enum": ["ship-handler", "fingerprint-sealer", "audit-recorder", "human-owner", "state-machine"] },
+          "type": { "enum": ["feeds", "validates", "requests", "authorizes", "owns_target", "force_overrides"] }
+        }
+      }
+    },
+    "requiredAnchors": {
+      "type": "array",
+      "minItems": 5,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "audit-model-contract",
+          "audit-graph-tests",
+          "audit-wiring-contract",
+          "audit-regression",
+          "audit-runtime-scenario"
+        ]
+      }
+    },
+    "anchorCommands": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "audit-model-contract",
+        "audit-graph-tests",
+        "audit-wiring-contract",
+        "audit-regression",
+        "audit-runtime-scenario"
+      ],
+      "properties": {
+        "audit-model-contract": { "const": "bun run shipaudit:validate" },
+        "audit-graph-tests": {
+          "const": "bun test packages/core/tests/ship-audit.machine.test.ts tools/ship-audit/tests"
+        },
+        "audit-wiring-contract": { "const": "bun test packages/core/tests/ship-audit.wiring.test.ts" },
+        "audit-regression": { "const": "bun run shipaudit:regression" },
+        "audit-runtime-scenario": { "const": "bun run shipaudit:demo" }
+      }
+    },
+    "maxRetries": { "const": 0 }
+  }
+}

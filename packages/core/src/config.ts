@@ -27,6 +27,12 @@ export interface DeliberationConfig {
   charsPerAgent?: number;
 }
 
+export interface ShipConfig {
+  /** Opt-in ship audit challenge: the first dao_ship call returns
+   *  AUDIT_REQUIRED; only an unchanged second call executes. */
+  auditChallenge?: boolean;
+}
+
 export interface ProjectConfig {
   mode: ActivationMode;
   agentOverrides?: Record<string, Partial<DAOAgent>>;
@@ -36,6 +42,7 @@ export interface ProjectConfig {
   bitbucket?: { enabled: boolean; workspace?: string; repo?: string };
   execution?: ExecutionConfig;
   deliberation?: DeliberationConfig;
+  ship?: ShipConfig;
 }
 
 export const DEFAULT_PROJECT_CONFIG: ProjectConfig = {

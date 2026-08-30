@@ -17,8 +17,10 @@ import {
   collectAttention,
   configureGitHub,
   createExecutionWorkspace,
+  evaluateShipAuditChallenge,
   FileDaoStateRepository,
   FsAttentionStore,
+  FsShipAuditStore,
   formatAttention,
   getAllAuditLog,
   getAuditLog,
@@ -429,12 +431,38 @@ async function cmdShip(cwd: string, positional: string[], flags: Record<string, 
 
   const repository = await ensureLoaded(cwd);
   const projectConfig = await loadConfig(getDaoRoot(cwd));
+
+  // Ship audit challenge (opt-in): first call challenges, unchanged second
+  // call proceeds (models/ship-audit.md).
+  let auditConsume: (() => Promise<void>) | undefined;
+  if (projectConfig.ship?.auditChallenge === true) {
+    const proposal = getProposal(id);
+    if (!proposal) err(`proposal #${id} not found`);
+    const gate = await evaluateShipAuditChallenge({
+      proposal,
+      store: new FsShipAuditStore(cwd),
+      challengeEnabled: true,
+      force,
+      forceReason: force ? "swarm-dao ship --force" : undefined,
+      options: { cascade },
+    });
+    if (!gate.proceed) {
+      info(`🛑 Ship audit — do not proceed yet:\n\n${gate.message}`);
+      info("\nRe-run the same command unchanged to confirm, or use --force (recorded bypass).");
+      return;
+    }
+    auditConsume = gate.consume;
+  }
+
   const workspace = createExecutionWorkspace(projectConfig.execution, cliRunner(), cwd);
   const result = await new ShipProposalUseCase({
     repository,
     clock: systemClock,
     workspace,
-  }).execute({ proposalId: id, actor: "cli", cascade, force });
+    // With the challenge enabled, force bypasses the audit ONLY —
+    // dependency checks still run.
+  }).execute({ proposalId: id, actor: "cli", cascade, force: auditConsume ? undefined : force });
+  await auditConsume?.();
   if (!result.ok) {
     if (result.error.includes("unexecuted dependencies found")) {
       info(`Run with --cascade to ship all dependencies first:`);

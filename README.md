@@ -276,6 +276,22 @@ Copilot/Claude/Codex adapters, Pi, OpenCode). It is a deterministic,
 read-only decision — the gate never edits files and never transitions
 proposal state.
 
+### Ship audit challenge (AUDIT_REQUIRED)
+
+Opt-in, per project:
+
+```json
+{ "ship": { "auditChallenge": true } }
+```
+
+The swarm-forge `AUDIT_REQUIRED` pattern adapted to shipping: the first
+`dao_ship` / `swarm-dao ship` call for a proposal does **not** execute — it
+returns `AUDIT_REQUIRED` and records the decision fingerprint (votes, gates,
+scope). Only a second, **unchanged** call executes; any change re-issues the
+challenge. `--force` / `force=true` is an explicit, audited human bypass.
+Snapshots persist in `.dao/ship-audits/`. No AI role exists in the model —
+confirmation is deterministic ([models/ship-audit.md](models/ship-audit.md)).
+
 ### Execution isolation (worktrees)
 
 When `execution.isolation` is `"worktree"` (default `"none"`), executing or

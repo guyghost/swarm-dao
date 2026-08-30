@@ -1,0 +1,58 @@
+{
+  "$schema": "./ship-audit.graph.schema.json",
+  "id": "swarm-dao-ship-audit",
+  "version": 1,
+  "scope": "ship-confirmation",
+  "proposalStateAuthority": "none",
+  "evidenceRoot": ".dao/ship-audits",
+  "owner": {
+    "id": "human-owner",
+    "kind": "human",
+    "authority": ["owns_target", "force_overrides", "cancels"]
+  },
+  "nodes": [
+    {
+      "id": "ship-handler",
+      "kind": "deterministic",
+      "authority": "gate",
+      "emits": ["SHIP_REQUESTED", "SHIP_CONSUMED"]
+    },
+    {
+      "id": "fingerprint-sealer",
+      "kind": "deterministic",
+      "authority": "anchor",
+      "emits": ["FINGERPRINT_SEALED"]
+    },
+    {
+      "id": "audit-recorder",
+      "kind": "deterministic",
+      "authority": "anchor",
+      "emits": ["CHALLENGE_RECORDED", "CONFIRMATION_RECORDED", "OVERRIDE_RECORDED"]
+    }
+  ],
+  "edges": [
+    { "from": "ship-handler", "to": "fingerprint-sealer", "type": "feeds" },
+    { "from": "fingerprint-sealer", "to": "state-machine", "type": "validates" },
+    { "from": "ship-handler", "to": "state-machine", "type": "requests" },
+    { "from": "state-machine", "to": "ship-handler", "type": "authorizes" },
+    { "from": "state-machine", "to": "audit-recorder", "type": "authorizes" },
+    { "from": "audit-recorder", "to": "state-machine", "type": "validates" },
+    { "from": "human-owner", "to": "state-machine", "type": "owns_target" },
+    { "from": "human-owner", "to": "state-machine", "type": "force_overrides" }
+  ],
+  "requiredAnchors": [
+    "audit-model-contract",
+    "audit-graph-tests",
+    "audit-wiring-contract",
+    "audit-regression",
+    "audit-runtime-scenario"
+  ],
+  "anchorCommands": {
+    "audit-model-contract": "bun run shipaudit:validate",
+    "audit-graph-tests": "bun test packages/core/tests/ship-audit.machine.test.ts tools/ship-audit/tests",
+    "audit-wiring-contract": "bun test packages/core/tests/ship-audit.wiring.test.ts",
+    "audit-regression": "bun run shipaudit:regression",
+    "audit-runtime-scenario": "bun run shipaudit:demo"
+  },
+  "maxRetries": 0
+}
