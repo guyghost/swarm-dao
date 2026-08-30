@@ -7,6 +7,8 @@ import type { BenchmarkMeasurement, BenchmarkReport } from "../src/harness.js";
 const DEFAULT_RESULTS = "benchmark-results.json";
 const DEFAULT_BASELINE = "benchmark-baseline.json";
 const DEFAULT_THRESHOLD = 0.25;
+/** Absolute noise floor: timer jitter on microsecond-scale cases must not fail CI. */
+const DEFAULT_FLOOR_MS = 0.05;
 
 export type ComparisonStatus = "ok" | "new" | "regression";
 
@@ -27,6 +29,7 @@ export function compareReports(
   current: BenchmarkReport,
   baseline: BenchmarkReport | null,
   threshold: number,
+  floorMs: number = DEFAULT_FLOOR_MS,
 ): Comparison[] {
   const baselineByKey = new Map<string, BenchmarkMeasurement>(
     (baseline?.measurements ?? []).map((measurement) => [key(measurement), measurement]),
@@ -45,13 +48,17 @@ export function compareReports(
       };
     }
     const changeRatio = (measurement.meanMs - previous.meanMs) / previous.meanMs;
+    // A regression requires BOTH the relative threshold and the absolute
+    // noise floor: a 30% jump on a 10µs case is timer jitter, not a
+    // regression; a 30% jump on a 1ms case is real.
+    const regressed = changeRatio > threshold && measurement.meanMs - previous.meanMs > floorMs;
     return {
       suite: measurement.suite,
       name: measurement.name,
       currentMs: measurement.meanMs,
       baselineMs: previous.meanMs,
       changeRatio,
-      status: changeRatio > threshold ? ("regression" as const) : ("ok" as const),
+      status: regressed ? ("regression" as const) : ("ok" as const),
     };
   });
 }
@@ -79,6 +86,7 @@ async function main(): Promise<void> {
   const resultsFile = process.env.BENCH_RESULTS ?? DEFAULT_RESULTS;
   const baselineFile = process.env.BENCH_BASELINE ?? DEFAULT_BASELINE;
   const threshold = Number(process.env.BENCH_THRESHOLD ?? DEFAULT_THRESHOLD);
+  const floorMs = Number(process.env.BENCH_FLOOR_MS ?? DEFAULT_FLOOR_MS);
 
   const current = await readReport(resultsFile);
   if (!current) {
@@ -93,12 +101,12 @@ async function main(): Promise<void> {
     return;
   }
 
-  const comparisons = compareReports(current, baseline, threshold);
+  const comparisons = compareReports(current, baseline, threshold, floorMs);
   console.log(formatComparisons(comparisons));
 
   const regressions = comparisons.filter((comparison) => comparison.status === "regression");
   if (regressions.length > 0) {
-    console.error(`\n${regressions.length} regression(s) beyond ${(threshold * 100).toFixed(0)}%.`);
+    console.error(`\n${regressions.length} regression(s) beyond ${(threshold * 100).toFixed(0)}% and ${floorMs}ms.`);
     process.exit(1);
   }
 }
