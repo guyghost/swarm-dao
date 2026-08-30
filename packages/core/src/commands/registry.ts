@@ -183,6 +183,13 @@ export const DAO_COMMANDS: readonly DaoCommand[] = [
     hosts: ["mcp", "claude", "copilot", "codex", "pi", "opencode"],
   },
   {
+    id: "attention",
+    phase: "discover",
+    summary: "List pending human gates across workflow runs (read-only)",
+    args: "[--source <graph-engineering|improvement-loop|product-loop>,...]",
+    hosts: ["cli"],
+  },
+  {
     id: "dry-run",
     phase: "discover",
     summary: "Preview execution without applying changes",

@@ -8,10 +8,15 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { ProposalType, VotePosition } from "@guyghost/swarm-dao-core";
 import {
+  ATTENTION_SOURCES,
+  type AttentionSource,
   addVote,
   CreateProposalUseCase,
+  collectAttention,
   configureGitHub,
   FileDaoStateRepository,
+  FsAttentionStore,
+  formatAttention,
   getAllAuditLog,
   getAuditLog,
   getDaoCommandsByPhase,
@@ -94,6 +99,7 @@ const CLI_IMPLEMENTED = [
   "github-pr",
   "config",
   "audit",
+  "attention",
   "status",
   "help",
 ] as const;
@@ -113,6 +119,7 @@ const CLI_USAGE_DETAILS: Record<string, string> = {
   "github-pr": "  github-pr <proposal-id> --head-branch <b>",
   config: "  config",
   audit: "  audit [--proposal <id>]",
+  attention: "  attention [--source <graph-engineering|improvement-loop|product-loop>,...]",
 };
 
 /** All commands in the registry, grouped by phase, for lookup by id. */
@@ -304,6 +311,25 @@ async function cmdAudit(cwd: string, flags: Record<string, string | true>): Prom
   for (const e of entries) {
     info(`[${e.timestamp}] #${e.proposalId} ${e.layer.padEnd(12)} ${e.action.padEnd(20)} by ${e.actor}`);
     if (e.details) info(`    ${e.details}`);
+  }
+}
+
+async function cmdAttention(cwd: string, flags: Record<string, string | true>): Promise<void> {
+  let sources: readonly AttentionSource[] | undefined;
+  if (typeof flags.source === "string") {
+    const requested = flags.source
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const invalid = requested.filter((s) => !ATTENTION_SOURCES.includes(s as AttentionSource));
+    if (invalid.length > 0) err(`invalid --source '${invalid.join(", ")}'. Allowed: ${ATTENTION_SOURCES.join(", ")}`);
+    sources = requested as AttentionSource[];
+  }
+
+  const items = await collectAttention(new FsAttentionStore(cwd), sources);
+  info(formatAttention(items));
+  for (const item of items) {
+    if (item.command) info(`  ${item.source}/${item.runId}: ${item.command}`);
   }
 }
 
@@ -583,6 +609,9 @@ export async function main(argv: string[], cwd: string = process.cwd()): Promise
         return 0;
       case "audit":
         await cmdAudit(cwd, flags);
+        return 0;
+      case "attention":
+        await cmdAttention(cwd, flags);
         return 0;
       case "status":
         await cmdStatus(cwd);
