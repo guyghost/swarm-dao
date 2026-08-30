@@ -1,5 +1,19 @@
 # @guyghost/swarm-dao-cli
 
+## 0.2.3
+
+### Patch Changes
+
+- ecfa79a: Add opt-in execution isolation via git worktrees. When `execution.isolation` is `"worktree"` in `.dao/config.json`, executing a proposal first provisions a dedicated worktree (branch `dao/<id>-<slug>` under `.dao/worktrees`), the execution snapshot and audit record the real branch, and merging back stays a separate deliberate action. Includes: pure `planExecutionIsolation`, an `ExecutionWorkspacePort` injected into ExecuteProposalUseCase/ShipProposalUseCase, a `GitWorkspace` adapter (idempotent retry, branch-exists fallback) wired into `dao_execute` on every host and `swarm-dao ship` on the CLI. A failed preparation leaves the proposal `controlled`.
+- Updated dependencies [1c20921]
+- Updated dependencies [eb686bd]
+- Updated dependencies [ecfa79a]
+- Updated dependencies [831a124]
+- Updated dependencies [ecd1d32]
+- Updated dependencies [34fa76e]
+- Updated dependencies [c561bb7]
+  - @guyghost/swarm-dao-core@0.5.0
+
 ## 0.2.2
 
 ### Patch Changes

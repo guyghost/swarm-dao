@@ -1,5 +1,23 @@
 # @guyghost/swarm-dao-pi-adapter
 
+## 0.3.0
+
+### Minor Changes
+
+- 34fa76e: Wire the `mode` and `criticalPaths` configuration into a deterministic edit gate: `dao_check_edit` (exposed on MCP, Copilot/Claude/Codex adapters, Pi, and OpenCode) lets agents check the files they are about to touch before editing. `opt-in` flags critical paths informationally, `suggest` adds a non-blocking proposal nudge on uncovered critical paths, and `enforce` blocks critical paths unless an approved, controlled, or executed proposal declares them in `affectedPaths`. The gate is pure and read-only — it never edits files and never transitions proposal state. Previously `mode` and `criticalPaths` were documented as reserved schema with no host wiring.
+- c561bb7: Expose the GitHub integration on the Pi extension and the OpenCode plugin: `dao_config_github`, `dao_github_create_branch`, and `dao_github_open_pr` are now registered as native tools on both hosts (previously CLI + MCP only). The registry entries list `pi` and `opencode`, and the three host-tool handlers now read state through the context repository instead of the process-global legacy bridge.
+
+### Patch Changes
+
+- Updated dependencies [1c20921]
+- Updated dependencies [eb686bd]
+- Updated dependencies [ecfa79a]
+- Updated dependencies [831a124]
+- Updated dependencies [ecd1d32]
+- Updated dependencies [34fa76e]
+- Updated dependencies [c561bb7]
+  - @guyghost/swarm-dao-core@0.5.0
+
 ## 0.2.2
 
 ### Patch Changes
