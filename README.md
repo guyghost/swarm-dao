@@ -80,6 +80,7 @@ for the pattern all non-native hosts share).
 | `@guyghost/swarm-dao-codex-adapter` | OpenAI Codex plugin (MCP + AGENTS.md) |
 | `@guyghost/swarm-dao-pi-adapter` | Bridge to Pi coding agent |
 | `@guyghost/swarm-dao-opencode-adapter` | Bridge to OpenCode |
+| `@guyghost/swarm-dao-tmux-adapter` | tmux host — one watchable pane per agent (swarm-forge model) |
 | `@guyghost/swarm-dao-cli` | Standalone CLI (`swarm-dao`) |
 
 ## 4-Layer Governance
@@ -468,6 +469,20 @@ DAO state stored in `.dao/`:
 - `config.json` — per-project configuration
 
 Previously each proposal was also mirrored in `.dao/proposals/NNN.json` "sidecar" files; that redundant copy has been removed. On the first load after upgrading, any existing sidecars are imported into `state.json` and the `proposals/` directory is removed.
+
+## tmux Host (one watchable pane per agent)
+
+The swarm-forge execution model for deliberation: each agent runs as its own
+detached tmux pane — watch it live with `tmux attach`, inspect scrollback
+after the fact. Configure the agent CLI in `.dao/config.json`:
+
+```json
+{ "tmux": { "command": "claude -p \"$PROMPT\"", "timeoutMs": 300000 } }
+```
+
+`$PROMPT` carries the deliberation prompt; stdout is harvested as the
+agent's output and feeds the same deterministic tally as every other host.
+See [packages/tmux-adapter](packages/tmux-adapter/README.md).
 
 ## Adding a New Host
 
