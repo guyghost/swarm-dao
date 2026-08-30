@@ -81,6 +81,7 @@ for the pattern all non-native hosts share).
 | `@guyghost/swarm-dao-pi-adapter` | Bridge to Pi coding agent |
 | `@guyghost/swarm-dao-opencode-adapter` | Bridge to OpenCode |
 | `@guyghost/swarm-dao-tmux-adapter` | tmux host — one watchable pane per agent (swarm-forge model) |
+| `@guyghost/swarm-dao-herdr-adapter` | herdr host — each agent is a real coding agent in a herdr workspace |
 | `@guyghost/swarm-dao-cli` | Standalone CLI (`swarm-dao`) |
 
 ## 4-Layer Governance
@@ -469,6 +470,22 @@ DAO state stored in `.dao/`:
 - `config.json` — per-project configuration
 
 Previously each proposal was also mirrored in `.dao/proposals/NNN.json` "sidecar" files; that redundant copy has been removed. On the first load after upgrading, any existing sidecars are imported into `state.json` and the `proposals/` directory is removed.
+
+## herdr Host (real coding agents in herdr workspaces)
+
+Each deliberation agent runs as a **real coding agent** (pi, claude, codex,
+grok, opencode…) inside an isolated [herdr](https://herdr.dev) workspace —
+herdr tracks its lifecycle, you can attach to any agent pane live, and a
+**blocked** agent (approval/question UI) surfaces as an error output, never
+as a vote.
+
+```typescript
+import { createHerdrHostAdapter } from "@guyghost/swarm-dao-herdr-adapter";
+const adapter = createHerdrHostAdapter({ workDir: process.cwd(), kind: "pi" });
+```
+
+Prerequisites: `herdr` installed and its server running. See
+[packages/herdr-adapter](packages/herdr-adapter/README.md).
 
 ## tmux Host (one watchable pane per agent)
 
