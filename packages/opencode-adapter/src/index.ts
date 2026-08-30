@@ -482,7 +482,13 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
         async execute(_args: any, _context: any) {
           const state = getState();
           if (!state.initialized) return OPENCODE_ONBOARDING_MESSAGE;
-          const dashboard = generateDashboard(state.proposals, state.outcomes, state.agents, state.healthSnapshots);
+          const dashboard = generateDashboard(
+            state.proposals,
+            state.outcomes,
+            state.agents,
+            state.healthSnapshots,
+            state.config.healthWeights,
+          );
           const health = computeHealthScore(state.proposals, state.outcomes, state.config.healthWeights);
           return `${dashboard}\n\n${formatHealthScore(health)}`;
         },

@@ -197,13 +197,14 @@ export function generateDashboard(
   outcomes: Record<number, ProposalOutcome>,
   agents: { id: string; name: string; weight: number }[],
   snapshots?: HealthSnapshot[],
+  weights: HealthWeights = DEFAULT_HEALTH_WEIGHTS,
 ): string {
   const byStatus: Record<string, number> = {};
   for (const p of proposals) {
     byStatus[p.status] = (byStatus[p.status] || 0) + 1;
   }
 
-  const health = computeHealthScore(proposals, outcomes);
+  const health = computeHealthScore(proposals, outcomes, weights);
 
   let output = "# 🏛️ DAO Dashboard\n\n";
   output += `## Overview\n`;

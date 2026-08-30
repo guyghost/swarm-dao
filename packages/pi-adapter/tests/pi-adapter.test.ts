@@ -275,6 +275,71 @@ describe("swarmDaoExtension", () => {
       expect(result).toContain("# 🏥 DAO Health Score");
     });
 
+    it("/dao dashboard health scores agree with configured weights", async () => {
+      const { initStorage, setState, getOrCreateState, initializeAgents } = await import("@guyghost/swarm-dao-core");
+      await initStorage(process.cwd());
+      const state = getOrCreateState(process.cwd());
+      state.initialized = true;
+      state.agents = initializeAgents();
+      // Three executed proposals with 5★ ratings: passRate=100, avgRating=100,
+      // deliberationDepth=0, participation=100.
+      state.proposals = [1, 2, 3].map((id) => ({
+        id,
+        title: `P${id}`,
+        type: "product-feature",
+        description: "d",
+        proposedBy: "t",
+        status: "executed",
+        votes: [],
+        agentOutputs: [],
+      })) as never;
+      state.outcomes = {
+        1: {
+          proposalId: 1,
+          ratings: [{ proposalId: 1, rater: "a", score: 5, comment: "", ratedAt: "" }],
+          metrics: [],
+          overallScore: 5,
+          status: "tracked",
+          createdAt: "",
+          updatedAt: "",
+        },
+        2: {
+          proposalId: 2,
+          ratings: [{ proposalId: 2, rater: "a", score: 5, comment: "", ratedAt: "" }],
+          metrics: [],
+          overallScore: 5,
+          status: "tracked",
+          createdAt: "",
+          updatedAt: "",
+        },
+        3: {
+          proposalId: 3,
+          ratings: [{ proposalId: 3, rater: "a", score: 5, comment: "", ratedAt: "" }],
+          metrics: [],
+          overallScore: 5,
+          status: "tracked",
+          createdAt: "",
+          updatedAt: "",
+        },
+      } as never;
+      // Weights that would yield a different score than the 25/25/25/25 defaults.
+      state.config.healthWeights = { passRate: 100, avgRating: 0, deliberationDepth: 0, participation: 0 };
+      setState(state);
+
+      const mod = await import("@guyghost/swarm-dao-pi-adapter");
+      const pi = createMockPi();
+      mod.default(pi);
+
+      const daoCommand = pi.commands.find((c) => c.name === "dao");
+      const result = await daoCommand?.handler("status", {});
+      // Overview line and appended score section must agree (100 with these
+      // weights — 80 under defaults, which is the pre-fix conflict).
+      const overview = result?.match(/\*\*Health:\*\* (\d+)\/100/)?.[1];
+      const section = result?.match(/DAO Health Score: (\d+)\/100/)?.[1];
+      expect(overview).toBe("100");
+      expect(section).toBe("100");
+    });
+
     it("/dao help returns the registry-driven command list", async () => {
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
@@ -542,6 +607,24 @@ describe("swarmDaoExtension", () => {
 
       const handler = pi.events.find((e) => e.event === "session_start")?.handler;
       await expect(handler({}, {})).resolves.toBeUndefined();
+    });
+
+    it("deselects a previously opened repository when a reopen fails", async () => {
+      const mod = await import("@guyghost/swarm-dao-pi-adapter");
+      const pi = createMockPi();
+      mod.default(pi);
+
+      const handler = pi.events.find((e) => e.event === "session_start")?.handler;
+      // First open succeeds and selects the core repository.
+      await handler({}, {});
+      const { getState } = await import("@guyghost/swarm-dao-core");
+      expect(() => getState()).not.toThrow();
+
+      // Corrupt the state file: the failed reopen must deselect the stale
+      // repository instead of silently serving the previous session's state.
+      await fs.writeFile(path.join(DAO_ROOT, "state.json"), "{ not valid json", "utf8");
+      await handler({}, {});
+      expect(() => getState()).toThrow();
     });
   });
 

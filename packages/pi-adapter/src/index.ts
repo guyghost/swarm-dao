@@ -539,6 +539,10 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
     } catch (error) {
       // A corrupt state file must not brick the session: tools and the /dao
       // command surface the onboarding message until storage is readable.
+      // Deselect any previously opened repository so a failed reopen can
+      // never serve (or overwrite) a prior session's state.
+      repository = undefined;
+      setRepository(null);
       const message = error instanceof Error ? error.message : String(error);
       logger.warn(`[pi-adapter] Failed to open DAO storage at ${cwd}: ${message}`);
     }
@@ -838,7 +842,13 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
     async execute(_id, _params: DaoDashboardParams) {
       const state = getState();
       if (!state.initialized) return toolResult(PI_ONBOARDING_MESSAGE);
-      const dashboard = generateDashboard(state.proposals, state.outcomes, state.agents, state.healthSnapshots);
+      const dashboard = generateDashboard(
+        state.proposals,
+        state.outcomes,
+        state.agents,
+        state.healthSnapshots,
+        state.config.healthWeights,
+      );
       const health = computeHealthScore(state.proposals, state.outcomes, state.config.healthWeights);
       return toolResult(`${dashboard}\n\n${formatHealthScore(health)}`);
     },
@@ -1020,7 +1030,13 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
   // the matching `dao_*` tool; read-only commands render inline.
   const renderDashboard = (state: ReturnType<typeof getState>): string => {
     // Mirror the `dao_dashboard` tool exactly (pipeline + health metrics + score).
-    const dashboard = generateDashboard(state.proposals, state.outcomes, state.agents, state.healthSnapshots);
+    const dashboard = generateDashboard(
+      state.proposals,
+      state.outcomes,
+      state.agents,
+      state.healthSnapshots,
+      state.config.healthWeights,
+    );
     const health = computeHealthScore(state.proposals, state.outcomes, state.config.healthWeights);
     return `${dashboard}\n\n${formatHealthScore(health)}`;
   };

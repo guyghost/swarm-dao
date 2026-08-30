@@ -125,6 +125,30 @@ describe("health-score", () => {
     expect(dashboard).toContain("executed: 1");
   });
 
+  it("generateDashboard honors custom weights in its overview score", () => {
+    const executed = [1, 2, 3].map((id) => ({
+      id,
+      title: `P${id}`,
+      type: "product-feature" as const,
+      description: "",
+      proposedBy: "",
+      status: "executed" as const,
+      votes: [],
+      agentOutputs: [],
+      createdAt: "",
+    }));
+    // No agent outputs → deliberationDepth = 0; everything else = 100.
+    // Defaults (25 each) → 75; passRate-only weights → 100.
+    const weights = { passRate: 100, avgRating: 0, deliberationDepth: 0, participation: 0 };
+
+    const dashboard = generateDashboard(executed, {}, [{ id: "a", name: "Agent A", weight: 3 }], undefined, weights);
+
+    expect(dashboard).toContain("**Health:** 100/100");
+    // Sanity: the same data under default weights scores differently (50).
+    const defaults = generateDashboard(executed, {}, [{ id: "a", name: "Agent A", weight: 3 }]);
+    expect(defaults).toContain("**Health:** 50/100");
+  });
+
   it("computes health trend", () => {
     const snapshots = [
       { weekKey: "W1", year: 2026, week: 1, score: 60, metrics: [], proposalCount: 5, createdAt: "" },
