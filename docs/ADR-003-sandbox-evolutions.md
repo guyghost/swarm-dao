@@ -2,7 +2,10 @@
 
 ## Status
 
-Proposed (2026-08-31)
+Accepted (2026-08-31) — rollout steps 1-2 implemented in the same change set
+(sandbox command builder promoted to core delivery, `execution.isolation:
+"sandbox"` planned and provisioned with a runtime probe); step 3 is the
+env-gated integration test included here.
 
 ## Context
 

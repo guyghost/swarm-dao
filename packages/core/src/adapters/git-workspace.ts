@@ -16,21 +16,34 @@ const GIT_TIMEOUT_MS = 60_000;
 
 /**
  * Build the workspace port from a project config: undefined (no isolation)
- * unless config.execution.isolation === "worktree". Fails closed — an absent
- * or malformed config never enables isolation.
+ * unless config.execution.isolation is "worktree" or "sandbox" (ADR-003).
+ * Fails closed — an absent or malformed config never enables isolation; a
+ * malformed sandbox section surfaces as an invalid plan at prepare time.
  */
 export function createExecutionWorkspace(
-  execution: { isolation?: string; worktreeRoot?: string; baseBranch?: string } | undefined,
+  execution:
+    | {
+        isolation?: string;
+        worktreeRoot?: string;
+        baseBranch?: string;
+        sandbox?: { runtime?: string; image?: string; cpus?: number; memoryMb?: number };
+      }
+    | undefined,
   runner: CommandRunnerPort,
   repositoryRoot: string,
 ): ExecutionWorkspacePort | undefined {
-  if (execution?.isolation !== "worktree") return undefined;
+  if (execution?.isolation !== "worktree" && execution?.isolation !== "sandbox") return undefined;
+  // Raw pass-through: the planner validates runtime/image and fails closed on
+  // invalid config (coercing "podman" to docker would fake the boundary —
+  // Copilot review on #85).
+  const sandbox = execution.isolation === "sandbox" ? execution.sandbox : undefined;
   return new GitWorkspace({
     runner,
     repositoryRoot,
-    isolation: "worktree",
+    isolation: execution.isolation,
     worktreeRoot: execution.worktreeRoot,
     baseBranch: execution.baseBranch ?? null,
+    ...(sandbox ? { sandbox } : {}),
   });
 }
 
@@ -61,6 +74,20 @@ export class GitWorkspace implements ExecutionWorkspacePort {
       // No isolation: still report the deterministic branch name so the
       // execution snapshot can carry it, but change nothing on disk.
       return { ok: true, branch: `dao/${proposal.id}-${slugify(proposal.title) || "proposal"}`, path: null };
+    }
+
+    if (plan.mode === "sandbox") {
+      // Probe the runtime before touching git: an evolution that cannot be
+      // bounded must not silently degrade to host execution (ADR-003).
+      const probe = await this.#exec(`${plan.runtime} --version`);
+      if (!probe.ok) {
+        return {
+          ok: false,
+          error:
+            `sandbox runtime '${plan.runtime}' is not available on this host (${probe.error}). ` +
+            `Install Docker or Apple container, or set execution.isolation to "worktree".`,
+        };
+      }
     }
 
     // Idempotent retry: the worktree may already exist and be checked out on

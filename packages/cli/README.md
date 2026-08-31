@@ -68,6 +68,28 @@ overridden. The `sandbox` section is optional: `mode` is `none` (default),
 in. Evidence accumulates under `.dao/improvement-series/` and
 `.dao/improvement-cycles/` (override with `--evidence-root` / `--cycle-root`).
 
+### 4. Sandboxed proposal execution (optional)
+
+By default proposal execution runs on the host. `.dao/config.json` can bind
+execution to a git worktree — optionally inside a bounded container
+(ADR-003):
+
+```json
+{
+  "execution": {
+    "isolation": "sandbox",
+    "worktreeRoot": ".dao/worktrees",
+    "baseBranch": "main",
+    "sandbox": { "runtime": "container", "image": "node:22-bookworm", "cpus": 2, "memoryMb": 2048 }
+  }
+}
+```
+
+`isolation` is `none` (default), `worktree` (host worktree), or `sandbox`
+(worktree + container: repository mounted at `/workspace`, network disabled,
+CPU/memory capped). The container runtime is probed before anything runs — a
+missing runtime is an honest error, never a silent host fallback.
+
 ## Commands
 
 | Command | Purpose |

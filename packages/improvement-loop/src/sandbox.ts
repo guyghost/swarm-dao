@@ -12,16 +12,15 @@
 
 import { exec as execCallback } from "node:child_process";
 import { promisify } from "node:util";
+import { buildSandboxCommand, SANDBOX_WORKDIR_MOUNT, validateSandboxImage } from "@guyghost/swarm-dao-core/delivery";
 
 export type SandboxMode = "none" | "docker" | "container" | "auto";
 
-export const SANDBOX_WORKDIR_MOUNT = "/workspace";
-const DEFAULT_CPUS = 2;
-const DEFAULT_MEMORY_MB = 2048;
+// The pure container command builder and image validation live in core
+// (delivery/sandbox-command) and are shared with the delivery layer; this
+// module keeps the executor-side concerns (runtime detection, outcome runner).
+
 const DEFAULT_TIMEOUT_MS = 600_000;
-/** OCI image reference: optional registry host, repo path, optional tag/digest. */
-const SAFE_IMAGE =
-  /^[a-z0-9]+(?:[._-][a-z0-9]+)*(?::[0-9]{1,5})?(\/[a-z0-9]+(?:[._/-][a-z0-9]+)*)?(:[a-zA-Z0-9._-]{1,128})?(@sha256:[a-f0-9]{64})?$/;
 
 export interface SandboxOptions {
   mode: Exclude<SandboxMode, "none">;
@@ -42,6 +41,9 @@ export type SandboxExecRunner = (
 
 export type AnchorCommandRunner = (command: string) => Promise<AnchorCommandOutcome>;
 
+export type { SandboxCommandOptions } from "@guyghost/swarm-dao-core/delivery";
+export { buildSandboxCommand, SANDBOX_WORKDIR_MOUNT, validateSandboxImage };
+
 const execAsync = promisify(execCallback);
 
 const defaultExecRunner: SandboxExecRunner = async (command, timeoutMs) => {
@@ -58,58 +60,6 @@ const defaultExecRunner: SandboxExecRunner = async (command, timeoutMs) => {
   }
 };
 
-const boundedInt = (value: number | undefined, fallback: number, min: number, max: number): number => {
-  const parsed = typeof value === "number" && Number.isFinite(value) ? Math.trunc(value) : fallback;
-  return Math.min(Math.max(parsed, min), max);
-};
-
-const shellQuote = (value: string): string => `'${value.replace(/'/g, `'\\''`)}'`;
-
-/** Fail closed on anything that is not a plain OCI image reference. */
-export function validateSandboxImage(image: string): string | null {
-  if (typeof image !== "string" || image.length === 0 || image.length > 256) {
-    return "sandbox image must be a non-empty image reference";
-  }
-  if (!SAFE_IMAGE.test(image)) {
-    return `sandbox image '${image}' is not a plain OCI reference (registry/repo[:tag][@digest])`;
-  }
-  return null;
-}
-
-/** Build the bounded container command line for one anchor command. */
-export function buildSandboxCommand(options: SandboxOptions, command: string): string {
-  const imageError = validateSandboxImage(options.image);
-  if (imageError) throw new Error(imageError);
-  if (typeof options.workDir !== "string" || !options.workDir.startsWith("/")) {
-    throw new Error("sandbox workDir must be an absolute host path");
-  }
-
-  const cpus = boundedInt(options.cpus, DEFAULT_CPUS, 1, 64);
-  const memoryMb = boundedInt(options.memoryMb, DEFAULT_MEMORY_MB, 256, 1_048_576);
-  const runtime = options.mode === "docker" ? "docker" : "container";
-  // Both runtimes accept: --rm --network none --cpus N --memory <n>M -v host:target -w dir image sh -c cmd
-  const args = [
-    runtime,
-    "run",
-    "--rm",
-    "--network",
-    "none",
-    "--cpus",
-    String(cpus),
-    "--memory",
-    `${memoryMb}M`,
-    "-v",
-    shellQuote(`${options.workDir}:${SANDBOX_WORKDIR_MOUNT}`),
-    "-w",
-    SANDBOX_WORKDIR_MOUNT,
-    options.image,
-    "sh",
-    "-c",
-    shellQuote(command),
-  ];
-  return args.join(" ");
-}
-
 const tail = (value: string, max: number): string => (value.length <= max ? value : `…${value.slice(-max + 1)}`);
 
 /**
@@ -118,11 +68,11 @@ const tail = (value: string, max: number): string => (value.length <= max ? valu
  * failed — never as thrown exceptions above the machine.
  */
 export function createSandboxRunCommand(
-  options: SandboxOptions,
+  options: SandboxOptions & { mode: Exclude<SandboxMode, "none" | "auto"> },
   runner: SandboxExecRunner = defaultExecRunner,
 ): AnchorCommandRunner {
   return async (command: string): Promise<AnchorCommandOutcome> => {
-    const line = buildSandboxCommand(options, command);
+    const line = buildSandboxCommand({ ...options, runtime: options.mode }, command);
     const result = await runner(line, options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
     if (result.exitCode !== 0) {
       const detail = [result.stderr, result.stdout].filter((part) => part && part.length > 0).join(" ");

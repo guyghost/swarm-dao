@@ -132,3 +132,44 @@ describe("GitWorkspace", () => {
     }
   });
 });
+
+describe("GitWorkspace — sandbox mode (ADR-003)", () => {
+  test("probes the runtime before provisioning and fails honestly when it is missing", async () => {
+    const { runner, calls } = recordingRunner([
+      { stdout: "", stderr: "command not found", exitCode: 127 }, // container --version probe fails
+    ]);
+    const workspace = new GitWorkspace({
+      runner,
+      repositoryRoot: "/repo",
+      isolation: "sandbox",
+      sandbox: { runtime: "container", image: "node:22" },
+    });
+    const result = await workspace.prepare(proposal(7, "Sandbox it"));
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain("sandbox runtime 'container' is not available");
+    expect(calls[0]?.command).toBe("container --version");
+    expect(calls.length).toBe(1); // no git effect ran
+  });
+
+  test("provisions the worktree after a passing runtime probe", async () => {
+    const { runner, calls } = recordingRunner([
+      { stdout: "container CLI version 1.3.0", stderr: "", exitCode: 0 }, // probe
+      { stdout: "", stderr: "", exitCode: 1 }, // rev-parse: no existing worktree
+      { stdout: "", stderr: "", exitCode: 0 }, // worktree add
+    ]);
+    const workspace = new GitWorkspace({
+      runner,
+      repositoryRoot: "/repo",
+      isolation: "sandbox",
+      worktreeRoot: ".dao/worktrees",
+      sandbox: { runtime: "container", image: "node:22" },
+    });
+    const result = await workspace.prepare(proposal(7, "Sandbox it"));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.branch).toBe("dao/7-sandbox-it");
+      expect(result.path).toBe("/repo/.dao/worktrees/7-sandbox-it");
+    }
+    expect(calls[2]?.command).toContain("git worktree add -b dao/7-sandbox-it");
+  });
+});

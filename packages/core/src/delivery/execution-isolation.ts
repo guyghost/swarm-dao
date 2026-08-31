@@ -19,16 +19,31 @@
 
 import { slugify } from "../integrations/utils.js";
 import type { Proposal } from "../types/index.js";
+import { validateSandboxImage } from "./sandbox-command.js";
 
-export type ExecutionIsolationMode = "none" | "worktree";
+export type ExecutionIsolationMode = "none" | "worktree" | "sandbox";
+
+/**
+ * Container configuration for sandboxed execution (ADR-003). The shape is
+ * deliberately loose: runtime and image are operator input, validated by the
+ * planner — anything but docker/container fails closed as an invalid plan.
+ */
+export interface SandboxExecutionOptions {
+  runtime?: string;
+  image?: string;
+  cpus?: number;
+  memoryMb?: number;
+}
 
 export interface ExecutionIsolationOptions {
-  /** "none" (default, no isolation) or "worktree" (dedicated worktree). */
+  /** "none" (default), "worktree" (host worktree), or "sandbox" (worktree + bounded container). */
   isolation?: ExecutionIsolationMode;
   /** Directory (relative to the repository root) holding worktrees. */
   worktreeRoot?: string;
   /** Base branch for the execution branch; null lets git use HEAD. */
   baseBranch?: string | null;
+  /** Required when isolation is "sandbox": container runtime, image, and bounds. */
+  sandbox?: SandboxExecutionOptions;
 }
 
 export type ExecutionIsolationPlan =
@@ -45,6 +60,17 @@ export type ExecutionIsolationPlan =
       /** Worktree path relative to the repository root. */
       path: string;
       /** Configured base branch, or null for git's default (HEAD). */
+      baseBranch: string | null;
+    }
+  | {
+      /** Worktree + bounded container: files isolated by git, effects by the runtime. */
+      mode: "sandbox";
+      runtime: "docker" | "container";
+      image: string;
+      cpus: number;
+      memoryMb: number;
+      branch: string;
+      path: string;
       baseBranch: string | null;
     };
 
@@ -100,7 +126,8 @@ export function planExecutionIsolation(
   proposal: Pick<Proposal, "id" | "title">,
   options: ExecutionIsolationOptions = {},
 ): ExecutionIsolationPlan {
-  if (options.isolation !== "worktree") return { mode: "none" };
+  if (options.isolation !== "worktree" && options.isolation !== "sandbox") return { mode: "none" };
+  const sandboxed = options.isolation === "sandbox";
 
   const root = options.worktreeRoot && options.worktreeRoot.length > 0 ? options.worktreeRoot : DEFAULT_WORKTREE_ROOT;
   const rootError = validateWorktreeRoot(root);
@@ -114,14 +141,56 @@ export function planExecutionIsolation(
   }
   const baseBranch = typeof rawBase === "string" ? rawBase : null;
 
+  let runtime: "docker" | "container" = "docker";
+  let image = "";
+  let cpus: number | undefined;
+  let memoryMb: number | undefined;
+  if (sandboxed) {
+    // A sandbox plan without a runtime and a plain image reference fails
+    // closed: bounded execution with an unbounded image string would be
+    // theater (ADR-003).
+    const sandbox = options.sandbox;
+    if (!sandbox || (sandbox.runtime !== "docker" && sandbox.runtime !== "container")) {
+      return { mode: "invalid", error: 'sandbox isolation requires sandbox.runtime of "docker" or "container"' };
+    }
+    runtime = sandbox.runtime;
+    const imageCandidate = sandbox.image ?? "";
+    const imageError = validateSandboxImage(imageCandidate);
+    if (imageError) return { mode: "invalid", error: imageError };
+    image = imageCandidate;
+    cpus = sandbox.cpus;
+    memoryMb = sandbox.memoryMb;
+  }
+
   // slugify() output is strictly [a-z0-9-], so the derived branch and path
   // inherit the validated charset of the root.
   const slug = slugify(proposal.title) || "proposal";
   const trimmedRoot = root.replace(/\/+$/, "");
+  const branch = `dao/${proposal.id}-${slug}`;
+  const worktreePath = `${trimmedRoot}/${proposal.id}-${slug}`;
+  if (!sandboxed) {
+    return { mode: "worktree", branch, path: worktreePath, baseBranch };
+  }
+  const boundedCpus = boundedCpusValue(cpus);
+  const boundedMemoryMb = boundedMemoryValue(memoryMb);
   return {
-    mode: "worktree",
-    branch: `dao/${proposal.id}-${slug}`,
-    path: `${trimmedRoot}/${proposal.id}-${slug}`,
+    mode: "sandbox",
+    runtime,
+    image,
+    cpus: boundedCpus,
+    memoryMb: boundedMemoryMb,
+    branch,
+    path: worktreePath,
     baseBranch,
   };
 }
+
+const boundedCpusValue = (value: number | undefined): number => {
+  const parsed = typeof value === "number" && Number.isFinite(value) ? Math.trunc(value) : 2;
+  return Math.min(Math.max(parsed, 1), 64);
+};
+
+const boundedMemoryValue = (value: number | undefined): number => {
+  const parsed = typeof value === "number" && Number.isFinite(value) ? Math.trunc(value) : 2048;
+  return Math.min(Math.max(parsed, 256), 1_048_576);
+};

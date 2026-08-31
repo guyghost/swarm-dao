@@ -25,7 +25,7 @@ describe("improvement-loop — bounded sandbox execution", () => {
   });
 
   it("builds docker/container commands with network off, mount, limits and quoting", () => {
-    const base = { mode: "docker" as const, image: "node:22", workDir: "/repo root" };
+    const base = { runtime: "docker" as const, image: "node:22", workDir: "/repo root" };
     const docker = buildSandboxCommand(base, "npm test");
     expect(docker).toContain("docker run --rm --network none");
     expect(docker).toContain("--cpus 2");
@@ -34,7 +34,7 @@ describe("improvement-loop — bounded sandbox execution", () => {
     expect(docker).toContain("-w /workspace");
     expect(docker).toContain("node:22 sh -c");
 
-    const apple = buildSandboxCommand({ ...base, mode: "container", cpus: 4, memoryMb: 8192 }, "bun test");
+    const apple = buildSandboxCommand({ ...base, runtime: "container", cpus: 4, memoryMb: 8192 }, "bun test");
     expect(apple.startsWith("container run --rm --network none")).toBe(true);
     expect(apple).toContain("--cpus 4");
     expect(apple).toContain("--memory 8192M");
