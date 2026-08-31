@@ -1,5 +1,17 @@
 # @guyghost/swarm-dao-integration-tests
 
+## 0.1.5
+
+### Patch Changes
+
+- Updated dependencies [774bc5d]
+- Updated dependencies [08a8b29]
+  - @guyghost/swarm-dao-core@0.9.0
+  - @guyghost/swarm-dao-claude-adapter@0.2.6
+  - @guyghost/swarm-dao-codex-adapter@0.2.6
+  - @guyghost/swarm-dao-copilot-adapter@0.3.6
+  - @guyghost/swarm-dao-mcp@0.3.4
+
 ## 0.1.4
 
 ### Patch Changes

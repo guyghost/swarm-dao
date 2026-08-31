@@ -1,5 +1,15 @@
 # @guyghost/swarm-dao-core
 
+## 0.9.0
+
+### Minor Changes
+
+- 08a8b29: Improvement loop everywhere: new `@guyghost/swarm-dao-improvement` executor package (series orchestrator, cycle runner, herdr workers, per-project `.dao/improvement.json` anchor config) and `swarm-dao improve init|status|once|submit` CLI commands to run improvement series in any project. Anchor commands can execute in a bounded sandbox (`--sandbox docker|container|auto|none --image <ref>`: network off, repo mounted at /workspace, CPU/memory caps) via Docker or Apple container. Core gains the `models/improvement` export subpath and the `improve` registry entry.
+
+### Patch Changes
+
+- 774bc5d: Improvement loop arbitration: the counter-veto now keys on a frozen negative-outcome set (`declined`, `fell`) instead of the single string `declined`. The veto stays prompt-vocabulary independent — a sensor phrasing drift (found by dogfood-002) can no longer silently disarm it. Outcome strings are unchanged, so journal replay stays deterministic. Governed by Graph Engineering run `ge-arbitration-vocabulary` (model hash `417bfd8b…`).
+
 ## 0.8.0
 
 ### Minor Changes
