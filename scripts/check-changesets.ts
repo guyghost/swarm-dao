@@ -53,7 +53,10 @@ if (baseSha === sh("git rev-parse HEAD")) {
 
 // ── Changed files ────────────────────────────────────────────
 
-const changed = sh(`git diff --name-only ${baseSha}...HEAD`).split("\n").filter(Boolean);
+// --no-renames: a file moved out of src/ must appear as a deletion of its
+// old path (default rename detection would show only the destination and
+// let the move bypass the gate).
+const changed = sh(`git diff --name-only --no-renames ${baseSha}...HEAD`).split("\n").filter(Boolean);
 const srcTouched = changed.filter((f) => /^packages\/[^/]+\/src\//.test(f));
 if (srcTouched.length === 0) {
   console.log("check:changesets — no src/ changes; nothing to cover.");
