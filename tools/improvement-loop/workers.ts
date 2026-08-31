@@ -89,6 +89,11 @@ const escapeInStringControls = (candidate: string): string => {
         continue;
       }
     } else if (inString && escaped) {
+      if (char === "\n" || char === "\r" || char === "\t") {
+        // Hard-wrap injected between the backslash and its escaped character:
+        // drop the artifact and keep consuming the escape (Copilot review on #79).
+        continue;
+      }
       escaped = false;
     } else if (char === '"') {
       inString = true;

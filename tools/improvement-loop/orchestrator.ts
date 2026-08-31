@@ -66,9 +66,11 @@ const PHASE_WORKERS: Readonly<Record<WorkerPhase, readonly string[]>> = {
 // models/improvement-orchestrator.review.md); the machine binds only the
 // worker identities, the output contract, and the retry bound.
 const WORKER_PROMPTS: Readonly<Record<string, (scope: string) => string>> = {
-  // Sample values use the arbitration machine's vocabulary: only "declined"
-  // trips the counter-veto (arbitratePairedSignals), so the sensors must never
-  // be offered a synonym (e.g. "fell") for the negative outcome.
+  // Sample values are vocabulary-tolerant by model contract: the frozen
+  // negative-outcome set {declined, fell} (models/improvement-loop.md,
+  // "Deterministic arbitration policy") owns the counter-veto, so prompt
+  // phrasing can drift without disarming it. Prompts keep the canonical
+  // words so journal samples stay uniformly worded.
   sensor: (scope) =>
     `You are the sensor worker of a Swarm DAO improvement series for scope '${scope}'. ` +
     `Observe the optimizing metric for this scope in the repository around you, then answer with ONLY a JSON object: ` +

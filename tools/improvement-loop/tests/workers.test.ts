@@ -21,6 +21,17 @@ describe("extractLastJsonObject — terminal-harvested transcripts", () => {
     expect(extractLastJsonObject(content)).toEqual({ sample: { value: "a\\b", evidence: "x\ty\r\nz" } });
   });
 
+  it("drops a hard-wrap injected between a backslash and its escaped character (Copilot review on #79)", () => {
+    // Original JSON escape \\n split by a terminal wrap -> backslash, RAW newline, 'n'.
+    const splitEscape = '{"sample": {"value": "a\\' + "\n" + 'nb", "evidence": "e"}}';
+    expect(extractLastJsonObject(splitEscape)).toEqual({ sample: { value: "a\nb", evidence: "e" } });
+
+    // Original escaped quote \\" split by a wrap -> backslash, RAW newline, quote:
+    // the quote must stay escaped instead of closing the string.
+    const splitQuote = '{"sample": {"value": "say \\' + "\n" + '"kept", "evidence": "e"}}';
+    expect(extractLastJsonObject(splitQuote)).toEqual({ sample: { value: 'say "kept', evidence: "e" } });
+  });
+
   it("still returns null when no JSON object exists", () => {
     expect(extractLastJsonObject("no json here")).toBeNull();
   });
