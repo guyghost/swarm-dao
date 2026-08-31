@@ -427,6 +427,223 @@ function toolResult(content: string): {
   };
 }
 
+// ── /dao → tool execution bridge ─────────────────────────────
+// Pi slash commands cannot invoke Pi tools, but this extension owns both
+// surfaces. Every dao tool registers its `execute` in this map so the `/dao`
+// dispatcher can run the exact same logic and render the result itself.
+
+type DaoToolResult = {
+  content: Array<{ type: "text"; text: string }>;
+  details: Record<string, unknown>;
+};
+
+type DaoToolUpdate = {
+  content: DaoToolResult["content"];
+  details: Record<string, unknown>;
+};
+
+type DaoToolExecute = (
+  toolCallId: string,
+  params: Record<string, unknown>,
+  signal?: AbortSignal,
+  onUpdate?: (update: DaoToolUpdate) => void,
+  ctx?: ExtensionCommandContext,
+) => Promise<DaoToolResult>;
+
+/** Extract plain text from a tool result for command output rendering. */
+function daoToolResultText(result: DaoToolResult): string {
+  return result.content
+    .map((block) => (block.type === "text" ? block.text : ""))
+    .join("\n")
+    .trim();
+}
+
+/** Quote-aware tokenizer for `/dao` subcommand arguments. */
+export function tokenizeDaoArgs(input: string): string[] {
+  const tokens: string[] = [];
+  let current = "";
+  let quote: string | null = null;
+  let started = false;
+  for (const char of input) {
+    if (quote) {
+      if (char === quote) quote = null;
+      else current += char;
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      started = true;
+      continue;
+    }
+    if (/\s/.test(char)) {
+      if (current.length > 0 || started) tokens.push(current);
+      current = "";
+      started = false;
+      continue;
+    }
+    current += char;
+  }
+  if (current.length > 0 || started) tokens.push(current);
+  return tokens;
+}
+
+/** Usage lines for each tool reachable from the `/dao` command surface. */
+const DAO_ARG_USAGE: Record<string, string> = {
+  dao_propose:
+    '/dao propose "<title>" <type> <description…> — type: product-feature | technical-change | security-change | release-change | governance-change',
+  dao_deliberate: "/dao deliberate <proposalId>",
+  dao_check: "/dao check <proposalId>",
+  dao_execute: "/dao execute <proposalId>",
+  dao_ship: "/dao ship <proposalId> [--cascade] [--force]",
+  dao_rollback: "/dao rollback <proposalId>",
+  dao_plan: "/dao plan <proposalId>",
+  dao_artefacts: "/dao artefacts <proposalId>",
+  dao_dry_run: "/dao dry-run <proposalId>",
+  dao_rate: '/dao rate <proposalId> <1-5> "<comment>"',
+  dao_update_proposal:
+    "/dao update-proposal <proposalId> [--problem <text>] [--criteria <a,b>] [--metrics <a,b>] [--rollback <a,b>]",
+  dao_check_edit: "/dao check-edit <path> [<path…>]",
+  dao_config_github: "/dao github-config --token <token> --owner <owner> --repo <repo>",
+  dao_github_create_branch: "/dao github-branch <proposalId>",
+  dao_github_open_pr: "/dao github-pr <proposalId> <headBranch>",
+  dao_roundtable: "/dao roundtable",
+};
+
+function daoUsage(toolName: string): string {
+  return `Usage: ${DAO_ARG_USAGE[toolName] ?? "`/dao help`"}`;
+}
+
+/**
+ * Parse `/dao <subcommand>` argument tokens into tool parameters.
+ * Returns a usage/error string when required arguments are missing or invalid.
+ */
+export function parseDaoToolArgs(toolName: string, tokens: string[]): Record<string, unknown> | string {
+  const usage = daoUsage(toolName);
+
+  const splitFlags = (allowed: Record<string, "boolean" | "string">) => {
+    const flags: Record<string, string | boolean> = {};
+    const positional: string[] = [];
+    for (let i = 0; i < tokens.length; i++) {
+      const token = tokens[i];
+      if (token === undefined) continue;
+      if (token.startsWith("--")) {
+        const name = token.slice(2);
+        const kind = allowed[name];
+        if (!kind) return `Unknown flag: --${name}\n\n${usage}`;
+        if (kind === "boolean") {
+          flags[name] = true;
+          continue;
+        }
+        const value = tokens[i + 1];
+        if (value === undefined) return `Missing value for --${name}\n\n${usage}`;
+        flags[name] = value;
+        i++;
+        continue;
+      }
+      positional.push(token);
+    }
+    return { flags, positional };
+  };
+
+  const proposalIdFrom = (raw: string | undefined): number | string => {
+    if (raw === undefined) return usage;
+    const value = Number.parseInt(raw, 10);
+    if (Number.isNaN(value)) return `Invalid proposal ID: \`${raw}\`.\n\n${usage}`;
+    return value;
+  };
+
+  const commaList = (raw: string): string[] =>
+    raw
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+
+  switch (toolName) {
+    case "dao_roundtable":
+      return {};
+
+    case "dao_deliberate":
+    case "dao_check":
+    case "dao_execute":
+    case "dao_rollback":
+    case "dao_plan":
+    case "dao_artefacts":
+    case "dao_dry_run":
+    case "dao_github_create_branch": {
+      const proposalId = proposalIdFrom(tokens[0]);
+      return typeof proposalId === "string" ? proposalId : { proposalId };
+    }
+
+    case "dao_ship": {
+      const split = splitFlags({ cascade: "boolean", force: "boolean" });
+      if (typeof split === "string") return split;
+      const proposalId = proposalIdFrom(split.positional[0]);
+      if (typeof proposalId === "string") return proposalId;
+      return { proposalId, cascade: split.flags.cascade === true, force: split.flags.force === true };
+    }
+
+    case "dao_propose": {
+      const [title, type, ...descriptionTokens] = tokens;
+      if (!title || !type || descriptionTokens.length === 0) return usage;
+      if (!PROPOSAL_TYPES.includes(type as ProposalType)) {
+        return `Invalid type: \`${type}\`. Expected one of: ${PROPOSAL_TYPES.join(", ")}.\n\n${usage}`;
+      }
+      return { title, type, description: descriptionTokens.join(" ") };
+    }
+
+    case "dao_rate": {
+      const [idRaw, scoreRaw, ...commentTokens] = tokens;
+      const proposalId = idRaw === undefined ? Number.NaN : Number.parseInt(idRaw, 10);
+      const score = scoreRaw === undefined ? Number.NaN : Number.parseInt(scoreRaw, 10);
+      if (Number.isNaN(proposalId) || Number.isNaN(score) || score < 1 || score > 5 || commentTokens.length === 0) {
+        return usage;
+      }
+      return { proposalId, score, comment: commentTokens.join(" ") };
+    }
+
+    case "dao_update_proposal": {
+      const split = splitFlags({ problem: "string", criteria: "string", metrics: "string", rollback: "string" });
+      if (typeof split === "string") return split;
+      const proposalId = proposalIdFrom(split.positional[0]);
+      if (typeof proposalId === "string") return proposalId;
+      const params: Record<string, unknown> = { proposalId };
+      if (typeof split.flags.problem === "string") params.problemStatement = split.flags.problem;
+      if (typeof split.flags.criteria === "string") params.acceptanceCriteria = commaList(split.flags.criteria);
+      if (typeof split.flags.metrics === "string") params.successMetrics = commaList(split.flags.metrics);
+      if (typeof split.flags.rollback === "string") params.rollbackConditions = commaList(split.flags.rollback);
+      return params;
+    }
+
+    case "dao_check_edit": {
+      if (tokens.length === 0) return usage;
+      return { paths: [...tokens] };
+    }
+
+    case "dao_config_github": {
+      const split = splitFlags({ token: "string", owner: "string", repo: "string" });
+      if (typeof split === "string") return split;
+      const token = split.flags.token;
+      const owner = split.flags.owner;
+      const repo = split.flags.repo;
+      if (typeof token !== "string" || typeof owner !== "string" || typeof repo !== "string") return usage;
+      return { token, owner, repo };
+    }
+
+    case "dao_github_open_pr": {
+      const split = splitFlags({ "head-branch": "string" });
+      if (typeof split === "string") return split;
+      const proposalId = proposalIdFrom(split.positional[0]);
+      if (typeof proposalId === "string") return proposalId;
+      const headBranch = split.flags["head-branch"] ?? split.positional[1];
+      if (typeof headBranch !== "string" || headBranch.length === 0) return usage;
+      return { proposalId, headBranch };
+    }
+
+    default:
+      return {};
+  }
+}
+
 const PI_ONBOARDING_MESSAGE = [
   "# DAO not initialized",
   "",
@@ -584,6 +801,29 @@ export function frameDaoPanel(title: string, body: string, width: number): strin
 
 export default function swarmDaoExtension(pi: ExtensionAPI) {
   let repository: DaoStateRepositoryPort | undefined;
+
+  // Executors for this session's dao tools, keyed by tool name. The `/dao`
+  // dispatcher invokes these directly so slash commands run the same logic
+  // as the LLM-facing tools instead of routing users to them.
+  const daoToolExecutors = new Map<string, DaoToolExecute>();
+
+  /** Register a dao tool with Pi and capture its executor for `/dao`. */
+  const registerDaoTool = <TParams>(tool: {
+    name: string;
+    label?: string;
+    description: string;
+    parameters: unknown;
+    execute: (
+      toolCallId: string,
+      params: TParams,
+      signal?: AbortSignal,
+      onUpdate?: (update: DaoToolUpdate) => void,
+      ctx?: ExtensionCommandContext,
+    ) => Promise<DaoToolResult>;
+  }): void => {
+    daoToolExecutors.set(tool.name, tool.execute as unknown as DaoToolExecute);
+    pi.registerTool(tool);
+  };
   // Restore state on session start
   pi.on("session_start", async (_event, _ctx) => {
     const cwd = process.cwd();
@@ -644,7 +884,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
   });
 
   // ── Tool: dao_setup ──────────────────────────────────────
-  pi.registerTool({
+  registerDaoTool({
     name: "dao_setup",
     label: "DAO Setup",
     description: "Initialize the DAO with 7 default agents",
@@ -668,7 +908,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
   });
 
   // ── Tool: dao_propose ────────────────────────────────────
-  pi.registerTool({
+  registerDaoTool({
     name: "dao_propose",
     label: "DAO Propose",
     description: "Create a new proposal",
@@ -689,7 +929,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
   });
 
   // ── Tool: dao_deliberate ─────────────────────────────────
-  pi.registerTool({
+  registerDaoTool({
     name: "dao_deliberate",
     label: "DAO Deliberate",
     description: "Run swarm deliberation on a proposal",
@@ -729,7 +969,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
   });
 
   // ── Tool: dao_check ──────────────────────────────────────
-  pi.registerTool({
+  registerDaoTool({
     name: "dao_check",
     label: "DAO Check",
     description: "Run quality control gates",
@@ -752,7 +992,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
   });
 
   // ── Tool: dao_plan ───────────────────────────────────────
-  pi.registerTool({
+  registerDaoTool({
     name: "dao_plan",
     label: "DAO Plan",
     description: "Get delivery plan",
@@ -788,7 +1028,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
   });
 
   // ── Tool: dao_execute ────────────────────────────────────
-  pi.registerTool({
+  registerDaoTool({
     name: "dao_execute",
     label: "DAO Execute",
     description: "Execute a controlled proposal",
@@ -810,7 +1050,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
   });
 
   // ── Tool: dao_ship ───────────────────────────────────────
-  pi.registerTool({
+  registerDaoTool({
     name: "dao_ship",
     label: "DAO Ship",
     description: "Ship a controlled proposal (optionally cascade dependencies)",
@@ -837,7 +1077,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
   });
 
   // ── Tool: dao_audit ──────────────────────────────────────
-  pi.registerTool({
+  registerDaoTool({
     name: "dao_audit",
     label: "DAO Audit",
     description: "View audit trail",
@@ -852,7 +1092,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
   });
 
   // ── Tool: dao_artefacts ─────────────────────────────────
-  pi.registerTool({
+  registerDaoTool({
     name: "dao_artefacts",
     label: "DAO Artefacts",
     description: "View auto-generated artefacts for a proposal",
@@ -866,7 +1106,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
   });
 
   // ── Tool: dao_rate ───────────────────────────────────────
-  pi.registerTool({
+  registerDaoTool({
     name: "dao_rate",
     label: "DAO Rate",
     description: "Rate a proposal outcome post-execution (1-5 stars)",
@@ -888,7 +1128,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
   });
 
   // ── Tool: dao_dashboard ──────────────────────────────────
-  pi.registerTool({
+  registerDaoTool({
     name: "dao_dashboard",
     label: "DAO Dashboard",
     description: "View outcome tracking dashboard",
@@ -909,7 +1149,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
   });
 
   // ── Tool: dao_dry_run ────────────────────────────────────
-  pi.registerTool({
+  registerDaoTool({
     name: "dao_dry_run",
     label: "DAO Dry Run",
     description: "Preview execution without applying changes",
@@ -920,7 +1160,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
   });
 
   // ── Tool: dao_rollback ───────────────────────────────────
-  pi.registerTool({
+  registerDaoTool({
     name: "dao_rollback",
     label: "DAO Rollback",
     description: "Revert proposal execution to pre-execution snapshot",
@@ -931,7 +1171,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
   });
 
   // ── Tool: dao_roundtable ─────────────────────────────────
-  pi.registerTool({
+  registerDaoTool({
     name: "dao_roundtable",
     label: "DAO Roundtable",
     description: "Ask every agent to suggest a proposal idea",
@@ -952,7 +1192,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
   });
 
   // ── Tool: dao_update_proposal ────────────────────────────
-  pi.registerTool({
+  registerDaoTool({
     name: "dao_update_proposal",
     label: "DAO Update Proposal",
     description: "Update structured fields on an open proposal",
@@ -980,7 +1220,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
   });
 
   // ── Tool: dao_check_edit ─────────────────────────────────
-  pi.registerTool({
+  registerDaoTool({
     name: "dao_check_edit",
     label: "DAO Check Edit",
     description: "Check whether paths may be edited under the configured mode (opt-in/suggest/enforce)",
@@ -1004,7 +1244,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
   });
 
   // ── Tool: dao_config_github ─────────────────────────────
-  pi.registerTool({
+  registerDaoTool({
     name: "dao_config_github",
     label: "DAO GitHub Config",
     description: "Configure the GitHub integration (token, owner, repo)",
@@ -1030,7 +1270,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
   });
 
   // ── Tool: dao_github_create_branch ──────────────────────
-  pi.registerTool({
+  registerDaoTool({
     name: "dao_github_create_branch",
     label: "DAO GitHub Branch",
     description: "Create a GitHub branch (dao/<id>-<slug>) for a proposal",
@@ -1052,7 +1292,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
   });
 
   // ── Tool: dao_github_open_pr ────────────────────────────
-  pi.registerTool({
+  registerDaoTool({
     name: "dao_github_open_pr",
     label: "DAO GitHub PR",
     description: "Open a GitHub pull request for a proposal",
@@ -1219,14 +1459,14 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
       return matches.length > 0 ? matches.map((value) => ({ value, label: value })) : null;
     },
     handler: async (args, ctx) => {
-      await displayDaoOutput(ctx, "Swarm DAO", await runDaoCommand(args));
+      await displayDaoOutput(ctx, "Swarm DAO", await runDaoCommand(args, ctx));
     },
   });
 
   /** Pure dispatcher for the `/dao` command surface — returns the output text. */
-  const runDaoCommand = async (args: string): Promise<string> => {
+  const runDaoCommand = async (args: string, ctx: ExtensionCommandContext | undefined): Promise<string> => {
     const raw = args.trim();
-    const tokens = raw.split(/\s+/).filter(Boolean);
+    const tokens = tokenizeDaoArgs(raw);
     const subcommand = (tokens[0] ?? "").toLowerCase();
     const rest = tokens.slice(1);
 
@@ -1271,13 +1511,20 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
     const cmd = resolveDaoCommand(subcommand, "pi");
     if (!cmd) return suggestDaoCommand(subcommand, "pi");
 
-    // Known command → route to its Pi tool (slash commands can't call tools).
-    // Pi registers the quality-control tool as `dao_check`, so map the registry's
-    // canonical `dao_control` (and the `check` alias) onto it.
+    // Known command → execute its tool logic directly. Pi slash commands
+    // cannot invoke Pi tools, but this extension owns both surfaces, so the
+    // registered executor runs here and the result is rendered like any
+    // command output. Pi registers the quality-control tool as `dao_check`,
+    // so map the registry's canonical `dao_control` (and the `check` alias)
+    // onto it.
     if (cmd.tool) {
-      const tool = cmd.tool === "dao_control" ? "dao_check" : cmd.tool;
-      const argHint = cmd.args ? ` — e.g. \`${tool} ${cmd.args}\`` : "";
-      return `${cmd.summary}.\n\n→ Run the \`${tool}\` tool${argHint}.\n\n(\`/dao ${cmd.id}\` is the discovery alias; Pi executes it via the \`${tool}\` tool.)`;
+      const toolName = cmd.tool === "dao_control" ? "dao_check" : cmd.tool;
+      const executor = daoToolExecutors.get(toolName);
+      if (!executor) return suggestDaoCommand(subcommand, "pi");
+      const parsed = parseDaoToolArgs(toolName, rest);
+      if (typeof parsed === "string") return parsed;
+      const result = await executor(`dao-cmd-${cmd.id}`, parsed, undefined, undefined, ctx);
+      return daoToolResultText(result);
     }
     return suggestDaoCommand(subcommand, "pi");
   };
