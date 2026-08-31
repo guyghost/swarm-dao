@@ -18,6 +18,9 @@ evidence/graph-runs/
 # Improvement Loop local evidence
 evidence/improvement-cycles/
 
+# Improvement Orchestrator local evidence
+evidence/improvement-series/
+
 # Product Loop local evidence
 evidence/product-loops/
 

@@ -93,6 +93,29 @@ verifier decide outcomes.
 | `bun test packages/core/tests/improvement-loop.frozen.test.ts` | frozen-set-intact |
 | `bun run improvement:regression` | regression |
 
+## Improvement orchestrator (continuous series)
+
+`improvement-orchestrator.md` and `improvement-orchestrator.graph.json` define
+the continuous series layer that sits above the improvement loop: one series
+runs repeated improvement cycles on a fixed scope and reference, scheduling the
+next cycle only while cycles succeed. Its executable XState model lives in
+`packages/core/src/models/improvement-orchestrator.machine.ts`; the herdr
+worker executor and the series CLI live in `tools/improvement-loop/workers.ts`
+and `tools/improvement-loop/orchestrator.ts`.
+
+The orchestrator is correlation plus effect execution only: it never owns
+cycle state, never submits a human-source event to any machine, and pauses on
+the same human gates as the cycles it runs (`awaitingHumanCycleDecision`,
+`workerFailed`, `halted`). Series evidence under `evidence/improvement-series/`
+is gitignored.
+
+| command | purpose |
+|---|---|
+| `bun run improvement:series:init` | start a series (human; scope, reference hash, cooldown) |
+| `bun run improvement:series:status` | show the persisted series snapshot |
+| `bun run improvement:series:submit` | forward a human event (retry/restart/cancel) |
+| `bun run improvement:series:once` | execute the single effect authorized by the current state |
+
 ## Product loop (continuous product-loop)
 
 `product-loop.md` and `product-loop.graph.json` define the continuous

@@ -1,0 +1,108 @@
+{
+  "$schema": "./improvement-orchestrator.graph.schema.json",
+  "id": "swarm-dao-improvement-orchestrator",
+  "version": 1,
+  "scope": "improvement-series",
+  "cycleStateAuthority": "none",
+  "proposalStateAuthority": "none",
+  "evidenceRoot": "evidence/improvement-series",
+  "improvementGraph": "models/improvement-loop.graph.json",
+  "owner": {
+    "id": "human-owner",
+    "kind": "human",
+    "authority": [
+      "starts_series",
+      "retries_workers",
+      "restarts_halted_series",
+      "cancels_series"
+    ]
+  },
+  "nodes": [
+    {
+      "id": "series-machine",
+      "kind": "state_machine",
+      "authority": "series_state_only",
+      "emits": []
+    },
+    {
+      "id": "herdr-worker-executor",
+      "kind": "deterministic",
+      "authority": "executor",
+      "emits": ["WORKERS_HARVESTED", "WORKERS_FAILED"]
+    },
+    {
+      "id": "signal-submitter",
+      "kind": "deterministic",
+      "authority": "executor",
+      "emits": [
+        "CYCLE_INITIALIZED",
+        "SAMPLES_SUBMITTED",
+        "ARBITRATION_SUBMITTED",
+        "ANCHORS_SUBMITTED",
+        "EVALUATE_SUBMITTED",
+        "SIGNAL_REJECTED"
+      ]
+    },
+    {
+      "id": "anchor-executor",
+      "kind": "deterministic",
+      "authority": "executor",
+      "emits": ["ANCHORS_SUBMITTED"]
+    },
+    {
+      "id": "cycle-observer",
+      "kind": "deterministic",
+      "authority": "executor",
+      "emits": [
+        "CYCLE_SUCCEEDED",
+        "CYCLE_AWAITING_HUMAN",
+        "CYCLE_RESUMED",
+        "CYCLE_FAILED",
+        "CYCLE_BLOCKED",
+        "CYCLE_CANCELLED"
+      ]
+    },
+    {
+      "id": "scheduler",
+      "kind": "deterministic",
+      "authority": "executor",
+      "emits": ["COOLDOWN_ELAPSED"]
+    }
+  ],
+  "edges": [
+    { "from": "human-owner", "to": "series-machine", "type": "gates" },
+    { "from": "series-machine", "to": "herdr-worker-executor", "type": "authorizes" },
+    { "from": "herdr-worker-executor", "to": "series-machine", "type": "feeds" },
+    { "from": "series-machine", "to": "signal-submitter", "type": "authorizes" },
+    { "from": "signal-submitter", "to": "series-machine", "type": "feeds" },
+    { "from": "series-machine", "to": "anchor-executor", "type": "authorizes" },
+    { "from": "anchor-executor", "to": "series-machine", "type": "validates" },
+    { "from": "series-machine", "to": "cycle-observer", "type": "authorizes" },
+    { "from": "cycle-observer", "to": "series-machine", "type": "feeds" },
+    { "from": "series-machine", "to": "scheduler", "type": "authorizes" },
+    { "from": "scheduler", "to": "series-machine", "type": "feeds" },
+    { "from": "anchor-executor", "to": "improvement-loop.graph.json", "type": "frozen_commands_only" }
+  ],
+  "states": [
+    "idle",
+    "preparing",
+    "sampling",
+    "sealing",
+    "auditing",
+    "arbitrating",
+    "grounding",
+    "evaluating",
+    "observing",
+    "cooldown",
+    "awaitingHumanCycleDecision",
+    "workerFailed",
+    "halted",
+    "cancelled"
+  ],
+  "terminalStates": ["idle", "cancelled"],
+  "humanGatedStates": ["awaitingHumanCycleDecision", "workerFailed", "halted"],
+  "workerKinds": ["pi", "claude", "codex", "gemini", "cursor", "grok", "opencode"],
+  "defaultWorkerKind": "pi",
+  "maxWorkerRetries": 2,
+  "cooldownMs": { "minimum": 60000 }
+}
