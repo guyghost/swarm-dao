@@ -110,8 +110,10 @@ A **series** runs repeated **cycles** over a fixed scope and reference. Each
 cycle: two AI sensors sample the optimizing and counter metrics, a drift
 auditor compares behavior to the reference, a deterministic arbitrator
 combines the pair (the counter-metric can veto), the project's gate commands
-run as anchors, and the cycle ends `succeeded`, `adjusting` (human must review
-the reference), `retrying`, or `failed`. Evidence is journaled and replayed
+run as anchors, and the cycle ends in exactly one of: `succeeded`,
+`adjusting` (human must review the reference), `retrying`, `failed`,
+`blocked` (a tool reported a permission denial), or `cancelled` (human
+cancellation). Evidence is journaled and replayed
 deterministically — a state transition is only ever produced by the machine.
 
 ```bash
