@@ -608,20 +608,46 @@ Anchor commands come from .dao/improvement.json in the project (create it with
 an 'anchorCommands' object binding the four command-backed anchors). Evidence
 defaults to .dao/improvement-series and .dao/improvement-cycles.`;
 
+const SANDBOX_MODES = new Set(["none", "docker", "container", "auto"]);
+
 function sandboxRequestFrom(
   flags: Record<string, string | true>,
   config: { raw: Record<string, unknown> } | null,
 ): Parameters<typeof resolveSandboxRunCommand>[0] {
+  // parseFlags yields boolean `true` for value-less flags; silently coercing
+  // `--cpus` to Number(true) === 1 or `--sandbox` to auto-detection would hide
+  // operator typos (Copilot review on #82). Every sandbox flag must carry an
+  // explicit value.
+  const stringFlag = (name: string): string | undefined => {
+    const value = flags[name];
+    if (value === undefined) return undefined;
+    if (typeof value !== "string" || value.trim().length === 0) err(`--${name} requires a value`);
+    return value;
+  };
+  const numberFlag = (name: string): number | undefined => {
+    const raw = stringFlag(name);
+    if (raw === undefined) return undefined;
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed)) err(`--${name} must be a number, got '${raw}'`);
+    return parsed;
+  };
   const configSandbox =
     config && typeof config.raw.sandbox === "object" && config.raw.sandbox !== null
       ? (config.raw.sandbox as Record<string, unknown>)
       : {};
-  const mode = (flags.sandbox ?? configSandbox.mode) as SandboxMode | undefined;
+  const configString = (value: unknown): string | undefined =>
+    typeof value === "string" && value.trim().length > 0 ? value : undefined;
+
+  const mode = stringFlag("sandbox") ?? configString(configSandbox.mode);
+  if (mode !== undefined && !SANDBOX_MODES.has(mode)) {
+    err(`--sandbox must be one of none|docker|container|auto, got '${mode}'`);
+  }
   return {
-    sandbox: mode,
-    image: (flags.image ?? configSandbox.image) as string | undefined,
-    cpus: flags.cpus ? Number(flags.cpus) : (configSandbox.cpus as number | undefined),
-    memoryMb: flags["memory-mb"] ? Number(flags["memory-mb"]) : (configSandbox.memoryMb as number | undefined),
+    sandbox: mode as SandboxMode | undefined,
+    image: stringFlag("image") ?? configString(configSandbox.image),
+    cpus: numberFlag("cpus") ?? (typeof configSandbox.cpus === "number" ? configSandbox.cpus : undefined),
+    memoryMb:
+      numberFlag("memory-mb") ?? (typeof configSandbox.memoryMb === "number" ? configSandbox.memoryMb : undefined),
   };
 }
 
