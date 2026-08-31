@@ -9,6 +9,10 @@ const DEFAULT_BASELINE = "benchmark-baseline.json";
 const DEFAULT_THRESHOLD = 0.25;
 /** Absolute noise floor: timer jitter on microsecond-scale cases must not fail CI. */
 const DEFAULT_FLOOR_MS = 0.05;
+/** The calibration kernel caps how much runner slowness may relax the gate. */
+const MAX_SLOWDOWN = 3;
+
+export const CALIBRATION_SUITE = "calibration";
 
 export type ComparisonStatus = "ok" | "new" | "regression";
 
@@ -25,12 +29,41 @@ function key(measurement: { suite: string; name: string }): string {
   return `${measurement.suite}/${measurement.name}`;
 }
 
+const meanCalibrationMs = (report: BenchmarkReport | null): number | null => {
+  const entries = (report?.measurements ?? []).filter((measurement) => measurement.suite === CALIBRATION_SUITE);
+  if (entries.length === 0) return null;
+  return entries.reduce((sum, measurement) => sum + measurement.meanMs, 0) / entries.length;
+};
+
+/**
+ * Ratio of current to baseline calibration-kernel time. This is pure runner
+ * speed: shared CI runners routinely run whole jobs 30–60% slower, which used
+ * to surface as fleet-wide fake regressions. Returns null when either report
+ * has no calibration data (a pre-calibration baseline) so the caller can
+ * replace the baseline instead of comparing apples to oranges.
+ */
+export function calibrationSlowdown(
+  current: BenchmarkReport,
+  baseline: BenchmarkReport | null,
+  maxSlowdown: number = MAX_SLOWDOWN,
+): number | null {
+  const currentMs = meanCalibrationMs(current);
+  const baselineMs = meanCalibrationMs(baseline);
+  if (currentMs === null || baselineMs === null || baselineMs === 0 || currentMs === 0) return null;
+  if (!Number.isFinite(currentMs / baselineMs)) return null;
+  // A faster runner never tightens the gate; a slower one relaxes it, capped.
+  return Math.min(Math.max(currentMs / baselineMs, 1), maxSlowdown);
+}
+
 export function compareReports(
   current: BenchmarkReport,
   baseline: BenchmarkReport | null,
   threshold: number,
   floorMs: number = DEFAULT_FLOOR_MS,
+  slowdown: number = 1,
 ): Comparison[] {
+  const allowedThreshold = threshold + (slowdown - 1);
+  const allowedFloor = floorMs * slowdown;
   const baselineByKey = new Map<string, BenchmarkMeasurement>(
     (baseline?.measurements ?? []).map((measurement) => [key(measurement), measurement]),
   );
@@ -49,9 +82,11 @@ export function compareReports(
     }
     const changeRatio = (measurement.meanMs - previous.meanMs) / previous.meanMs;
     // A regression requires BOTH the relative threshold and the absolute
-    // noise floor: a 30% jump on a 10µs case is timer jitter, not a
-    // regression; a 30% jump on a 1ms case is real.
-    const regressed = changeRatio > threshold && measurement.meanMs - previous.meanMs > floorMs;
+    // noise floor — and both scale with measured runner slowdown, so a slow
+    // shared runner cannot fail the whole fleet while a genuine algorithmic
+    // regression (relative AND absolute, way beyond both scaled gates) still
+    // fails on any runner.
+    const regressed = changeRatio > allowedThreshold && measurement.meanMs - previous.meanMs > allowedFloor;
     return {
       suite: measurement.suite,
       name: measurement.name,
@@ -101,12 +136,27 @@ async function main(): Promise<void> {
     return;
   }
 
-  const comparisons = compareReports(current, baseline, threshold, floorMs);
+  // A baseline from before the calibration kernel existed cannot be compared
+  // against a calibrated run: replace it so the next comparison is apples to
+  // apples. This also makes the first CI run after this change green.
+  const slowdown = calibrationSlowdown(current, baseline);
+  if (slowdown === null) {
+    await fs.writeFile(baselineFile, `${JSON.stringify(current, null, 2)}\n`, "utf8");
+    console.log(`Baseline has no calibration data — replaced ${baselineFile} from the current run.`);
+    return;
+  }
+
+  const comparisons = compareReports(current, baseline, threshold, floorMs, slowdown);
   console.log(formatComparisons(comparisons));
+  console.log(
+    `\ncalibration: runner slowdown x${slowdown.toFixed(2)} -> gate at >${((threshold + slowdown - 1) * 100).toFixed(0)}% and ${(floorMs * slowdown).toFixed(3)}ms.`,
+  );
 
   const regressions = comparisons.filter((comparison) => comparison.status === "regression");
   if (regressions.length > 0) {
-    console.error(`\n${regressions.length} regression(s) beyond ${(threshold * 100).toFixed(0)}% and ${floorMs}ms.`);
+    console.error(
+      `\n${regressions.length} regression(s) beyond ${((threshold + slowdown - 1) * 100).toFixed(0)}% and ${(floorMs * slowdown).toFixed(3)}ms.`,
+    );
     process.exit(1);
   }
 }

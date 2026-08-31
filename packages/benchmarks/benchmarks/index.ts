@@ -3,10 +3,11 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { type BenchmarkSuite, formatReport, runSuites } from "../src/harness.js";
 import { artefactsSuite } from "./artefacts.benchmark.js";
+import { calibrationSuite } from "./calibration.benchmark.js";
 import { deliberationSuite } from "./deliberation.benchmark.js";
 import { persistenceSuite } from "./persistence.benchmark.js";
 
-export const SUITES: BenchmarkSuite[] = [deliberationSuite, persistenceSuite, artefactsSuite];
+export const SUITES: BenchmarkSuite[] = [calibrationSuite, deliberationSuite, persistenceSuite, artefactsSuite];
 
 interface CliOptions {
   json?: string;
