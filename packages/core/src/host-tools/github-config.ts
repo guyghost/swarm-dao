@@ -1,6 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { configureGitHub, isGitHubEnabled } from "../integrations/github.js";
+import { configureGitHub, getGitHubConfig, isGitHubEnabled } from "../integrations/github.js";
 import { logger } from "../observability/logging.js";
 
 export async function loadGitHubConfigFromDaoRoot(daoRoot: string): Promise<boolean> {
@@ -12,12 +12,26 @@ export async function loadGitHubConfigFromDaoRoot(daoRoot: string): Promise<bool
     const github = configData.github;
     if (github?.owner && github?.repo) {
       // The persisted token is redacted on save; the live token comes from
-      // DAO_GITHUB_TOKEN (the mechanism the config output advertises). A
-      // redacted literal must never be sent as a credential.
+      // (in order) the persisted value, DAO_GITHUB_TOKEN (the mechanism the
+      // config output advertises), or an in-memory token configured earlier
+      // in this session for the SAME owner/repo (dao_config_github keeps it
+      // only in memory; the persisted copy is always redacted). A redacted
+      // literal must never be sent as a credential.
       const persisted = typeof github.token === "string" ? github.token : undefined;
-      const token = persisted && persisted !== "[REDACTED]" ? persisted : process.env.DAO_GITHUB_TOKEN;
+      const inMemory = getGitHubConfig();
+      const reusableSessionToken =
+        inMemory?.token &&
+        inMemory.token !== "[REDACTED]" &&
+        inMemory.owner === github.owner &&
+        inMemory.repo === github.repo
+          ? inMemory.token
+          : undefined;
+      const token =
+        (persisted && persisted !== "[REDACTED]" ? persisted : undefined) ??
+        process.env.DAO_GITHUB_TOKEN ??
+        reusableSessionToken;
       if (!token) {
-        logger.debug("loadGitHubConfigFromDaoRoot: token redacted and DAO_GITHUB_TOKEN not set");
+        logger.debug("loadGitHubConfigFromDaoRoot: token redacted and no live token available");
         return false;
       }
       configureGitHub({ owner: github.owner, repo: github.repo, token, enabled: github.enabled ?? true });

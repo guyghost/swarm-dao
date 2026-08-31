@@ -3,7 +3,7 @@ import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { loadGitHubConfigFromDaoRoot, saveGitHubConfigToDaoRoot } from "../src/host-tools/github-config.js";
-import { getGitHubConfig, isGitHubEnabled } from "../src/integrations/github.js";
+import { configureGitHub, getGitHubConfig, isGitHubEnabled } from "../src/integrations/github.js";
 
 describe("host-tools/github-config.ts", () => {
   it("restores the live token from DAO_GITHUB_TOKEN when the persisted one is redacted", async () => {
@@ -14,8 +14,16 @@ describe("host-tools/github-config.ts", () => {
       const persisted = JSON.parse(await fs.readFile(path.join(daoRoot, "config.json"), "utf8"));
       expect(persisted.github.token).toBe("[REDACTED]");
 
-      // ...so without an env token a fresh process cannot enable the integration.
+      // Same session: dao_config_github left a live token in memory for the
+      // same owner/repo, so the integration loads without the env var.
       delete process.env.DAO_GITHUB_TOKEN;
+      expect(await loadGitHubConfigFromDaoRoot(daoRoot)).toBe(true);
+      expect(getGitHubConfig()?.token).toBe("ghp_live");
+      expect(getGitHubConfig()?.owner).toBe("acme");
+
+      // Fresh process: no in-memory token — without DAO_GITHUB_TOKEN the
+      // integration stays disabled and the redacted literal is never sent.
+      configureGitHub({ token: undefined, owner: undefined, repo: undefined });
       expect(await loadGitHubConfigFromDaoRoot(daoRoot)).toBe(false);
 
       // With DAO_GITHUB_TOKEN set, the redacted literal must never be sent as
