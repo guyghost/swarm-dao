@@ -1,8 +1,12 @@
 #!/usr/bin/env bun
-// Compare a benchmark run against the committed baseline and fail on regressions.
+// Compare a benchmark run against the committed baseline and fail on regressions
+// that reproduce. A single flagging run is adjudicated: the flagged case is
+// re-measured in isolation and only a reproduced flag fails the gate (PR #79
+// finding — sub-ms micro-benches flared 3x on one shared runner, then passed).
 
 import { promises as fs } from "node:fs";
-import type { BenchmarkMeasurement, BenchmarkReport } from "../src/harness.js";
+import { SUITES } from "../benchmarks/index.js";
+import { type BenchmarkMeasurement, type BenchmarkReport, runCase } from "../src/harness.js";
 
 const DEFAULT_RESULTS = "benchmark-results.json";
 const DEFAULT_BASELINE = "benchmark-baseline.json";
@@ -55,6 +59,17 @@ export function calibrationSlowdown(
   return Math.min(Math.max(currentMs / baselineMs, 1), maxSlowdown);
 }
 
+export function isRegression(
+  currentMs: number,
+  baselineMs: number,
+  allowedThreshold: number,
+  allowedFloorMs: number,
+): boolean {
+  if (baselineMs <= 0) return false;
+  const changeRatio = (currentMs - baselineMs) / baselineMs;
+  return changeRatio > allowedThreshold && currentMs - baselineMs > allowedFloorMs;
+}
+
 export function compareReports(
   current: BenchmarkReport,
   baseline: BenchmarkReport | null,
@@ -86,7 +101,7 @@ export function compareReports(
     // shared runner cannot fail the whole fleet while a genuine algorithmic
     // regression (relative AND absolute, way beyond both scaled gates) still
     // fails on any runner.
-    const regressed = changeRatio > allowedThreshold && measurement.meanMs - previous.meanMs > allowedFloor;
+    const regressed = isRegression(measurement.meanMs, previous.meanMs, allowedThreshold, allowedFloor);
     return {
       suite: measurement.suite,
       name: measurement.name,
@@ -106,6 +121,76 @@ export function formatComparisons(comparisons: Comparison[]): string {
       return `${comparison.status.toUpperCase().padEnd(11)} ${comparison.suite}/${comparison.name} — ${comparison.currentMs.toFixed(3)}ms vs ${baseline} (${change})`;
     })
     .join("\n");
+}
+
+const median = (values: number[]): number =>
+  [...values].sort((left, right) => left - right)[Math.floor(values.length / 2)] ?? 0;
+
+/**
+ * Re-measure one benchmark case in isolation, `attempts` times, and report each
+ * run's mean. Uses a higher iteration count than the suite default so the
+ * re-measurement is steadier than the run that raised the flag. Returns an
+ * empty array when the case no longer exists (renamed/removed).
+ */
+export async function reMeasureCase(
+  suiteName: string,
+  caseName: string,
+  attempts = 3,
+  iterations = 50,
+): Promise<number[]> {
+  const suite = SUITES.find((candidate) => candidate.name === suiteName);
+  const benchmark = suite?.cases.find((candidate) => candidate.name === caseName);
+  if (!suite || !benchmark) return [];
+  await suite.setup?.();
+  try {
+    const means: number[] = [];
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      means.push((await runCase(suite, benchmark, { iterations })).meanMs);
+    }
+    return means;
+  } finally {
+    await suite.teardown?.();
+  }
+}
+
+export interface AdjudicationResult {
+  /** Flags whose re-measured median still sits beyond the calibrated gates. */
+  confirmed: Comparison[];
+  /** Flags dismissed as runner noise because the re-measurement fell inside. */
+  dismissed: Array<Comparison & { reMeasuredMs: number }>;
+}
+
+/**
+ * Second-chance gate: a flag must reproduce on isolated re-measurement before
+ * it may fail CI. The same calibrated gates (relative AND absolute) apply to
+ * the re-measured median — adjudication never loosens the definition of a
+ * regression, it only demands the evidence reproduce.
+ */
+export async function adjudicateRegressions(
+  regressions: Comparison[],
+  baseline: BenchmarkReport,
+  gates: { threshold: number; floorMs: number; slowdown: number },
+  reMeasure: (suite: string, name: string) => Promise<number[]> = reMeasureCase,
+): Promise<AdjudicationResult> {
+  const allowedThreshold = gates.threshold + (gates.slowdown - 1);
+  const allowedFloor = gates.floorMs * gates.slowdown;
+  const baselineByKey = new Map<string, BenchmarkMeasurement>(
+    (baseline.measurements ?? []).map((measurement) => [key(measurement), measurement]),
+  );
+
+  const confirmed: Comparison[] = [];
+  const dismissed: AdjudicationResult["dismissed"] = [];
+  for (const regression of regressions) {
+    const baselineMs = baselineByKey.get(key(regression))?.meanMs ?? 0;
+    const means = await reMeasure(regression.suite, regression.name);
+    // Nothing to re-measure (renamed or removed case): keep the honest failure.
+    if (means.length === 0 || isRegression(median(means), baselineMs, allowedThreshold, allowedFloor)) {
+      confirmed.push(regression);
+    } else {
+      dismissed.push({ ...regression, reMeasuredMs: median(means) });
+    }
+  }
+  return { confirmed, dismissed };
 }
 
 async function readReport(file: string): Promise<BenchmarkReport | null> {
@@ -153,12 +238,22 @@ async function main(): Promise<void> {
   );
 
   const regressions = comparisons.filter((comparison) => comparison.status === "regression");
-  if (regressions.length > 0) {
-    console.error(
-      `\n${regressions.length} regression(s) beyond ${((threshold + slowdown - 1) * 100).toFixed(0)}% and ${(floorMs * slowdown).toFixed(3)}ms.`,
+  if (regressions.length === 0) return;
+
+  const { confirmed, dismissed } = await adjudicateRegressions(regressions, baseline, { threshold, floorMs, slowdown });
+  for (const flake of dismissed) {
+    console.log(
+      `ADJUDICATED  ${flake.suite}/${flake.name} — re-measured median ${flake.reMeasuredMs.toFixed(3)}ms vs ${flake.baselineMs?.toFixed(3)}ms is inside the gate; dismissed as runner noise.`,
     );
-    process.exit(1);
   }
+  if (confirmed.length === 0) {
+    console.log(`\n${dismissed.length} flagged bench(es) did not reproduce on re-measurement; gate passed.`);
+    return;
+  }
+  console.error(
+    `\n${confirmed.length} regression(s) reproduced beyond ${((threshold + slowdown - 1) * 100).toFixed(0)}% and ${(floorMs * slowdown).toFixed(3)}ms.`,
+  );
+  process.exit(1);
 }
 
 if (import.meta.main) {
