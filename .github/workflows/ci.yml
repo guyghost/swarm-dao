@@ -22,6 +22,17 @@ jobs:
         with:
           bun-version: "1.4.0"
 
+      - name: Check changeset coverage
+        # Fails fast, before install/lint/test/build: a PR changing a
+        # published package's src/ without a pending changeset declaring
+        # it is rejected without paying for the rest of CI (prevents
+        # merged-but-never-published runtime changes; happened on #71).
+        if: github.event_name == 'pull_request'
+        env:
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: bun run check:changesets
+
       - name: Setup Node
         uses: actions/setup-node@v6
         with:
@@ -51,16 +62,6 @@ jobs:
 
       - name: Validate Pi extension npm package
         run: bun run pack:pi
-
-      - name: Check changeset coverage
-        # Fails when a PR changes a published package's src/ without a
-        # pending changeset declaring it (prevents merged-but-never-
-        # published runtime changes; happened on #71).
-        if: github.event_name == 'pull_request'
-        env:
-          GITHUB_EVENT_NAME: ${{ github.event_name }}
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: bun run check:changesets
 
   benchmarks:
     name: Performance benchmarks

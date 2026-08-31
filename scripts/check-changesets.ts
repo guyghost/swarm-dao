@@ -51,6 +51,20 @@ if (baseSha === sh("git rev-parse HEAD")) {
   process.exit(0);
 }
 
+// The base comes from environment variables and is interpolated into shell
+// commands below — accept nothing except a hexadecimal commit id, then
+// verify + canonicalize it through git itself.
+if (!/^[0-9a-f]{7,40}$/i.test(baseSha)) {
+  console.error(`check:changesets — refusing non-SHA base: ${JSON.stringify(baseSha)}`);
+  process.exit(1);
+}
+try {
+  baseSha = sh(`git rev-parse --verify ${baseSha}^{commit}`);
+} catch {
+  console.error(`check:changesets — base commit not found in repository: ${baseSha}`);
+  process.exit(1);
+}
+
 // ── Changed files ────────────────────────────────────────────
 
 // --no-renames: a file moved out of src/ must appear as a deletion of its
