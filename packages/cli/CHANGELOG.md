@@ -1,5 +1,13 @@
 # @guyghost/swarm-dao-cli
 
+## 0.3.1
+
+### Patch Changes
+
+- Updated dependencies [82df3ed]
+  - @guyghost/swarm-dao-core@0.10.0
+  - @guyghost/swarm-dao-improvement@0.2.1
+
 ## 0.3.0
 
 ### Minor Changes

@@ -1,6 +1,6 @@
 {
   "name": "@guyghost/swarm-dao-core",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "description": "Swarm DAO core — pure business logic for AI agent governance",
   "type": "module",
   "main": "./dist/index.js",
