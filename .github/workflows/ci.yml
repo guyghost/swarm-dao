@@ -66,13 +66,12 @@ jobs:
   benchmarks:
     name: Performance benchmarks
     runs-on: ubuntu-latest
-    # Advisory on purpose: the suites measure sub-millisecond pure functions,
-    # and shared-runner variance exceeds the 25% signal (observed +58%/+81%
-    # between runs on code paths that had not changed). Results are still
-    # published as an artifact and compared against the cached baseline with
-    # a relative threshold plus an absolute noise floor; treat REGRESSION
-    # lines as a prompt to investigate locally (`bun run bench`), not as a
-    # merge blocker.
+    # Calibrated comparison: the run starts with a fixed pure-CPU kernel
+    # (benchmarks/calibration.benchmark.ts) that measures how fast THIS runner
+    # is today, and the comparison script scales its relative threshold and
+    # absolute floor by that ratio (capped 3x). Shared-runner slowdowns of
+    # 30–60% therefore cannot fake fleet-wide regressions, while genuine
+    # algorithmic regressions still fail the job on any runner.
     continue-on-error: true
     steps:
       - uses: actions/checkout@v6

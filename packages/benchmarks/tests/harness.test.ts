@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { parseArgs, SUITES } from "../benchmarks/index.js";
-import { compareReports, formatComparisons } from "../scripts/compare-benchmarks.js";
+import { calibrationSlowdown, compareReports, formatComparisons } from "../scripts/compare-benchmarks.js";
 import { type BenchmarkReport, formatReport, runSuites, summarize } from "../src/harness.js";
 
 function report(measurements: Array<{ suite: string; name: string; meanMs: number }>): BenchmarkReport {
@@ -68,7 +68,7 @@ describe("benchmark harness", () => {
   });
 
   it("declares every core suite", () => {
-    expect(SUITES.map((suite) => suite.name)).toEqual(["deliberation", "persistence", "artefacts"]);
+    expect(SUITES.map((suite) => suite.name)).toEqual(["calibration", "deliberation", "persistence", "artefacts"]);
     expect(SUITES.every((suite) => suite.cases.length > 0)).toBe(true);
   });
 
@@ -125,5 +125,69 @@ describe("benchmark harness", () => {
     const comparisons = compareReports(report([{ suite: "s", name: "b", meanMs: 3 }]), report([]), 0.25);
     expect(comparisons[0]?.status).toBe("new");
     expect(comparisons[0]?.baselineMs).toBeNull();
+  });
+});
+
+describe("calibrated comparison", () => {
+  const cal = (meanMs: number) => report([{ suite: "calibration", name: "reference kernel", meanMs }]);
+
+  it("computes the runner slowdown ratio from the calibration kernel", () => {
+    // The PR #76 incident: whole-job runner slowdown of ~1.55x.
+    expect(calibrationSlowdown(cal(0.775), cal(0.5))).toBe(1.55);
+    // A faster runner never tightens the gate.
+    expect(calibrationSlowdown(cal(0.4), cal(0.5))).toBe(1);
+    // Absurd ratios are capped so the gate cannot be fully disarmed.
+    expect(calibrationSlowdown(cal(5), cal(1))).toBe(3);
+    // Missing calibration data on either side is not a slowdown.
+    expect(calibrationSlowdown(cal(0.5), report([]))).toBeNull();
+    expect(calibrationSlowdown(report([]), cal(0.5))).toBeNull();
+  });
+
+  it("does not flag a fleet-wide slow runner as regressions", () => {
+    // The exact false positives seen on PR #76: every measurement drifted
+    // ~40–55% because the runner itself was slow (calibration x1.55).
+    const baseline = report([
+      { suite: "calibration", name: "reference kernel", meanMs: 0.5 },
+      { suite: "deliberation", name: "deliberate proposal", meanMs: 0.538 },
+      { suite: "deliberation", name: "run control gates", meanMs: 0.16 },
+      { suite: "persistence", name: "file persist (1 proposal)", meanMs: 0.14 },
+    ]);
+    const current = report([
+      { suite: "calibration", name: "reference kernel", meanMs: 0.775 },
+      { suite: "deliberation", name: "deliberate proposal", meanMs: 0.842 }, // was 0.538 (+56.5%)
+      { suite: "deliberation", name: "run control gates", meanMs: 0.246 }, // was 0.160 (+53.8%)
+      { suite: "persistence", name: "file persist (1 proposal)", meanMs: 0.218 }, // was 0.140 (+55.7%)
+    ]);
+    const slowdown = calibrationSlowdown(current, baseline);
+    expect(slowdown).toBe(1.55);
+    const comparisons = compareReports(current, baseline, 0.25, 0.05, slowdown ?? 1);
+    expect(comparisons.filter((comparison) => comparison.status === "regression")).toHaveLength(0);
+  });
+
+  it("keeps the strict gate when the runner speed is unchanged", () => {
+    const baseline = report([
+      { suite: "calibration", name: "reference kernel", meanMs: 0.5 },
+      { suite: "deliberation", name: "deliberate proposal", meanMs: 0.538 },
+    ]);
+    const current = report([
+      { suite: "calibration", name: "reference kernel", meanMs: 0.5 },
+      { suite: "deliberation", name: "deliberate proposal", meanMs: 0.842 }, // was 0.538 (+56.5%)
+    ]);
+    const comparisons = compareReports(current, baseline, 0.25, 0.05, calibrationSlowdown(current, baseline) ?? 1);
+    expect(comparisons.filter((comparison) => comparison.status === "regression")).toHaveLength(1);
+  });
+
+  it("still flags genuine regressions on a slow runner", () => {
+    const baseline = report([
+      { suite: "calibration", name: "reference kernel", meanMs: 0.5 },
+      { suite: "deliberation", name: "deliberate proposal", meanMs: 0.538 },
+    ]);
+    const current = report([
+      { suite: "calibration", name: "reference kernel", meanMs: 0.775 },
+      { suite: "deliberation", name: "deliberate proposal", meanMs: 1.61 }, // 3x — real regression
+    ]);
+    const slowdown = calibrationSlowdown(current, baseline) ?? 1;
+    const comparisons = compareReports(current, baseline, 0.25, 0.05, slowdown);
+    expect(comparisons.filter((comparison) => comparison.status === "regression")).toHaveLength(1);
   });
 });
