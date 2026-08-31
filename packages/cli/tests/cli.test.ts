@@ -26,15 +26,13 @@ describe("cli.ts — improve sandbox flags", () => {
 });
 
 describe("cli.ts — improve series roots", () => {
-  it("status on an unknown series in an empty project still answers (fresh idle runner)", async () => {
+  it("answers status for an unknown series (fresh idle runner; no DAO proposal state touched)", async () => {
     const code = await main(["improve", "status", "--series-id", "nope"], process.cwd());
     expect(code).toBe(0);
   });
-});
 
-describe("cli.ts — improve series roots", () => {
-  it("answers status for an unknown series without touching DAO proposal state", async () => {
-    const code = await main(["improve", "status", "--series-id", "nope"], process.cwd());
-    expect(code).toBe(0);
+  it("fails fast on a value-less --cycle-root or --evidence-root flag", async () => {
+    expect(await main(["improve", "once", "--series-id", "t", "--cycle-root"], process.cwd())).toBe(1);
+    expect(await main(["improve", "once", "--series-id", "t", "--evidence-root"], process.cwd())).toBe(1);
   });
 });
