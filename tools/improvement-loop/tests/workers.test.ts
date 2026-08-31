@@ -1,5 +1,30 @@
 import { describe, expect, it } from "bun:test";
-import { type HerdrWorkerOptions, runHerdrWorker, toBoundedInt } from "../workers.js";
+import { extractLastJsonObject, type HerdrWorkerOptions, runHerdrWorker, toBoundedInt } from "../workers.js";
+
+describe("extractLastJsonObject — terminal-harvested transcripts", () => {
+  it("parses the last JSON object and ignores earlier prompt templates", () => {
+    const content = '{"sample": {"value": "x"}} trailing {"sample": {"value": "held", "evidence": "ok"}}';
+    expect(extractLastJsonObject(content)).toEqual({ sample: { value: "held", evidence: "ok" } });
+  });
+
+  it("repairs raw newlines that terminal hard-wraps inject inside string literals", () => {
+    // Real dogfood-002 corruption: a herdr read returned a JSON answer whose
+    // evidence string contained a literal newline mid-token (invalid JSON).
+    const content = '{"sample": {"value": "held", "evidence": "series start\n (12:58Z), clean."}}';
+    expect(extractLastJsonObject(content)).toEqual({
+      sample: { value: "held", evidence: "series start\n (12:58Z), clean." },
+    });
+  });
+
+  it("repairs tabs and carriage returns inside strings without touching escaped sequences", () => {
+    const content = '{"sample": {"value": "a\\\\b", "evidence": "x\\ty\\r\\nz"}}';
+    expect(extractLastJsonObject(content)).toEqual({ sample: { value: "a\\b", evidence: "x\ty\r\nz" } });
+  });
+
+  it("still returns null when no JSON object exists", () => {
+    expect(extractLastJsonObject("no json here")).toBeNull();
+  });
+});
 
 describe("herdr worker executor — numeric option sanitization", () => {
   it("coerces bounds on numeric options", () => {

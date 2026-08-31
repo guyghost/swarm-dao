@@ -62,6 +62,42 @@ export type WorkerHarvest = Readonly<{ ok: true; content: string } | { ok: false
 
 const SAFE_KIND = /^[a-z][a-z0-9_-]{0,31}$/;
 
+/**
+ * Escape raw control characters that are illegal inside JSON string literals.
+ * Terminal hard-wraps inject literal newlines mid-string (observed on real
+ * herdr `agent read --source recent-unwrapped` harvests); whitespace between
+ * JSON tokens is preserved — only in-string characters are rewritten.
+ */
+const escapeInStringControls = (candidate: string): string => {
+  let repaired = "";
+  let inString = false;
+  let escaped = false;
+  for (const char of candidate) {
+    if (inString && !escaped) {
+      if (char === "\\") {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      } else if (char === "\n") {
+        repaired += "\\n";
+        continue;
+      } else if (char === "\r") {
+        repaired += "\\r";
+        continue;
+      } else if (char === "\t") {
+        repaired += "\\t";
+        continue;
+      }
+    } else if (inString && escaped) {
+      escaped = false;
+    } else if (char === '"') {
+      inString = true;
+    }
+    repaired += char;
+  }
+  return repaired;
+};
+
 // Numeric options are interpolated into herdr shell commands, so they must be
 // finite integers within bounds even when callers bypass the TypeScript types
 // (e.g. JSON config); anything else falls back to the default.
@@ -197,13 +233,21 @@ export function extractLastJsonObject(content: string): Record<string, unknown> 
   if (lastClose === -1) return null;
   let open = content.lastIndexOf("{", lastClose);
   for (let scans = 0; open !== -1 && scans < 50; scans++, open = content.lastIndexOf("{", open - 1)) {
+    const raw = content.slice(open, lastClose + 1);
     try {
-      const parsed: unknown = JSON.parse(content.slice(open, lastClose + 1));
+      const parsed: unknown = JSON.parse(raw);
       if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
         return parsed as Record<string, unknown>;
       }
     } catch {
-      // walk back to the previous opening brace
+      try {
+        const repaired: unknown = JSON.parse(escapeInStringControls(raw));
+        if (typeof repaired === "object" && repaired !== null && !Array.isArray(repaired)) {
+          return repaired as Record<string, unknown>;
+        }
+      } catch {
+        // walk back to the previous opening brace
+      }
     }
   }
   return null;
