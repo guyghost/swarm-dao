@@ -16,6 +16,7 @@ provided.
 | Goodhart (metric gaming) | Counter-metric is mandatory; `sample-gate` seals the pair; anchor `counter-metric-paired` | Covered |
 | Blindness upward | Human owns the reference; `adjusting` is a governed, human-gated state | Covered |
 | Conflict | Deterministic `arbitrator` owns the paired-metric trade-off; anchor `arbitration-policy` | Covered |
+| Arbitration vocabulary | The veto keys on the frozen negative-outcome set {`declined`, `fell`}, never on executor prompt wording | Covered |
 | Measurement decay | `drift-auditor` plus anchor `drift-audit`; `detached` forces `adjusting` | Covered |
 | Graph circularity | Frozen `anchor-reality` and `frozen-set-intact`; external human root judgment | Covered |
 | Invalid input | Schema and source guards reject and journal it | Covered |
@@ -45,6 +46,8 @@ provided.
    events are rejected and retained in the journal.
 7. The drift estimate never alone selects an outcome; `detached` forces
    `adjusting` and every other class still requires the ground-contact anchors.
+8. The counter-veto recognizes the frozen negative-outcome set, so a sensor
+   vocabulary drift (dogfood-002) cannot silently disarm arbitration.
 
 ## Invariant review
 

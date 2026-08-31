@@ -17,6 +17,24 @@ describe("improvement-loop — deterministic paired-signal arbitration", () => {
     expect(result.outcome).toBe("counter-veto:metric-rose-counter-fell");
   });
 
+  it("vetoes on every frozen negative synonym, not only on 'declined' (dogfood-002 gap)", () => {
+    const result = arbitratePairedSignals(
+      { value: "improved", evidence: "metric-improved" },
+      { value: "fell", evidence: "counter-fell" },
+    );
+    expect(result.arbitrationPolicyPassed).toBe(false);
+    expect(result.outcome).toBe("counter-veto:metric-rose-counter-fell");
+  });
+
+  it("never false-optimizes when the optimizing metric itself falls", () => {
+    const result = arbitratePairedSignals(
+      { value: "fell", evidence: "metric-fell" },
+      { value: "rose", evidence: "counter-rose" },
+    );
+    expect(result.arbitrationPolicyPassed).toBe(true);
+    expect(result.outcome).toBe("balanced");
+  });
+
   it("passes when both move together (balanced)", () => {
     const result = arbitratePairedSignals(
       { value: "rose", evidence: "metric-rose" },

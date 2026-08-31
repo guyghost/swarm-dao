@@ -105,6 +105,27 @@ text is never converted into a human event. The drift class is a signal: a
 `none` estimate never alone satisfies grounding, because ground-contact anchors
 are still required.
 
+### Deterministic arbitration policy
+
+The arbitrator is a deterministic tool: the AI supplies paired samples, never
+the outcome. `arbitratePairedSignals` selects exactly one outcome:
+
+1. If either sample is missing, the outcome is `missing-pair` and the
+   `arbitration-policy` anchor fails.
+2. Else if the optimizing metric is non-negative while the counter-metric is
+   negative, the outcome is `counter-veto:metric-rose-counter-fell` and the
+   `arbitration-policy` anchor fails.
+3. Else the outcome is `balanced` and the anchor passes.
+
+A sample value is negative when it belongs to the negative-outcome set
+{`declined`, `fell`}; every other value (for example `improved`, `rose`,
+`held`) is non-negative. The veto must stay prompt-vocabulary independent:
+executor prompts may phrase sample vocabularies freely, but the frozen policy
+recognizes every documented negative synonym, so a prompt drift can never
+silently disarm the counter-veto (found by dogfood-002: prompts emitted
+`rose|fell|held` while the veto keyed on `declined` alone). Outcome strings
+are stable identifiers and never change, so journals replay deterministically.
+
 ### EVALUATE decision
 
 `EVALUATE` selects exactly one outcome, in this order:
