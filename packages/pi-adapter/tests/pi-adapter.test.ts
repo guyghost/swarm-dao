@@ -487,7 +487,7 @@ describe("swarmDaoExtension", () => {
       expect(result).toContain("/dao ship");
     });
 
-    it("/dao <known command> routes to its tool instead of rejecting", async () => {
+    it("/dao <known command> executes the matching tool logic", async () => {
       const { initStorage, setState, getOrCreateState, initializeAgents } = await import("@guyghost/swarm-dao-core");
       await initStorage(process.cwd());
       const state = getOrCreateState(process.cwd());
@@ -503,7 +503,9 @@ describe("swarmDaoExtension", () => {
       const commandCtx = createMockCommandContext();
       await daoCommand?.handler("deliberate 1", commandCtx.ctx);
       const result = commandCtx.rendered();
-      expect(result).toContain("dao_deliberate");
+      // The dispatcher executes the dao_deliberate logic inline — proposal #1
+      // does not exist, so the tool-level validation surfaces.
+      expect(result).toContain("Proposal #1 not found");
       expect(result).not.toContain("Unknown /dao subcommand");
     });
 
@@ -526,7 +528,7 @@ describe("swarmDaoExtension", () => {
       expect(result).toContain("No proposals yet");
     });
 
-    it("/dao control routes to dao_check (Pi-specific override)", async () => {
+    it("/dao control executes the dao_check tool logic (Pi-specific override)", async () => {
       const { initStorage, setState, getOrCreateState, initializeAgents } = await import("@guyghost/swarm-dao-core");
       await initStorage(process.cwd());
       const state = getOrCreateState(process.cwd());
@@ -542,11 +544,11 @@ describe("swarmDaoExtension", () => {
       const commandCtx = createMockCommandContext();
       await daoCommand?.handler("control 1", commandCtx.ctx);
       const result = commandCtx.rendered();
-      expect(result).toContain("dao_check");
+      expect(result).toContain("Proposal #1 not found");
       expect(result).not.toContain("dao_control");
     });
 
-    it("/dao check alias also routes to dao_check", async () => {
+    it("/dao check alias also executes the dao_check tool logic", async () => {
       const { initStorage, setState, getOrCreateState, initializeAgents } = await import("@guyghost/swarm-dao-core");
       await initStorage(process.cwd());
       const state = getOrCreateState(process.cwd());
@@ -562,7 +564,96 @@ describe("swarmDaoExtension", () => {
       const commandCtx = createMockCommandContext();
       await daoCommand?.handler("check 1", commandCtx.ctx);
       const result = commandCtx.rendered();
-      expect(result).toContain("dao_check");
+      expect(result).toContain("Proposal #1 not found");
+    });
+
+    it("/dao roundtable executes the tool and creates proposals", async () => {
+      const { initStorage, setState, getOrCreateState, initializeAgents, getState } = await import(
+        "@guyghost/swarm-dao-core"
+      );
+      await initStorage(process.cwd());
+      const state = getOrCreateState(process.cwd());
+      state.initialized = true;
+      state.agents = initializeAgents();
+      setState(state);
+
+      const mod = await import("@guyghost/swarm-dao-pi-adapter");
+      const pi = createMockPi();
+      mod.default(pi);
+
+      const daoCommand = pi.commands.find((c) => c.name === "dao");
+      const commandCtx = createMockCommandContext();
+      await daoCommand?.handler("roundtable", commandCtx.ctx);
+      const result = commandCtx.rendered();
+      expect(result).toContain("# 🎯 Round Table Results");
+      // The slash command mutated state exactly like the dao_roundtable tool.
+      expect(getState().proposals.length).toBe(7);
+    });
+
+    it("/dao propose executes the propose tool with quoted arguments", async () => {
+      const { initStorage, setState, getOrCreateState, initializeAgents, getState } = await import(
+        "@guyghost/swarm-dao-core"
+      );
+      await initStorage(process.cwd());
+      const state = getOrCreateState(process.cwd());
+      state.initialized = true;
+      state.agents = initializeAgents();
+      setState(state);
+
+      const mod = await import("@guyghost/swarm-dao-pi-adapter");
+      const pi = createMockPi();
+      mod.default(pi);
+
+      const daoCommand = pi.commands.find((c) => c.name === "dao");
+      const commandCtx = createMockCommandContext();
+      await daoCommand?.handler(
+        'propose "Fix login flow" product-feature "Users get logged out when SSO expires"',
+        commandCtx.ctx,
+      );
+      const result = commandCtx.rendered();
+      expect(result).toContain("# 📋 Proposal Created");
+      expect(result).toContain("Fix login flow");
+      expect(getState().proposals[0]?.title).toBe("Fix login flow");
+    });
+
+    it("/dao propose rejects an invalid proposal type", async () => {
+      const { initStorage, setState, getOrCreateState, initializeAgents } = await import("@guyghost/swarm-dao-core");
+      await initStorage(process.cwd());
+      const state = getOrCreateState(process.cwd());
+      state.initialized = true;
+      state.agents = initializeAgents();
+      setState(state);
+
+      const mod = await import("@guyghost/swarm-dao-pi-adapter");
+      const pi = createMockPi();
+      mod.default(pi);
+
+      const daoCommand = pi.commands.find((c) => c.name === "dao");
+      const commandCtx = createMockCommandContext();
+      await daoCommand?.handler('propose "Bad" not-a-type "desc"', commandCtx.ctx);
+      const result = commandCtx.rendered();
+      expect(result).toContain("Invalid type");
+      expect(result).toContain("Usage:");
+    });
+
+    it("/dao ship without a proposal id shows usage", async () => {
+      const { initStorage, setState, getOrCreateState, initializeAgents } = await import("@guyghost/swarm-dao-core");
+      await initStorage(process.cwd());
+      const state = getOrCreateState(process.cwd());
+      state.initialized = true;
+      state.agents = initializeAgents();
+      setState(state);
+
+      const mod = await import("@guyghost/swarm-dao-pi-adapter");
+      const pi = createMockPi();
+      mod.default(pi);
+
+      const daoCommand = pi.commands.find((c) => c.name === "dao");
+      const commandCtx = createMockCommandContext();
+      await daoCommand?.handler("ship", commandCtx.ctx);
+      const result = commandCtx.rendered();
+      expect(result).toContain("Usage:");
+      expect(result).toContain("/dao ship <proposalId>");
     });
 
     it("/dao audit <proposalId> scopes the audit trail", async () => {
@@ -671,6 +762,27 @@ describe("swarmDaoExtension", () => {
       await daoCommand?.handler("status", statusCtx.ctx);
       const statusResult = statusCtx.rendered();
       expect(statusResult).toContain("# 🏛️ DAO Dashboard");
+    });
+
+    it("/dao ship parses cascade/force flags and executes", async () => {
+      const { initStorage, setState, getOrCreateState, initializeAgents } = await import("@guyghost/swarm-dao-core");
+      await initStorage(process.cwd());
+      const state = getOrCreateState(process.cwd());
+      state.initialized = true;
+      state.agents = initializeAgents();
+      setState(state);
+
+      const mod = await import("@guyghost/swarm-dao-pi-adapter");
+      const pi = createMockPi();
+      mod.default(pi);
+
+      const daoCommand = pi.commands.find((c) => c.name === "dao");
+      const commandCtx = createMockCommandContext();
+      await daoCommand?.handler("ship 3 --cascade --force", commandCtx.ctx);
+      const result = commandCtx.rendered();
+      // Flags parsed cleanly, so the tool logic ran (proposal #3 missing).
+      expect(result).toContain("Proposal #3 not found");
+      expect(result).not.toContain("Unknown flag");
     });
 
     it("/dao rejects unknown subcommands", async () => {
