@@ -6,4 +6,5 @@ export * from "./dry-run.js";
 export * from "./execution.js";
 export * from "./execution-isolation.js";
 export * from "./plans.js";
+export * from "./sandbox-command.js";
 export * from "./ship-audit.js";

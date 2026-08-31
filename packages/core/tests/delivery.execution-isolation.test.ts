@@ -132,3 +132,57 @@ describe("planExecutionIsolation", () => {
     }
   });
 });
+
+describe("planExecutionIsolation — sandbox mode (ADR-003)", () => {
+  const sandbox = {
+    isolation: "sandbox" as const,
+    worktreeRoot: ".dao/worktrees",
+    baseBranch: "main",
+    sandbox: { runtime: "container" as const, image: "node:22-bookworm", cpus: 4, memoryMb: 8192 },
+  };
+
+  test("plans a worktree plus bounded container", () => {
+    const plan = planExecutionIsolation(proposal(9, "Add dark mode"), sandbox);
+    expect(plan).toEqual({
+      mode: "sandbox",
+      runtime: "container",
+      image: "node:22-bookworm",
+      cpus: 4,
+      memoryMb: 8192,
+      branch: "dao/9-add-dark-mode",
+      path: ".dao/worktrees/9-add-dark-mode",
+      baseBranch: "main",
+    });
+  });
+
+  test("bounds cpu and memory values", () => {
+    const plan = planExecutionIsolation(proposal(9, "Add dark mode"), {
+      ...sandbox,
+      sandbox: { runtime: "docker", image: "node:22", cpus: 999, memoryMb: -5 },
+    });
+    expect(plan.mode).toBe("sandbox");
+    if (plan.mode === "sandbox") {
+      expect(plan.cpus).toBe(64);
+      expect(plan.memoryMb).toBe(256);
+    }
+  });
+
+  test("fails closed without a sandbox section", () => {
+    const plan = planExecutionIsolation(proposal(9, "Add dark mode"), {
+      isolation: "sandbox",
+      worktreeRoot: ".dao/worktrees",
+    });
+    expect(plan.mode).toBe("invalid");
+    if (plan.mode === "invalid") expect(plan.error).toContain('sandbox.runtime of "docker" or "container"');
+  });
+
+  test("fails closed on a non-plain image reference", () => {
+    const plan = planExecutionIsolation(proposal(9, "Add dark mode"), {
+      isolation: "sandbox",
+      worktreeRoot: ".dao/worktrees",
+      sandbox: { runtime: "docker", image: "node; rm -rf /" },
+    });
+    expect(plan.mode).toBe("invalid");
+    if (plan.mode === "invalid") expect(plan.error).toContain("not a plain OCI reference");
+  });
+});
