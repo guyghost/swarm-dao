@@ -172,6 +172,18 @@ describe("bench:compare — flake adjudication (PR #79 finding)", () => {
     expect(confirmed).toHaveLength(1);
   });
 
+  it("confirms when the baseline entry is missing — dismissal requires evidence (Copilot review on #81)", async () => {
+    const emptyBaseline = report([]);
+    const { confirmed, dismissed } = await adjudicateRegressions(
+      flagged(0.101, 0.031),
+      emptyBaseline,
+      gates,
+      async () => [0.03, 0.028, 0.032],
+    );
+    expect(confirmed).toHaveLength(1);
+    expect(dismissed).toHaveLength(0);
+  });
+
   it("adjudicates against the calibrated gates, not the raw ones", async () => {
     const baseline = report([{ suite: "artefacts", name: "render artefacts to markdown", meanMs: 0.08 }]);
     // Median +75% / +0.06ms: beyond the raw gates (25% / 0.05ms), inside the

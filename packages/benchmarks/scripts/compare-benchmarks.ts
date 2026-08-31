@@ -183,8 +183,15 @@ export async function adjudicateRegressions(
   for (const regression of regressions) {
     const baselineMs = baselineByKey.get(key(regression))?.meanMs ?? 0;
     const means = await reMeasure(regression.suite, regression.name);
-    // Nothing to re-measure (renamed or removed case): keep the honest failure.
-    if (means.length === 0 || isRegression(median(means), baselineMs, allowedThreshold, allowedFloor)) {
+    // Nothing to re-measure, or no baseline entry to adjudicate against (e.g.
+    // the case was renamed between baseline and run, or a malformed baseline):
+    // keep the honest failure — dismissal requires reproduced evidence, not
+    // missing data (Copilot review on #81).
+    if (
+      means.length === 0 ||
+      baselineMs <= 0 ||
+      isRegression(median(means), baselineMs, allowedThreshold, allowedFloor)
+    ) {
       confirmed.push(regression);
     } else {
       dismissed.push({ ...regression, reMeasuredMs: median(means) });
