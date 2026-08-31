@@ -12,6 +12,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          # Full history: the changeset-coverage step diffs the PR against its
+          # merge-base with main (three-dot diff).
+          fetch-depth: 0
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -47,6 +51,16 @@ jobs:
 
       - name: Validate Pi extension npm package
         run: bun run pack:pi
+
+      - name: Check changeset coverage
+        # Fails when a PR changes a published package's src/ without a
+        # pending changeset declaring it (prevents merged-but-never-
+        # published runtime changes; happened on #71).
+        if: github.event_name == 'pull_request'
+        env:
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: bun run check:changesets
 
   benchmarks:
     name: Performance benchmarks
