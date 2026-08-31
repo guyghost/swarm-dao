@@ -276,9 +276,16 @@ export const DAO_COMMANDS: readonly DaoCommand[] = [
     hosts: ["mcp", "claude", "copilot", "codex", "pi", "opencode"],
   },
 
-  // ── Meta (CLI-native) ─────────────────────────────────────────
+  // ── Meta (CLI-native) ─────────────────────────────────────
   { id: "init", phase: "init", summary: "Initialize the .dao/ storage directory", args: "", hosts: ["cli"] },
   { id: "config", phase: "discover", summary: "Print the DAO configuration", hosts: ["cli"] },
+  {
+    id: "improve",
+    phase: "init",
+    summary: "Run an improvement loop series in any project (init/status/once/submit)",
+    args: "<init|status|once|submit> [options]",
+    hosts: ["cli"],
+  },
 ];
 
 const PHASE_ORDER: DaoCommandPhase[] = [

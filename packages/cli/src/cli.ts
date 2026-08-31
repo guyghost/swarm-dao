@@ -43,6 +43,18 @@ import {
   systemClock,
 } from "@guyghost/swarm-dao-core";
 
+import {
+  assertNoActiveSeriesForScope,
+  isHumanChannelEvent,
+  loadProjectImprovementConfig,
+  ORCHESTRATOR_MIN_COOLDOWN_MS,
+  type OrchestratorOnceDeps,
+  OrchestratorRunner,
+  resolveAnchorCommands,
+  resolveSandboxRunCommand,
+  type SandboxMode,
+} from "@guyghost/swarm-dao-improvement";
+
 // ── Helpers ─────────────────────────────────────────────────
 
 class CliError extends Error {}
@@ -131,6 +143,7 @@ const CLI_IMPLEMENTED = [
   "audit",
   "attention",
   "status",
+  "improve",
   "help",
 ] as const;
 
@@ -150,6 +163,10 @@ const CLI_USAGE_DETAILS: Record<string, string> = {
   config: "  config",
   audit: "  audit [--proposal <id>]",
   attention: "  attention [--source <graph-engineering|improvement-loop|product-loop>,...]",
+  improve: `  improve init --series-id <id> --scope <s> --reference-hash <hash> [--cooldown-ms <ms>]
+        improve status --series-id <id>
+        improve once --series-id <id> [--sandbox <docker|container|auto|none>] [--image <img>]
+        improve submit --series-id <id> --event <file>`,
 };
 
 /** All commands in the registry, grouped by phase, for lookup by id. */
@@ -574,6 +591,102 @@ async function cmdGithubPr(cwd: string, positional: string[], flags: Record<stri
   info(`✓ PR created: #${result.number} — ${result.url}`);
 }
 
+// ── Improve (continuous improvement series in any project) ──
+
+const IMPROVE_SERIES_ROOT = ".dao/improvement-series";
+const IMPROVE_CYCLE_ROOT = ".dao/improvement-cycles";
+
+const IMPROVE_USAGE = `usage: swarm-dao improve <init|status|once|submit> [options]
+
+  init   --series-id <id> --scope <s> --reference-hash <hash> [--cooldown-ms <ms>]
+  status --series-id <id>
+  once   --series-id <id> [--sandbox <docker|container|auto|none>] [--image <ref>]
+                      [--cpus <n>] [--memory-mb <mb>]
+  submit --series-id <id> --event <file.json>
+
+Anchor commands come from .dao/improvement.json in the project (create it with
+an 'anchorCommands' object binding the four command-backed anchors). Evidence
+defaults to .dao/improvement-series and .dao/improvement-cycles.`;
+
+function sandboxRequestFrom(
+  flags: Record<string, string | true>,
+  config: { raw: Record<string, unknown> } | null,
+): Parameters<typeof resolveSandboxRunCommand>[0] {
+  const configSandbox =
+    config && typeof config.raw.sandbox === "object" && config.raw.sandbox !== null
+      ? (config.raw.sandbox as Record<string, unknown>)
+      : {};
+  const mode = (flags.sandbox ?? configSandbox.mode) as SandboxMode | undefined;
+  return {
+    sandbox: mode,
+    image: (flags.image ?? configSandbox.image) as string | undefined,
+    cpus: flags.cpus ? Number(flags.cpus) : (configSandbox.cpus as number | undefined),
+    memoryMb: flags["memory-mb"] ? Number(flags["memory-mb"]) : (configSandbox.memoryMb as number | undefined),
+  };
+}
+
+async function cmdImprove(cwd: string, positional: string[], flags: Record<string, string | true>): Promise<number> {
+  const sub = positional[0];
+  if (sub !== "init" && sub !== "status" && sub !== "once" && sub !== "submit") err(IMPROVE_USAGE);
+
+  const seriesId = typeof flags["series-id"] === "string" ? flags["series-id"] : undefined;
+  if (!seriesId) err(`--series-id is required\n${IMPROVE_USAGE}`);
+  const evidenceRoot = path.resolve(
+    cwd,
+    typeof flags["evidence-root"] === "string" ? flags["evidence-root"] : IMPROVE_SERIES_ROOT,
+  );
+
+  if (sub === "init") {
+    // Grounding needs gates: refuse a series whose project has no anchor config.
+    await resolveAnchorCommands(cwd);
+    const scope = typeof flags.scope === "string" ? flags.scope : undefined;
+    if (!scope) err(`--scope is required\n${IMPROVE_USAGE}`);
+    const referenceHash = typeof flags["reference-hash"] === "string" ? flags["reference-hash"] : undefined;
+    if (!referenceHash) err(`--reference-hash is required\n${IMPROVE_USAGE}`);
+    const cooldownMs = flags["cooldown-ms"] !== undefined ? Number(flags["cooldown-ms"]) : 60_000;
+    if (!Number.isInteger(cooldownMs) || cooldownMs < ORCHESTRATOR_MIN_COOLDOWN_MS) {
+      err(`--cooldown-ms must be an integer >= ${ORCHESTRATOR_MIN_COOLDOWN_MS}\n${IMPROVE_USAGE}`);
+    }
+    await assertNoActiveSeriesForScope(evidenceRoot, scope, seriesId);
+    const runner = await OrchestratorRunner.create({ seriesId, evidenceRoot });
+    const result = await runner.submit({ type: "START_SERIES", source: "human", scope, referenceHash, cooldownMs });
+    info(JSON.stringify(result.snapshot, null, 2));
+    return result.accepted ? 0 : 2;
+  }
+
+  if (sub === "status") {
+    const runner = await OrchestratorRunner.create({ seriesId, evidenceRoot });
+    info(JSON.stringify(runner.snapshot(), null, 2));
+    return 0;
+  }
+
+  if (sub === "submit") {
+    const eventFile = typeof flags.event === "string" ? flags.event : undefined;
+    if (!eventFile) err(`--event is required\n${IMPROVE_USAGE}`);
+    const event: unknown = JSON.parse(await fs.readFile(path.resolve(cwd, eventFile), "utf8"));
+    if (!isHumanChannelEvent(event)) {
+      err("submit only forwards human events (RETRY_WORKERS, RESTART_SERIES, CANCEL_SERIES with a non-empty reason)");
+    }
+    const runner = await OrchestratorRunner.create({ seriesId, evidenceRoot });
+    const result = await runner.submit(event);
+    info(JSON.stringify(result.snapshot, null, 2));
+    return result.accepted ? 0 : 2;
+  }
+
+  // once — one authorized effect; anchor commands may run in a bounded sandbox.
+  const config = await loadProjectImprovementConfig(cwd);
+  const runCommand = await resolveSandboxRunCommand(sandboxRequestFrom(flags, config), cwd);
+  const deps: OrchestratorOnceDeps = {
+    workDir: cwd,
+    cycleEvidenceRoot: path.resolve(cwd, IMPROVE_CYCLE_ROOT),
+    ...(runCommand ? { runCommand } : {}),
+  };
+  const runner = await OrchestratorRunner.create({ seriesId, evidenceRoot });
+  const result = await runner.once(deps);
+  info(JSON.stringify(result, null, 2));
+  return result.event && !result.accepted ? 2 : 0;
+}
+
 // ── CLI-local command suggestion ───────────────────────────
 
 /**
@@ -675,6 +788,8 @@ export async function main(argv: string[], cwd: string = process.cwd()): Promise
       case "status":
         await cmdStatus(cwd);
         return 0;
+      case "improve":
+        return await cmdImprove(cwd, positional, flags);
       case "vote":
         await cmdVote(cwd, positional, flags);
         return 0;
