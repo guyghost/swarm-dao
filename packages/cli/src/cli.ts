@@ -606,7 +606,9 @@ const IMPROVE_USAGE = `usage: swarm-dao improve <init|status|once|submit> [optio
 
 Anchor commands come from .dao/improvement.json in the project (create it with
 an 'anchorCommands' object binding the four command-backed anchors). Evidence
-defaults to .dao/improvement-series and .dao/improvement-cycles.`;
+defaults to .dao/improvement-series and .dao/improvement-cycles; override with
+--evidence-root and --cycle-root (repos carrying the frozen improvement graph
+use evidence/ paths).`;
 
 const SANDBOX_MODES = new Set(["none", "docker", "container", "auto"]);
 
@@ -661,6 +663,10 @@ async function cmdImprove(cwd: string, positional: string[], flags: Record<strin
     cwd,
     typeof flags["evidence-root"] === "string" ? flags["evidence-root"] : IMPROVE_SERIES_ROOT,
   );
+  const cycleRoot = path.resolve(
+    cwd,
+    typeof flags["cycle-root"] === "string" ? flags["cycle-root"] : IMPROVE_CYCLE_ROOT,
+  );
 
   if (sub === "init") {
     // Grounding needs gates: refuse a series whose project has no anchor config.
@@ -704,7 +710,7 @@ async function cmdImprove(cwd: string, positional: string[], flags: Record<strin
   const runCommand = await resolveSandboxRunCommand(sandboxRequestFrom(flags, config), cwd);
   const deps: OrchestratorOnceDeps = {
     workDir: cwd,
-    cycleEvidenceRoot: path.resolve(cwd, IMPROVE_CYCLE_ROOT),
+    cycleEvidenceRoot: cycleRoot,
     ...(runCommand ? { runCommand } : {}),
   };
   const runner = await OrchestratorRunner.create({ seriesId, evidenceRoot });

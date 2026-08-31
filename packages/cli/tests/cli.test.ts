@@ -24,3 +24,17 @@ describe("cli.ts — improve sandbox flags", () => {
     expect(code).toBe(1);
   });
 });
+
+describe("cli.ts — improve series roots", () => {
+  it("status on an unknown series in an empty project still answers (fresh idle runner)", async () => {
+    const code = await main(["improve", "status", "--series-id", "nope"], process.cwd());
+    expect(code).toBe(0);
+  });
+});
+
+describe("cli.ts — improve series roots", () => {
+  it("answers status for an unknown series without touching DAO proposal state", async () => {
+    const code = await main(["improve", "status", "--series-id", "nope"], process.cwd());
+    expect(code).toBe(0);
+  });
+});
