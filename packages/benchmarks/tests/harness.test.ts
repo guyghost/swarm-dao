@@ -1,6 +1,11 @@
 import { describe, expect, it } from "bun:test";
 import { parseArgs, SUITES } from "../benchmarks/index.js";
-import { calibrationSlowdown, compareReports, formatComparisons } from "../scripts/compare-benchmarks.js";
+import {
+  adjudicateRegressions,
+  calibrationSlowdown,
+  compareReports,
+  formatComparisons,
+} from "../scripts/compare-benchmarks.js";
 import { type BenchmarkReport, formatReport, runSuites, summarize } from "../src/harness.js";
 
 function report(measurements: Array<{ suite: string; name: string; meanMs: number }>): BenchmarkReport {
@@ -125,6 +130,72 @@ describe("benchmark harness", () => {
     const comparisons = compareReports(report([{ suite: "s", name: "b", meanMs: 3 }]), report([]), 0.25);
     expect(comparisons[0]?.status).toBe("new");
     expect(comparisons[0]?.baselineMs).toBeNull();
+  });
+});
+
+describe("bench:compare — flake adjudication (PR #79 finding)", () => {
+  const gates = { threshold: 0.25, floorMs: 0.05, slowdown: 1 };
+  const flagged = (currentMs: number, baselineMs: number) => [
+    {
+      suite: "artefacts",
+      name: "render artefacts to markdown",
+      currentMs,
+      baselineMs,
+      changeRatio: (currentMs - baselineMs) / baselineMs,
+      status: "regression" as const,
+    },
+  ];
+
+  it("dismisses a flagged bench whose re-measured median falls back inside the gates", async () => {
+    // The PR #79 flake: 0.101ms vs 0.031ms baseline on one run, gone on the next.
+    const baseline = report([{ suite: "artefacts", name: "render artefacts to markdown", meanMs: 0.031 }]);
+    const { confirmed, dismissed } = await adjudicateRegressions(flagged(0.101, 0.031), baseline, gates, async () => [
+      0.03, 0.028, 0.032,
+    ]);
+    expect(confirmed).toHaveLength(0);
+    expect(dismissed).toHaveLength(1);
+    expect(dismissed[0]?.reMeasuredMs).toBe(0.03);
+  });
+
+  it("confirms a regression whose re-measured median stays beyond the gates", async () => {
+    const baseline = report([{ suite: "artefacts", name: "render artefacts to markdown", meanMs: 0.031 }]);
+    const { confirmed, dismissed } = await adjudicateRegressions(flagged(0.101, 0.031), baseline, gates, async () => [
+      0.15, 0.14, 0.16,
+    ]);
+    expect(confirmed).toHaveLength(1);
+    expect(dismissed).toHaveLength(0);
+  });
+
+  it("confirms when the case cannot be re-measured — never silence what it cannot check", async () => {
+    const baseline = report([{ suite: "artefacts", name: "render artefacts to markdown", meanMs: 0.031 }]);
+    const { confirmed } = await adjudicateRegressions(flagged(0.101, 0.031), baseline, gates, async () => []);
+    expect(confirmed).toHaveLength(1);
+  });
+
+  it("confirms when the baseline entry is missing — dismissal requires evidence (Copilot review on #81)", async () => {
+    const emptyBaseline = report([]);
+    const { confirmed, dismissed } = await adjudicateRegressions(
+      flagged(0.101, 0.031),
+      emptyBaseline,
+      gates,
+      async () => [0.03, 0.028, 0.032],
+    );
+    expect(confirmed).toHaveLength(1);
+    expect(dismissed).toHaveLength(0);
+  });
+
+  it("adjudicates against the calibrated gates, not the raw ones", async () => {
+    const baseline = report([{ suite: "artefacts", name: "render artefacts to markdown", meanMs: 0.08 }]);
+    // Median +75% / +0.06ms: beyond the raw gates (25% / 0.05ms), inside the
+    // slowdown-2 gates (125% / 0.1ms) — a slow runner must relax adjudication too.
+    const { confirmed, dismissed } = await adjudicateRegressions(
+      flagged(0.14, 0.08),
+      baseline,
+      { threshold: 0.25, floorMs: 0.05, slowdown: 2 },
+      async () => [0.14],
+    );
+    expect(confirmed).toHaveLength(0);
+    expect(dismissed).toHaveLength(1);
   });
 });
 
