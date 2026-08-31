@@ -13,11 +13,11 @@
 // effect-level, bounded, and idempotent (fresh workspace per attempt); they
 // never change series or cycle state.
 
-import type { HerdrRunner } from "../../packages/herdr-adapter/src/adapter.js";
-import { sanitizeHerdrName } from "../../packages/herdr-adapter/src/adapter.js";
-import { ORCHESTRATOR_MAX_WORKER_RETRIES } from "../../packages/core/src/models/improvement-orchestrator.machine.js";
 import { exec as execCallback } from "node:child_process";
 import { promisify } from "node:util";
+import { ORCHESTRATOR_MAX_WORKER_RETRIES } from "../../packages/core/src/models/improvement-orchestrator.machine.js";
+import type { HerdrRunner } from "../../packages/herdr-adapter/src/adapter.js";
+import { sanitizeHerdrName } from "../../packages/herdr-adapter/src/adapter.js";
 
 const execAsync = promisify(execCallback);
 
@@ -62,6 +62,15 @@ export type WorkerHarvest = Readonly<{ ok: true; content: string } | { ok: false
 
 const SAFE_KIND = /^[a-z][a-z0-9_-]{0,31}$/;
 
+// Numeric options are interpolated into herdr shell commands, so they must be
+// finite integers within bounds even when callers bypass the TypeScript types
+// (e.g. JSON config); anything else falls back to the default.
+export const toBoundedInt = (value: unknown, fallback: number, min: number, max: number): number => {
+  const parsed = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(Math.max(Math.trunc(parsed), min), max);
+};
+
 const quote = (value: string): string => `'${value.replace(/'/g, `'\\''`)}'`;
 
 function herdrErrorDetail(stderr: string, stdout: string): string {
@@ -102,13 +111,19 @@ function agentState(result: HerdrJson["result"]): string | null {
  * Run one worker prompt inside a herdr workspace, with bounded effect-level
  * retries (fresh workspace and unique agent name per attempt).
  */
-export async function runHerdrWorker(options: HerdrWorkerOptions, name: string, prompt: string): Promise<WorkerHarvest> {
+export async function runHerdrWorker(
+  options: HerdrWorkerOptions,
+  name: string,
+  prompt: string,
+): Promise<WorkerHarvest> {
   const runner = options.runner ?? defaultRunner();
   const kind = options.kind ?? "pi";
   const agentArgs = options.agentArgs ?? ["-ne"];
-  const timeoutMs = Math.min(options.timeoutMs ?? 300_000, 300_000);
-  const startTimeoutMs = Math.min(options.startTimeoutMs ?? 120_000, 300_000);
-  const readLines = options.readLines ?? 200;
+  // herdr's own timeout ceiling is 300000ms; readLines is capped to keep the
+  // read command (and the harvested transcript) bounded.
+  const timeoutMs = toBoundedInt(options.timeoutMs, 300_000, 1_000, 300_000);
+  const startTimeoutMs = toBoundedInt(options.startTimeoutMs, 120_000, 1_000, 300_000);
+  const readLines = toBoundedInt(options.readLines, 200, 1, 10_000);
   const extraArgs = agentArgs.map((arg) => quote(arg)).join(" ");
 
   if (!SAFE_KIND.test(kind)) return { ok: false, error: `herdr kind '${kind}' is not a valid agent kind identifier.` };
@@ -143,7 +158,9 @@ export async function runHerdrWorker(options: HerdrWorkerOptions, name: string, 
         continue;
       }
 
-      const prompted = await runner.exec(`herdr agent prompt ${agentName} ${quote(prompt)} --wait --timeout ${timeoutMs}`);
+      const prompted = await runner.exec(
+        `herdr agent prompt ${agentName} ${quote(prompt)} --wait --timeout ${timeoutMs}`,
+      );
       if (prompted.exitCode !== 0) {
         lastError = `herdr agent prompt failed (likely timeout): ${herdrErrorDetail(prompted.stderr, prompted.stdout)}`;
         continue;

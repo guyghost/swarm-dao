@@ -305,11 +305,17 @@ describe("improvement-orchestrator wiring — authority helpers", () => {
   it("restricts the CLI submit channel to human events", () => {
     expect(isHumanChannelEvent({ type: "RETRY_WORKERS", source: "human" })).toBe(true);
     expect(isHumanChannelEvent({ type: "RESTART_SERIES", source: "human" })).toBe(true);
-    expect(isHumanChannelEvent({ type: "CANCEL_SERIES", source: "human" })).toBe(true);
+    expect(isHumanChannelEvent({ type: "CANCEL_SERIES", source: "human", reason: "owner stopped the series" })).toBe(
+      true,
+    );
     expect(isHumanChannelEvent({ type: "START_SERIES", source: "human" })).toBe(false);
     expect(isHumanChannelEvent({ type: "WORKERS_HARVESTED", source: "tool" })).toBe(false);
     expect(isHumanChannelEvent({ type: "RETRY_WORKERS", source: "tool" })).toBe(false);
     expect(isHumanChannelEvent("cancel the series")).toBe(false);
+    // CANCEL_SERIES requires a non-empty reason at the CLI boundary so the
+    // failure is immediate and specific, not a generic machine rejection.
+    expect(isHumanChannelEvent({ type: "CANCEL_SERIES", source: "human" })).toBe(false);
+    expect(isHumanChannelEvent({ type: "CANCEL_SERIES", source: "human", reason: "   " })).toBe(false);
   });
 
   it("enforces one active series per scope", async () => {

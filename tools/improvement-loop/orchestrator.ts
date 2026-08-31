@@ -147,9 +147,16 @@ const validSeriesId = (seriesId: string): boolean =>
 
 const HUMAN_CHANNEL_EVENTS: ReadonlySet<string> = new Set(["RETRY_WORKERS", "RESTART_SERIES", "CANCEL_SERIES"]);
 
-/** The CLI submit channel forwards only human events; tool/system events are produced by `once`. */
-export const isHumanChannelEvent = (event: unknown): boolean =>
-  isRecord(event) && HUMAN_CHANNEL_EVENTS.has(event.type as string) && event.source === "human";
+/**
+ * The CLI submit channel forwards only human events; tool/system events are
+ * produced by `once`. CANCEL_SERIES must already carry a non-empty reason so
+ * the CLI fails early instead of surfacing a generic machine rejection later.
+ */
+export const isHumanChannelEvent = (event: unknown): boolean => {
+  if (!isRecord(event) || !HUMAN_CHANNEL_EVENTS.has(event.type as string) || event.source !== "human") return false;
+  if (event.type === "CANCEL_SERIES") return typeof event.reason === "string" && event.reason.trim().length > 0;
+  return true;
+};
 
 /** Maps a persisted improvement cycle state to exactly one typed observation, or null (poll continues). */
 export const mapCycleStateToObservation = (
@@ -827,7 +834,9 @@ const main = async (): Promise<void> => {
     if (!values.event) throw new Error(`--event is required\n${usage}`);
     const event: unknown = JSON.parse(await readFile(resolve(values.event), "utf8"));
     if (!isHumanChannelEvent(event)) {
-      throw new Error("CLI submit only forwards human events (RETRY_WORKERS, RESTART_SERIES, CANCEL_SERIES)");
+      throw new Error(
+        "CLI submit only forwards human events (RETRY_WORKERS, RESTART_SERIES, CANCEL_SERIES with a non-empty reason)",
+      );
     }
     const runner = await OrchestratorRunner.create({ seriesId, evidenceRoot });
     const result = await runner.submit(event);
