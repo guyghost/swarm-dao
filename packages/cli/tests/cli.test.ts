@@ -24,3 +24,15 @@ describe("cli.ts — improve sandbox flags", () => {
     expect(code).toBe(1);
   });
 });
+
+describe("cli.ts — improve series roots", () => {
+  it("answers status for an unknown series (fresh idle runner; no DAO proposal state touched)", async () => {
+    const code = await main(["improve", "status", "--series-id", "nope"], process.cwd());
+    expect(code).toBe(0);
+  });
+
+  it("fails fast on a value-less --cycle-root or --evidence-root flag", async () => {
+    expect(await main(["improve", "once", "--series-id", "t", "--cycle-root"], process.cwd())).toBe(1);
+    expect(await main(["improve", "once", "--series-id", "t", "--evidence-root"], process.cwd())).toBe(1);
+  });
+});

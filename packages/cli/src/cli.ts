@@ -606,7 +606,9 @@ const IMPROVE_USAGE = `usage: swarm-dao improve <init|status|once|submit> [optio
 
 Anchor commands come from .dao/improvement.json in the project (create it with
 an 'anchorCommands' object binding the four command-backed anchors). Evidence
-defaults to .dao/improvement-series and .dao/improvement-cycles.`;
+defaults to .dao/improvement-series and .dao/improvement-cycles; override with
+--evidence-root and --cycle-root (repos carrying the frozen improvement graph
+use evidence/ paths).`;
 
 const SANDBOX_MODES = new Set(["none", "docker", "container", "auto"]);
 
@@ -657,10 +659,17 @@ async function cmdImprove(cwd: string, positional: string[], flags: Record<strin
 
   const seriesId = typeof flags["series-id"] === "string" ? flags["series-id"] : undefined;
   if (!seriesId) err(`--series-id is required\n${IMPROVE_USAGE}`);
-  const evidenceRoot = path.resolve(
-    cwd,
-    typeof flags["evidence-root"] === "string" ? flags["evidence-root"] : IMPROVE_SERIES_ROOT,
-  );
+  // Value-less root flags (parseFlags yields boolean true) must fail fast —
+  // silently writing to the default root would hide operator typos
+  // (Copilot review on #83), mirroring the sandbox flag validation.
+  const rootFlag = (name: string, fallback: string): string => {
+    const value = flags[name];
+    if (value === undefined) return fallback;
+    if (typeof value !== "string" || value.trim().length === 0) err(`--${name} requires a value`);
+    return value;
+  };
+  const evidenceRoot = path.resolve(cwd, rootFlag("evidence-root", IMPROVE_SERIES_ROOT));
+  const cycleRoot = path.resolve(cwd, rootFlag("cycle-root", IMPROVE_CYCLE_ROOT));
 
   if (sub === "init") {
     // Grounding needs gates: refuse a series whose project has no anchor config.
@@ -704,7 +713,7 @@ async function cmdImprove(cwd: string, positional: string[], flags: Record<strin
   const runCommand = await resolveSandboxRunCommand(sandboxRequestFrom(flags, config), cwd);
   const deps: OrchestratorOnceDeps = {
     workDir: cwd,
-    cycleEvidenceRoot: path.resolve(cwd, IMPROVE_CYCLE_ROOT),
+    cycleEvidenceRoot: cycleRoot,
     ...(runCommand ? { runCommand } : {}),
   };
   const runner = await OrchestratorRunner.create({ seriesId, evidenceRoot });
