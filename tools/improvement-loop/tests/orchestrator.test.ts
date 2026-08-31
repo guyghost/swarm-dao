@@ -152,6 +152,32 @@ describe("improvement-orchestrator wiring — nominal series", () => {
   });
 });
 
+describe("improvement-orchestrator wiring — cooldown persistence", () => {
+  it("persists cooldownEnteredAt so a fresh runner resumes the timer instead of restarting it", async () => {
+    const evidenceRoot = await mkdtemp(join(tmpdir(), "orchestrator-cooldown-"));
+    const cycleRoot = await mkdtemp(join(tmpdir(), "orchestrator-cooldown-cycles-"));
+    try {
+      const runner = await OrchestratorRunner.create({ seriesId: "series-cooldown", evidenceRoot });
+      await startSeries(runner);
+      const deps = { cycleEvidenceRoot: cycleRoot, runWorker: fakeWorker(), runCommand: okCommand };
+      for (let phase = 0; phase < 8; phase++) await runner.once(deps); // preparing..observing -> cooldown
+      expect(runner.snapshot().state).toBe("cooldown");
+
+      // A fresh runner (as every CLI invocation is) must restore the stamped
+      // timer from disk and expire the cooldown on schedule.
+      const fresh = await OrchestratorRunner.create({ seriesId: "series-cooldown", evidenceRoot });
+      expect(fresh.snapshot().cooldownEnteredAt).not.toBeNull();
+      const cooldownStart = Date.parse(fresh.snapshot().cooldownEnteredAt as string);
+      const step = await fresh.once({ ...deps, nowMs: () => cooldownStart + ORCHESTRATOR_MIN_COOLDOWN_MS + 1 });
+      expect(step.event).toBe("COOLDOWN_ELAPSED");
+      expect(fresh.snapshot().state).toBe("preparing");
+    } finally {
+      await rm(evidenceRoot, { recursive: true, force: true });
+      await rm(cycleRoot, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("improvement-orchestrator wiring — human gates", () => {
   it("routes worker failures to workerFailed and retries only through a human event", async () => {
     const evidenceRoot = await mkdtemp(join(tmpdir(), "orchestrator-fail-"));

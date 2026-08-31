@@ -66,14 +66,19 @@ const PHASE_WORKERS: Readonly<Record<WorkerPhase, readonly string[]>> = {
 // models/improvement-orchestrator.review.md); the machine binds only the
 // worker identities, the output contract, and the retry bound.
 const WORKER_PROMPTS: Readonly<Record<string, (scope: string) => string>> = {
+  // Sample values are vocabulary-tolerant by model contract: the frozen
+  // negative-outcome set {declined, fell} (models/improvement-loop.md,
+  // "Deterministic arbitration policy") owns the counter-veto, so prompt
+  // phrasing can drift without disarming it. Prompts keep the canonical
+  // words so journal samples stay uniformly worded.
   sensor: (scope) =>
     `You are the sensor worker of a Swarm DAO improvement series for scope '${scope}'. ` +
     `Observe the optimizing metric for this scope in the repository around you, then answer with ONLY a JSON object: ` +
-    `{"sample": {"value": "rose|fell|held", "evidence": "<concise observation>"}}. No other text.`,
+    `{"sample": {"value": "improved|held|declined", "evidence": "<concise observation>"}}. No other text.`,
   "counter-sensor": (scope) =>
     `You are the counter-sensor worker of a Swarm DAO improvement series for scope '${scope}'. ` +
     `Observe the counter-metric (the thing that must not regress while the optimizing metric moves), ` +
-    `then answer with ONLY a JSON object: {"sample": {"value": "rose|fell|held", "evidence": "<concise observation>"}}. No other text.`,
+    `then answer with ONLY a JSON object: {"sample": {"value": "improved|held|declined", "evidence": "<concise observation>"}}. No other text.`,
   "drift-auditor": (scope) =>
     `You are the drift-auditor worker of a Swarm DAO improvement series for scope '${scope}'. ` +
     `Compare the current implementation behavior against the approved reference for this scope, ` +
@@ -380,6 +385,10 @@ export class OrchestratorRunner {
     const after = this.#serialize();
     if (accepted && after.state === "cooldown") this.#cooldownEnteredAt = this.#clock();
     else if (after.state !== "cooldown") this.#cooldownEnteredAt = null;
+    // Re-serialize after stamping the cooldown timer: the persisted snapshot
+    // must carry cooldownEnteredAt, otherwise every fresh CLI runner restarts
+    // the timer on its first poll (dogfood-002 finding).
+    const persisted = this.#serialize();
 
     const entry: SeriesJournalEntry = {
       sequence: ++this.#sequence,
@@ -394,13 +403,13 @@ export class OrchestratorRunner {
       ...(event ? { event } : {}),
     };
     await appendFile(resolve(this.#seriesDirectory, "journal.ndjson"), `${JSON.stringify(entry)}\n`, "utf8");
-    await this.#persistSnapshot(after);
+    await this.#persistSnapshot(persisted);
     // One active series per scope (invariant 7): the runner maintains the
     // scope registry so every start path (CLI or library) is covered.
     if (accepted && type === "START_SERIES" && typeof after.context.scope === "string") {
       await rememberActiveSeries(this.#evidenceRoot, after.context.scope, this.#seriesId);
     }
-    return { accepted, issues, snapshot: after };
+    return { accepted, issues, snapshot: persisted };
   }
 
   async #restoreJournal(): Promise<void> {
@@ -531,6 +540,13 @@ export class OrchestratorRunner {
       }
       const answer = extractLastJsonObject(harvest.content);
       if (!answer) {
+        // Preserve the harvested transcript so parse failures are diagnosable
+        // without replaying the worker by hand (dogfood-002 finding).
+        await writeFile(
+          resolve(this.#workDirectory(), `worker-${worker}.transcript.txt`),
+          harvest.content,
+          "utf8",
+        ).catch(() => undefined);
         const reason = `worker ${worker} produced no parseable JSON answer`;
         const submitted = await this.submit({ type: "WORKERS_FAILED", source: "tool", reason, phase });
         return this.#result(base, submitted, "WORKERS_FAILED", reason);

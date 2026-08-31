@@ -85,8 +85,13 @@ export const arbitratePairedSignals = (
   if (!metric || !counterMetric) return { outcome: "missing-pair", arbitrationPolicyPassed: false };
   // Fixed policy: the counter-metric may veto an optimizing metric that moved the
   // wrong way. This is deterministic; the AI never supplies the outcome.
-  const metricUp = metric.value !== "declined";
-  const counterUp = counterMetric.value !== "declined";
+  // Negative outcomes are a frozen synonym set (models/improvement-loop.md,
+  // "Deterministic arbitration policy"): the veto keys on the set, never on
+  // executor prompt wording, so a sensor vocabulary drift cannot silently
+  // disarm it (dogfood-002). Outcome strings are stable journal identifiers.
+  const isNegative = (value: string): boolean => value === "declined" || value === "fell";
+  const metricUp = !isNegative(metric.value);
+  const counterUp = !isNegative(counterMetric.value);
   if (metricUp && !counterUp) {
     return { outcome: "counter-veto:metric-rose-counter-fell", arbitrationPolicyPassed: false };
   }
