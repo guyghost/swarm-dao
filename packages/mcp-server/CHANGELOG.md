@@ -1,5 +1,16 @@
 # @guyghost/swarm-dao-mcp
 
+## 0.5.0
+
+### Minor Changes
+
+- 42971b0: Add the read-only `dao_attention` MCP tool: pending human gates across Graph Engineering runs, improvement cycles and series, and product loops, each with its runnable resolution suggestion. The `attention` command registry entry becomes a dual-host (`cli`, `mcp`) command bound to the `dao_attention` tool.
+
+### Patch Changes
+
+- Updated dependencies [42971b0]
+  - @guyghost/swarm-dao-core@0.11.1
+
 ## 0.4.1
 
 ### Patch Changes
