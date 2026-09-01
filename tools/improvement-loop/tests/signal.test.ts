@@ -88,3 +88,22 @@ describe("improvement signal validation", () => {
     expect(humanCancel.ok).toBe(true);
   });
 });
+
+describe("validateImprovementSignal — ANCHOR_RECORDED evidence (dogfood-003 c7 finding)", () => {
+  it("keeps every evidence line (command + outcome tail), not just the first", () => {
+    const result = validateImprovementSignal({
+      cycleId: "c1",
+      type: "ANCHOR_RECORDED",
+      source: "tool",
+      producer: "anchor-verifier",
+      occurredAt: "2026-09-01T00:00:00.000Z",
+      payload: { anchor: "regression", status: "failed" },
+      evidence: ["$ bun run improvement:regression", "error: Cannot find package 'xstate'"],
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect((result.event as { evidence: string }).evidence).toBe(
+      "$ bun run improvement:regression\nerror: Cannot find package 'xstate'",
+    );
+  });
+});

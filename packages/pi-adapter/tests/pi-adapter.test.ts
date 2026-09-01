@@ -6,6 +6,7 @@
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, mock } from "bun:test";
 import { promises as fs } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 
 mock.module("@earendil-works/pi-ai", () => ({
@@ -128,7 +129,13 @@ const EXPECTED_TOOLS = [
   "dao_improve_once",
 ];
 
-const DAO_ROOT = path.join(process.cwd(), ".dao");
+// Tests run against a throwaway git checkout: the tools resolve paths from
+// process.cwd(), and under a root-level `bun test` that is the REPOSITORY —
+// the cleanup hooks would wipe the repo's real `.dao/` (dogfood-003 c7 lost
+// its series worktree exactly this way).
+let DAO_ROOT: string;
+let testRoot: string;
+let cwdBefore: string;
 
 // ── Test Suite ──────────────────────────────────────────────
 
@@ -136,21 +143,16 @@ describe("swarmDaoExtension", () => {
   let _mockPi: MockPi;
 
   beforeAll(async () => {
-    // Clean up any leftover .dao directory
-    try {
-      await fs.rm(DAO_ROOT, { recursive: true, force: true });
-    } catch {
-      /* ignore */
-    }
+    cwdBefore = process.cwd();
+    testRoot = await fs.mkdtemp(path.join(tmpdir(), "swarm-pi-tests-"));
+    await Bun.$`git init -q`.cwd(testRoot);
+    process.chdir(testRoot);
+    DAO_ROOT = path.join(testRoot, ".dao");
   });
 
   afterAll(async () => {
-    // Clean up .dao directory created by tests
-    try {
-      await fs.rm(DAO_ROOT, { recursive: true, force: true });
-    } catch {
-      /* ignore */
-    }
+    process.chdir(cwdBefore);
+    await fs.rm(testRoot, { recursive: true, force: true });
   });
 
   beforeEach(async () => {
