@@ -1,6 +1,6 @@
 {
   "name": "@guyghost/swarm-dao-mcp",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "description": "Swarm DAO Model Context Protocol server — exposes DAO governance tools to any MCP-compatible host (Copilot, Claude, Codex, …)",
   "type": "module",
   "main": "./dist/index.js",
@@ -29,7 +29,7 @@
   "dependencies": {
     "@guyghost/swarm-dao-core": "^0.11.4",
     "@guyghost/swarm-dao-graph": "^0.3.0",
-    "@guyghost/swarm-dao-improvement": "^0.5.0",
+    "@guyghost/swarm-dao-improvement": "^0.5.1",
     "@guyghost/swarm-dao-product": "^0.3.0",
     "@modelcontextprotocol/sdk": "^1.29.0"
   },
