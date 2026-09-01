@@ -70,14 +70,14 @@ describe("attention: human-gate classification", () => {
     }
   });
 
-  test("improvement-series workerFailed carries the pending reason and the series submit command", () => {
+  test("improvement-series workerFailed carries the pending reason and the retry-workers command", () => {
     const item = classifyAttention(
       "improvement-series",
       snapshot("workerFailed", { pendingReason: "sensor failed after 3 attempts" }, "ser-4"),
     );
     expect(item).not.toBeNull();
     expect(item?.detail).toBe("sensor failed after 3 attempts");
-    expect(item?.command).toBe("swarm-dao improve submit --series-id ser-4 --event <event.json>");
+    expect(item?.command).toBe("swarm-dao improve retry-workers --series-id ser-4");
   });
 
   test("improvement-series halted is a human gate; progressing states are not", () => {

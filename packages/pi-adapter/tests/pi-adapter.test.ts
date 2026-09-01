@@ -249,7 +249,7 @@ describe("swarmDaoExtension", () => {
       expect(text).toMatch(/pending human gates?/);
       expect(text).toContain("graph-engineering/g1");
       expect(text).toContain("cafebabe");
-      expect(text).toContain("swarm-dao graph submit --run-id g1");
+      expect(text).toContain("swarm-dao approve --run-id g1");
     });
 
     it("dao_attention rejects an unknown source", async () => {

@@ -57,6 +57,35 @@ import {
   type SandboxMode,
 } from "@guyghost/swarm-dao-improvement";
 import { createProductRunner } from "@guyghost/swarm-dao-product";
+import {
+  cmdApprove,
+  cmdImproveCancel,
+  cmdImproveReference,
+  cmdImproveRestart,
+  cmdImproveRetry,
+  cmdImproveRetryWorkers,
+  cmdReject,
+  GateError,
+} from "./human-gates.js";
+import { cmdNext } from "./next.js";
+import {
+  type CycleHistoryRow,
+  type CycleStatusView,
+  GLYPH,
+  type GraphStatusView,
+  renderCyclesTable,
+  renderGraphStatus,
+  renderSeriesStatus,
+  type SeriesStatusView,
+} from "./render.js";
+import {
+  CYCLE_ROOT_CANDIDATES,
+  listCycleDirs,
+  locateRoot,
+  readJournalDurationMs,
+  readJsonOrNull,
+  SERIES_ROOT_CANDIDATES,
+} from "./roots.js";
 
 // ── Helpers ─────────────────────────────────────────────────
 
@@ -145,6 +174,9 @@ const CLI_IMPLEMENTED = [
   "config",
   "audit",
   "attention",
+  "next",
+  "approve",
+  "reject",
   "status",
   "graph",
   "product",
@@ -168,6 +200,10 @@ const CLI_USAGE_DETAILS: Record<string, string> = {
   config: "  config",
   audit: "  audit [--proposal <id>]",
   attention: "  attention [--source <graph-engineering|improvement-loop|improvement-series|product-loop>,...]",
+  next: "  next              what needs you now (human gates + live workflows)",
+  approve:
+    "  approve --run-id <id> [--evidence-root <path>] [--yes]\n        approve the exact model hash of a graph run awaiting approval",
+  reject: "  reject --run-id <id> --reason <text> [--yes]\n        send an awaiting model back to draft",
   graph:
     "  graph <init|status|submit> --run-id <id> [--evidence-root <path>]\n        graph submit --run-id <id> --signal <file.json>",
   product:
@@ -637,6 +673,8 @@ interface RunCommandSpec {
   create: (options: { evidenceRoot: string; runId: string }) => Promise<RunCommandRunner>;
   /** Extra effect on init (graph runs mark the active run). */
   onInit?: (evidenceRoot: string, runId: string) => Promise<void>;
+  /** Human-readable status rendering; falls back to raw JSON when absent. */
+  renderStatus?: (snapshot: Record<string, unknown>) => string[];
 }
 
 /** Shared init/status/submit body for graph and product runs: identical flag
@@ -668,7 +706,11 @@ async function cmdRunCommand(
     return 0;
   }
   if (sub === "status") {
-    info(JSON.stringify(runner.snapshot(), null, 2));
+    if (spec.renderStatus && flags.json !== true) {
+      info(spec.renderStatus(runner.snapshot() as unknown as Record<string, unknown>).join("\n"));
+    } else {
+      info(JSON.stringify(runner.snapshot(), null, 2));
+    }
     return 0;
   }
 
@@ -686,6 +728,19 @@ const GRAPH_SPEC: RunCommandSpec = {
   create: createGraphRunner,
   onInit: async (evidenceRoot, runId) => {
     await fs.writeFile(path.join(evidenceRoot, "active-run.json"), `${JSON.stringify({ runId }, null, 2)}\n`, "utf8");
+  },
+  renderStatus: (snapshot) => {
+    const context = (snapshot.context ?? {}) as Record<string, unknown>;
+    const anchors = (context.anchors ?? {}) as Record<string, { status: string }>;
+    const view: GraphStatusView = {
+      runId: String(snapshot.runId ?? ""),
+      state: String(snapshot.state ?? "unknown"),
+      modelHash: typeof context.modelHash === "string" ? context.modelHash : null,
+      approvedModelHash: typeof context.approvedModelHash === "string" ? context.approvedModelHash : null,
+      implementationHash: typeof context.implementationHash === "string" ? context.implementationHash : null,
+      anchors,
+    };
+    return renderGraphStatus(view);
   },
 };
 
@@ -708,15 +763,22 @@ function cmdProduct(cwd: string, positional: string[], flags: Record<string, str
 const IMPROVE_SERIES_ROOT = ".dao/improvement-series";
 const IMPROVE_CYCLE_ROOT = ".dao/improvement-cycles";
 
-const IMPROVE_USAGE = `usage: swarm-dao improve <init|status|once|submit> [options]
+const IMPROVE_USAGE = `usage: swarm-dao improve <init|status|once|submit|cycles|retry|retry-workers|restart|cancel|reference> [options]
 
   init   --series-id <id> --scope <s> --reference-hash <hash> [--cooldown-ms <ms>]
-  status --series-id <id>
+  status --series-id <id> [--json]
+  cycles --series-id <id> [--json]     cycle history for the series
   once   --series-id <id> [--exec <branch|worktree|container>]
                       [--sandbox <docker|container|auto|none>] [--image <ref>]
                       [--cpus <n>] [--memory-mb <mb>]
                       [--agent <kind>] [--agent-args "<args>"]
   submit --series-id <id> --event <file.json>
+  human gates (--yes skips the prompt after review):
+  retry          --cycle-id <id> | --series-id <id>    authorize a retrying cycle
+  retry-workers  --series-id <id>                      after a worker failure
+  restart        --series-id <id>                      restart a halted series
+  cancel         --series-id <id> --reason <text>      terminal
+  reference      --cycle-id <id> --decision approve|reject [--reason <text>]
 
 Execution environments (--exec, default branch):
   branch    workers and anchors run in the current checkout
@@ -814,7 +876,14 @@ function workerOptionsFrom(
 
 async function cmdImprove(cwd: string, positional: string[], flags: Record<string, string | true>): Promise<number> {
   const sub = positional[0];
-  if (sub !== "init" && sub !== "status" && sub !== "once" && sub !== "submit") err(IMPROVE_USAGE);
+  // Human-gate subs take --cycle-id or --series-id themselves; dispatch before
+  // the shared --series-id requirement so `improve retry --cycle-id X` works.
+  if (sub === "retry") return cmdImproveRetry(cwd, flags);
+  if (sub === "retry-workers") return cmdImproveRetryWorkers(cwd, flags);
+  if (sub === "restart") return cmdImproveRestart(cwd, flags);
+  if (sub === "cancel") return cmdImproveCancel(cwd, flags);
+  if (sub === "reference") return cmdImproveReference(cwd, flags);
+  if (sub !== "init" && sub !== "status" && sub !== "once" && sub !== "submit" && sub !== "cycles") err(IMPROVE_USAGE);
 
   const seriesId = typeof flags["series-id"] === "string" ? flags["series-id"] : undefined;
   if (!seriesId) err(`--series-id is required\n${IMPROVE_USAGE}`);
@@ -824,6 +893,12 @@ async function cmdImprove(cwd: string, positional: string[], flags: Record<strin
   const rootFlag = (name: string, fallback: string): string => {
     const value = flags[name];
     if (value === undefined) return fallback;
+    if (typeof value !== "string" || value.trim().length === 0) err(`--${name} requires a value`);
+    return value;
+  };
+  const rootFlagValue = (name: string): string | undefined => {
+    const value = flags[name];
+    if (value === undefined) return undefined;
     if (typeof value !== "string" || value.trim().length === 0) err(`--${name} requires a value`);
     return value;
   };
@@ -849,8 +924,91 @@ async function cmdImprove(cwd: string, positional: string[], flags: Record<strin
   }
 
   if (sub === "status") {
-    const runner = await OrchestratorRunner.create({ seriesId, evidenceRoot });
-    info(JSON.stringify(runner.snapshot(), null, 2));
+    const located = await locateRoot(cwd, seriesId, SERIES_ROOT_CANDIDATES, rootFlagValue("evidence-root"));
+    const runner = await OrchestratorRunner.create({ seriesId, evidenceRoot: located.root });
+    const snapshot = runner.snapshot();
+    if (flags.json === true) {
+      info(JSON.stringify(snapshot, null, 2));
+      return 0;
+    }
+    const seriesView: SeriesStatusView = {
+      seriesId: snapshot.seriesId,
+      state: snapshot.state,
+      scope: snapshot.context.scope,
+      cycleSequence: snapshot.context.cycleSequence,
+      activeCycleId: snapshot.context.improvementCycleId,
+      cooldownEnteredAt: snapshot.cooldownEnteredAt,
+      cooldownMs: snapshot.context.cooldownMs,
+      terminalReason: snapshot.context.terminalReason,
+    };
+    let cycleView: CycleStatusView | null = null;
+    if (seriesView.activeCycleId) {
+      const cycleLocated = await locateRoot(
+        cwd,
+        seriesView.activeCycleId,
+        CYCLE_ROOT_CANDIDATES,
+        rootFlagValue("cycle-root"),
+      );
+      const raw = (await readJsonOrNull(path.join(cycleLocated.root, seriesView.activeCycleId, "snapshot.json"))) as {
+        state?: string;
+        context?: Record<string, unknown>;
+      } | null;
+      if (raw?.context) {
+        const anchors = (raw.context.anchors ?? {}) as Record<string, { status: string; attempt: number }>;
+        const metric = (raw.context.metric ?? {}) as { value?: string };
+        cycleView = {
+          cycleId: seriesView.activeCycleId,
+          state: raw.state ?? "unknown",
+          attempt: Number(raw.context.attempt ?? 0),
+          maxRetries: Number(raw.context.maxRetries ?? 0),
+          metricValue: typeof metric.value === "string" ? metric.value : null,
+          driftClass: typeof raw.context.driftClass === "string" ? raw.context.driftClass : null,
+          arbitration: typeof raw.context.arbitrationOutcome === "string" ? raw.context.arbitrationOutcome : null,
+          anchors,
+          terminalReason: typeof raw.context.terminalReason === "string" ? raw.context.terminalReason : null,
+        };
+      }
+    }
+    info(
+      renderSeriesStatus(seriesView, cycleView, {
+        now: Date.now(),
+        found: located.found,
+        triedRoots: located.tried,
+      }).join("\n"),
+    );
+    return 0;
+  }
+
+  if (sub === "cycles") {
+    // Cycle history lives beside the series evidence: derive the default
+    // cycle root from where the series was actually found.
+    const seriesLocated = await locateRoot(cwd, seriesId, SERIES_ROOT_CANDIDATES, rootFlagValue("evidence-root"));
+    const defaultCycleRoot = seriesLocated.root.endsWith("evidence/improvement-series")
+      ? "evidence/improvement-cycles"
+      : ".dao/improvement-cycles";
+    const cycleRoot = path.resolve(cwd, rootFlag("cycle-root", defaultCycleRoot));
+    const rows: CycleHistoryRow[] = [];
+    for (const { number, dir } of await listCycleDirs(cycleRoot, seriesId)) {
+      const raw = (await readJsonOrNull(path.join(dir, "snapshot.json"))) as {
+        cycleId?: string;
+        state?: string;
+        context?: Record<string, unknown>;
+      } | null;
+      if (!raw?.context) continue;
+      const metric = (raw.context.metric ?? {}) as { value?: string };
+      rows.push({
+        number,
+        cycleId: raw.cycleId ?? path.basename(dir),
+        state: raw.state ?? "unknown",
+        attempt: Number(raw.context.attempt ?? 0),
+        metricValue: typeof metric.value === "string" ? metric.value : null,
+        driftClass: typeof raw.context.driftClass === "string" ? raw.context.driftClass : null,
+        arbitration: typeof raw.context.arbitrationOutcome === "string" ? raw.context.arbitrationOutcome : null,
+        durationMs: await readJournalDurationMs(dir),
+      });
+    }
+    if (flags.json === true) info(JSON.stringify(rows, null, 2));
+    else info(renderCyclesTable(rows).join("\n"));
     return 0;
   }
 
@@ -1000,6 +1158,12 @@ export async function main(argv: string[], cwd: string = process.cwd()): Promise
       case "attention":
         await cmdAttention(cwd, flags);
         return 0;
+      case "next":
+        return await cmdNext(cwd);
+      case "approve":
+        return await cmdApprove(cwd, flags);
+      case "reject":
+        return await cmdReject(cwd, flags);
       case "status":
         await cmdStatus(cwd);
         return 0;
@@ -1032,6 +1196,10 @@ export async function main(argv: string[], cwd: string = process.cwd()): Promise
       }
     }
   } catch (e: unknown) {
+    if (e instanceof GateError) {
+      process.stderr.write(`${GLYPH.fail} ${e.message}\n`);
+      return 1;
+    }
     const message = e instanceof Error ? e.message : String(e);
     process.stderr.write(`error: ${message}\n`);
     return 1;
