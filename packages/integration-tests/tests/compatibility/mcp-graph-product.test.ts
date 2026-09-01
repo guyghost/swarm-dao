@@ -46,7 +46,7 @@ describe("Compatibility: MCP graph & product run surface", () => {
     expect(text).toContain("1 pending human gate");
     expect(text).toContain("graph-engineering/gate-1");
     expect(text).toContain("deadbeef");
-    expect(text).toContain("swarm-dao graph submit --run-id gate-1");
+    expect(text).toContain("swarm-dao approve --run-id gate-1");
 
     // Source filtering and the empty case.
     const filtered = textOf(await client.callTool({ name: "dao_attention", arguments: { sources: ["product-loop"] } }));
