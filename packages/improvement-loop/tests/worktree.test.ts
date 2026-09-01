@@ -53,7 +53,11 @@ describe("ensureSeriesWorktree", () => {
         }),
       });
       expect(handle.created).toBe(true);
-      expect(commands[2]).not.toContain("-b");
+      // The `-b` (create-branch) flag must be absent as a git argument — match
+      // the flag as a token, not a substring: the random mkdtemp suffix can
+      // legally contain "-b" inside the worktree path (e.g. swarm-worktree-b…),
+      // which flaked main-branch CI twice (runs 33548782801, 33551744921).
+      expect(commands[2]).not.toMatch(/(?:^|\s)-b(?:\s|$)/);
       expect(commands[2]).toContain(`git worktree add '${join(repo, ".dao/worktrees/s-1")}' dao/loop/s-1`);
     } finally {
       await rm(repo, { recursive: true, force: true });
