@@ -47,7 +47,7 @@ see the sibling adapters:
 
 ## Tools
 
-27 tools covering the full governance lifecycle:
+28 tools covering the full governance lifecycle:
 
 | Group | Tools |
 | --- | --- |
@@ -55,7 +55,7 @@ see the sibling adapters:
 | Proposals | `dao_propose`, `dao_update_proposal`, `dao_propose_amendment`, `dao_list` |
 | Deliberation | `dao_deliberate`, `dao_record_outputs`, `dao_roundtable` |
 | Delivery | `dao_plan`, `dao_artefacts`, `dao_dry_run`, `dao_control`, `dao_execute`, `dao_ship`, `dao_rollback` |
-| Tracking | `dao_dashboard`, `dao_audit`, `dao_rate` |
+| Tracking | `dao_dashboard`, `dao_audit`, `dao_rate`, `dao_attention` |
 | Agents | `dao_agents` |
 | GitHub | `dao_config_github`, `dao_github_create_branch`, `dao_github_open_pr` |
 | Workflow runs | `dao_graph_status`, `dao_graph_submit`, `dao_product_status`, `dao_product_submit` |

@@ -186,8 +186,9 @@ export const DAO_COMMANDS: readonly DaoCommand[] = [
     id: "attention",
     phase: "discover",
     summary: "List pending human gates across workflow runs (read-only)",
+    tool: "dao_attention",
     args: "[--source <graph-engineering|improvement-loop|improvement-series|product-loop>,...]",
-    hosts: ["cli"],
+    hosts: ["cli", "mcp"],
   },
   {
     id: "graph-status",
