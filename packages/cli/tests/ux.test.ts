@@ -343,3 +343,51 @@ describe("cli doctor + per-command help + hints (lot 3)", () => {
     }
   });
 });
+
+describe("cli watch + improve cancel-cycle", () => {
+  it("renders a single frame with --once and refuses the live pane without a TTY", async () => {
+    const cwd = await tmpCwd("ux-watch-");
+    try {
+      await graphRunAtAwaitingApproval(`${cwd}/.dao/graph-runs`, "run-watch", "9".repeat(64));
+      expect(await main(["watch", "--once"], cwd)).toBe(0);
+      // Loop mode needs a TTY (tests run without one): clean refusal, exit 1.
+      expect(await main(["watch"], cwd)).toBe(1);
+      expect(await main(["watch", "--interval"], cwd)).toBe(1);
+      expect(await main(["watch", "--interval", "0"], cwd)).toBe(1);
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("cancels a standalone cycle through the human channel (terminal)", async () => {
+    const cwd = await tmpCwd("ux-cancelcycle-");
+    try {
+      const { createImprovementRunner } = await import("@guyghost/swarm-dao-improvement");
+      const runner = await createImprovementRunner({
+        evidenceRoot: `${cwd}/evidence/improvement-cycles`,
+        cycleId: "c-arch",
+        scope: "s",
+        referenceHash: "7".repeat(64),
+      });
+      expect(runner.snapshot().state).toBe("sampling");
+      expect(
+        await main(
+          ["improve", "cancel-cycle", "--cycle-id", "c-arch", "--reason", "superseded by series dogfood-003", "--yes"],
+          cwd,
+        ),
+      ).toBe(0);
+      // Re-create: the CLI wrote through its own runner instance.
+      const after = await createImprovementRunner({
+        evidenceRoot: `${cwd}/evidence/improvement-cycles`,
+        cycleId: "c-arch",
+        scope: "s",
+        referenceHash: "7".repeat(64),
+      });
+      expect(after.snapshot().state).toBe("cancelled");
+      // Terminal now: a second cancel refuses cleanly.
+      expect(await main(["improve", "cancel-cycle", "--cycle-id", "c-arch", "--reason", "x", "--yes"], cwd)).toBe(1);
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
