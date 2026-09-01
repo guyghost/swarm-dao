@@ -47,7 +47,7 @@ see the sibling adapters:
 
 ## Tools
 
-23 tools covering the full governance lifecycle:
+27 tools covering the full governance lifecycle:
 
 | Group | Tools |
 | --- | --- |
@@ -58,6 +58,13 @@ see the sibling adapters:
 | Tracking | `dao_dashboard`, `dao_audit`, `dao_rate` |
 | Agents | `dao_agents` |
 | GitHub | `dao_config_github`, `dao_github_create_branch`, `dao_github_open_pr` |
+| Workflow runs | `dao_graph_status`, `dao_graph_submit`, `dao_product_status`, `dao_product_submit` |
+
+Workflow-run tools expose Graph Engineering and product-loop runs to AI
+agents with a hard authority boundary: the host sets `source: "ai"` on every
+submitted signal, and only AI-artifact event types are accepted. Human events
+(approvals, rejections, retries, cancellations) never pass through MCP — they
+belong to the `swarm-dao` CLI human channel.
 
 ## Programmatic API
 
