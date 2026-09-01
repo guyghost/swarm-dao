@@ -1,6 +1,6 @@
 {
   "name": "@guyghost/swarm-dao-pi-adapter",
-  "version": "0.6.3",
+  "version": "0.6.4",
   "description": "Swarm DAO adapter for the Pi coding agent — multi-agent governance tools, commands, and event hooks",
   "type": "module",
   "main": "./dist/index.js",
@@ -24,10 +24,10 @@
     "prepublishOnly": "bun run build"
   },
   "dependencies": {
-    "@guyghost/swarm-dao-core": "^0.11.4",
-    "@guyghost/swarm-dao-graph": "^0.3.0",
-    "@guyghost/swarm-dao-improvement": "^0.5.2",
-    "@guyghost/swarm-dao-product": "^0.3.0"
+    "@guyghost/swarm-dao-core": "^0.12.0",
+    "@guyghost/swarm-dao-graph": "^0.3.1",
+    "@guyghost/swarm-dao-improvement": "^0.5.3",
+    "@guyghost/swarm-dao-product": "^0.3.1"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": ">=0.1.0",

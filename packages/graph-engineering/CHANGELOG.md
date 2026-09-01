@@ -1,5 +1,12 @@
 # @guyghost/swarm-dao-graph
 
+## 0.3.1
+
+### Patch Changes
+
+- Updated dependencies [1538199]
+  - @guyghost/swarm-dao-core@0.12.0
+
 ## 0.3.0
 
 ### Minor Changes
