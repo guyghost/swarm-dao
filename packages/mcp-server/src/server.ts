@@ -1,9 +1,18 @@
 import path from "node:path";
-import type { DaoStateRepositoryPort, ProposalType, RecordOutputInput } from "@guyghost/swarm-dao-core";
+import type {
+  AttentionSource,
+  DaoStateRepositoryPort,
+  ProposalType,
+  RecordOutputInput,
+} from "@guyghost/swarm-dao-core";
 import {
+  ATTENTION_SOURCES,
   buildDaoHelpMessage,
+  collectAttention,
   DAO_ONBOARDING_MESSAGE,
   FileDaoStateRepository,
+  FsAttentionStore,
+  formatAttention,
   getState,
   handleDaoAgents,
   handleDaoArtefacts,
@@ -315,6 +324,17 @@ export function createSwarmDaoMcpServer(workDir = resolveDaoRoot(), repository?:
         },
       },
       {
+        name: "dao_attention",
+        description:
+          "List pending human gates across Graph Engineering runs, improvement cycles and series, and product loops (read-only projection of persisted snapshots)",
+        inputSchema: {
+          type: "object",
+          properties: {
+            sources: { type: "array", items: { type: "string", enum: [...ATTENTION_SOURCES] } },
+          },
+        },
+      },
+      {
         name: "dao_graph_status",
         description:
           "Read a Graph Engineering run snapshot (read-only). Evidence root defaults to .dao/graph-runs under the workspace.",
@@ -504,6 +524,23 @@ export function createSwarmDaoMcpServer(workDir = resolveDaoRoot(), repository?:
           return textResult(await handleDaoGithubCreateBranch(ctx, Number(args.proposalId)));
         case "dao_github_open_pr":
           return textResult(await handleDaoGithubOpenPr(ctx, Number(args.proposalId), String(args.headBranch)));
+        case "dao_attention": {
+          let sources: readonly AttentionSource[] | undefined;
+          if (Array.isArray(args.sources)) {
+            const requested = args.sources.map(String);
+            const invalid = requested.filter((source) => !ATTENTION_SOURCES.includes(source as AttentionSource));
+            if (invalid.length > 0) {
+              throw new Error(`invalid source '${invalid.join(", ")}'. Allowed: ${ATTENTION_SOURCES.join(", ")}`);
+            }
+            sources = requested as AttentionSource[];
+          }
+          const items = await collectAttention(new FsAttentionStore(ctx.workDir), sources);
+          const lines = [formatAttention(items)];
+          for (const item of items) {
+            if (item.command) lines.push(`  ${item.source}/${item.runId}: ${item.command}`);
+          }
+          return textResult(lines.join("\n"));
+        }
         case "dao_graph_status": {
           const runId = String(args.runId ?? "").trim();
           if (!runId) throw new Error("runId is required");

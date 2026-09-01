@@ -29,6 +29,36 @@ describe("Compatibility: MCP graph & product run surface", () => {
     await fs.rm(workDir, { recursive: true, force: true });
   });
 
+  it("lists pending human gates read-only with runnable suggestions", async () => {
+    await fs.mkdir(path.join(workDir, ".dao/graph-runs", "gate-1"), { recursive: true });
+    await fs.writeFile(
+      path.join(workDir, ".dao/graph-runs", "gate-1", "snapshot.json"),
+      JSON.stringify({
+        runId: "gate-1",
+        state: "awaitingApproval",
+        status: "active",
+        context: { runId: "gate-1", modelHash: "deadbeef" },
+      }),
+      "utf8",
+    );
+
+    const text = textOf(await client.callTool({ name: "dao_attention", arguments: {} }));
+    expect(text).toContain("1 pending human gate");
+    expect(text).toContain("graph-engineering/gate-1");
+    expect(text).toContain("deadbeef");
+    expect(text).toContain("swarm-dao graph submit --run-id gate-1");
+
+    // Source filtering and the empty case.
+    const filtered = textOf(await client.callTool({ name: "dao_attention", arguments: { sources: ["product-loop"] } }));
+    expect(filtered).toContain("no pending human gates");
+  });
+
+  it("rejects an unknown attention source", async () => {
+    const result = await client.callTool({ name: "dao_attention", arguments: { sources: ["vibes"] } });
+    expect(result.isError).toBe(true);
+    expect(textOf(result)).toContain("invalid source");
+  });
+
   it("reads a fresh graph run snapshot and submits an AI model draft", async () => {
     const status = JSON.parse(
       textOf(await client.callTool({ name: "dao_graph_status", arguments: { runId: "mcp-g1" } })),
