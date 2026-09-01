@@ -22,6 +22,7 @@
     "@guyghost/swarm-dao-copilot-adapter": "workspace:*",
     "@guyghost/swarm-dao-core": "workspace:*",
     "@guyghost/swarm-dao-mcp": "workspace:*",
-    "@modelcontextprotocol/sdk": "^1.29.0"
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@guyghost/swarm-dao-improvement": "^0.3.1"
   }
 }

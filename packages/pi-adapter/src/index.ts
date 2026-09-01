@@ -68,7 +68,7 @@ import {
   type GraphAiEventType,
   submitAiGraphSignal,
 } from "@guyghost/swarm-dao-graph";
-import { OrchestratorRunner } from "@guyghost/swarm-dao-improvement";
+import { advanceSeriesOnce, OrchestratorRunner } from "@guyghost/swarm-dao-improvement";
 import {
   createProductRunner,
   PRODUCT_AI_EVENT_TYPES,
@@ -534,6 +534,7 @@ const DAO_ARG_USAGE: Record<string, string> = {
   dao_product_submit:
     "/dao product-submit <runId> <AGENT_SIGNAL|FEEDBACK_AGGREGATED|PROPOSAL_DRAFTED> <producer> [payload JSON] [evidence a,b]",
   dao_improve_status: "/dao improve-status <seriesId> [--evidence-root <dir>]",
+  dao_improve_once: "/dao improve-once <seriesId> [--evidence-root <dir>]",
 };
 
 function daoUsage(toolName: string): string {
@@ -682,12 +683,13 @@ export function parseDaoToolArgs(toolName: string, tokens: string[]): Record<str
     }
 
     case "dao_product_status":
-    case "dao_improve_status": {
+    case "dao_improve_status":
+    case "dao_improve_once": {
       const split = splitFlags({ "evidence-root": "string" });
       if (typeof split === "string") return split;
       const id = split.positional[0];
       if (!id) return usage;
-      const key = toolName === "dao_improve_status" ? "seriesId" : "runId";
+      const key = toolName === "dao_improve_status" || toolName === "dao_improve_once" ? "seriesId" : "runId";
       return { [key]: id, ...(split.flags["evidence-root"] ? { evidenceRoot: split.flags["evidence-root"] } : {}) };
     }
 
@@ -970,7 +972,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
       }
     }
     daoContext += `\n- Config: quorum=${state.config.quorumPercent}%, approval=${state.config.approvalThreshold}%, risk=${state.config.riskThreshold}/10`;
-    daoContext += `\n\nAvailable tools: dao_setup, dao_propose, dao_deliberate, dao_check, dao_plan, dao_execute, dao_ship, dao_audit, dao_artefacts, dao_rate, dao_dashboard, dao_dry_run, dao_rollback, dao_roundtable, dao_update_proposal, dao_check_edit, dao_config_github, dao_github_create_branch, dao_github_open_pr, dao_attention, dao_graph_status, dao_graph_submit, dao_product_status, dao_product_submit, dao_improve_status`;
+    daoContext += `\n\nAvailable tools: dao_setup, dao_propose, dao_deliberate, dao_check, dao_plan, dao_execute, dao_ship, dao_audit, dao_artefacts, dao_rate, dao_dashboard, dao_dry_run, dao_rollback, dao_roundtable, dao_update_proposal, dao_check_edit, dao_config_github, dao_github_create_branch, dao_github_open_pr, dao_attention, dao_graph_status, dao_graph_submit, dao_product_status, dao_product_submit, dao_improve_status, dao_improve_once`;
 
     return { systemPrompt: event.systemPrompt + daoContext };
   });
@@ -1524,6 +1526,26 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
         evidenceRoot: path.resolve(process.cwd(), params.evidenceRoot ?? ".dao/improvement-series"),
       });
       return toolResult(JSON.stringify(runner.snapshot(), null, 2));
+    },
+  });
+
+  // ── Tool: dao_improve_once ──────────────────────
+  registerDaoTool({
+    name: "dao_improve_once",
+    label: "DAO Improve Once",
+    description:
+      "Advance an improvement series by exactly one state-authorized effect (deterministic executor). Runs workers/anchors from the persisted .dao/improvement.json configuration inside the per-series worktree — the caller supplies no execution options. No-op when the series waits on a human decision, has failed workers, is halted, or is terminal. Can be long-running (spawns worker agents).",
+    parameters: Type.Object({
+      seriesId: Type.String(),
+      evidenceRoot: Type.Optional(Type.String()),
+    }),
+    async execute(_id, params: { seriesId: string; evidenceRoot?: string }) {
+      const result = await advanceSeriesOnce({
+        seriesId: params.seriesId,
+        workDir: process.cwd(),
+        ...(params.evidenceRoot !== undefined ? { evidenceRoot: params.evidenceRoot } : {}),
+      });
+      return toolResult(JSON.stringify(result, null, 2));
     },
   });
 

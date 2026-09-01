@@ -4,6 +4,7 @@
 // (state authority) live in @guyghost/swarm-dao-core/models/improvement.
 
 export * from "./config.js";
+export * from "./host-once.js";
 export * from "./orchestrator.js";
 export * from "./runner.js";
 export * from "./sandbox.js";

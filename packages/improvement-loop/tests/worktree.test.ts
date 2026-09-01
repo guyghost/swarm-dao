@@ -32,8 +32,10 @@ describe("ensureSeriesWorktree", () => {
       expect(handle.created).toBe(true);
       expect(handle.branch).toBe("dao/loop/s-1");
       expect(handle.path).toBe(seriesWorktreePath(repo, "s-1"));
-      expect(commands[0]).toBe("git rev-parse --verify --quiet refs/heads/dao/loop/s-1");
-      expect(commands[1]).toBe(`git worktree add -b dao/loop/s-1 '${join(repo, ".dao/worktrees/s-1")}'`);
+      // Stale registrations are pruned before the branch check.
+      expect(commands[0]).toBe("git worktree prune");
+      expect(commands[1]).toBe("git rev-parse --verify --quiet refs/heads/dao/loop/s-1");
+      expect(commands[2]).toBe(`git worktree add -b dao/loop/s-1 '${join(repo, ".dao/worktrees/s-1")}'`);
     } finally {
       await rm(repo, { recursive: true, force: true });
     }
@@ -51,8 +53,8 @@ describe("ensureSeriesWorktree", () => {
         }),
       });
       expect(handle.created).toBe(true);
-      expect(commands[1]).not.toContain("-b");
-      expect(commands[1]).toContain(`git worktree add '${join(repo, ".dao/worktrees/s-1")}' dao/loop/s-1`);
+      expect(commands[2]).not.toContain("-b");
+      expect(commands[2]).toContain(`git worktree add '${join(repo, ".dao/worktrees/s-1")}' dao/loop/s-1`);
     } finally {
       await rm(repo, { recursive: true, force: true });
     }

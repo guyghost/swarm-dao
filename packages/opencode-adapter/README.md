@@ -4,7 +4,7 @@
 
 ## Overview
 
-This adapter bridges the [Swarm DAO](https://github.com/guyghost/swarm-dao) core governance engine to the OpenCode platform via the `@opencode-ai/plugin` API. It registers 16 DAO tools that OpenCode agents can invoke directly, enabling structured proposal creation, multi-agent deliberation, quality control gates, and execution tracking — all from within the OpenCode environment.
+This adapter bridges the [Swarm DAO](https://github.com/guyghost/swarm-dao) core governance engine to the OpenCode platform via the `@opencode-ai/plugin` API. It registers 28 DAO tools that OpenCode agents can invoke directly, enabling structured proposal creation, multi-agent deliberation, quality control gates, and execution tracking — all from within the OpenCode environment.
 
 Swarm DAO implements a **4-layer governance model**:
 
@@ -217,7 +217,7 @@ Per-project configuration in `.dao/config.json`:
 │                              │                               │
 │  ┌───────────────────────────┴───────────────────────────┐  │
 │  │        OpenCode Adapter (this package)                 │  │
-│  │   OpenCodeDAO plugin • 16 tools • HostAdapter impl     │  │
+│  │   OpenCodeDAO plugin • 28 tools • HostAdapter impl     │  │
 │  └───────────────────────────┬───────────────────────────┘  │
 │                              │                               │
 │  ┌───────────────────────────┴───────────────────────────┐  │

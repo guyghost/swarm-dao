@@ -4,14 +4,18 @@
 
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import type { DAOAgent, DaoStateRepositoryPort, HostAdapter } from "@guyghost/swarm-dao-core";
+import type { AttentionSource, DAOAgent, DaoStateRepositoryPort, HostAdapter } from "@guyghost/swarm-dao-core";
 import {
+  ATTENTION_SOURCES,
   // Commands registry (source of truth for the /dao surface)
   buildDaoHelpMessage,
+  collectAttention,
   computeHealthScore,
   execCommand,
   FileDaoStateRepository,
+  FsAttentionStore,
   formatAllArtefacts,
+  formatAttention,
   formatAuditTrail,
   formatHealthScore,
   formatPlan,
@@ -42,10 +46,30 @@ import {
   setRepository,
   writeFileContained,
 } from "@guyghost/swarm-dao-core";
+import type { GraphAiEventType } from "@guyghost/swarm-dao-graph";
+import { createGraphRunner, GRAPH_AI_EVENT_TYPES, submitAiGraphSignal } from "@guyghost/swarm-dao-graph";
+import { advanceSeriesOnce, OrchestratorRunner } from "@guyghost/swarm-dao-improvement";
+import type { ProductAiEventType } from "@guyghost/swarm-dao-product";
+import { createProductRunner, PRODUCT_AI_EVENT_TYPES, submitAiProductSignal } from "@guyghost/swarm-dao-product";
 import type { Plugin, PluginInput } from "@opencode-ai/plugin";
 import { tool } from "@opencode-ai/plugin";
 
 const schema = tool.schema;
+
+/** Normalise the JSON-encoded payload parameter of run-submit tools. */
+function parsePayloadParam(raw: unknown): Record<string, unknown> | string {
+  if (raw === undefined || raw === null) return {};
+  if (typeof raw !== "string") return "Payload must be a JSON-encoded object string.";
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return "Payload must be a JSON object.";
+    }
+    return parsed as Record<string, unknown>;
+  } catch {
+    return "Invalid payload JSON.";
+  }
+}
 
 const OPENCODE_ONBOARDING_MESSAGE = [
   "# DAO not initialized",
@@ -614,6 +638,169 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
             Number(args.proposalId),
             String(args.headBranch),
           );
+        },
+      }),
+
+      // ── dao_attention ─────────────────────────────────────
+      dao_attention: tool({
+        description:
+          "List pending human gates across Graph Engineering runs, improvement cycles and series, and product loops (read-only projection of persisted snapshots)",
+        args: {
+          sources: schema.array(schema.string()).describe("Optional source filter").optional(),
+        },
+        // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
+        async execute(args: any, context: any) {
+          let sources: readonly AttentionSource[] | undefined;
+          if (Array.isArray(args.sources)) {
+            const invalid = args.sources.filter(
+              (source: string) => !ATTENTION_SOURCES.includes(source as AttentionSource),
+            );
+            if (invalid.length > 0) {
+              return `Invalid source '${invalid.join(", ")}'. Allowed: ${ATTENTION_SOURCES.join(", ")}`;
+            }
+            sources = args.sources as AttentionSource[];
+          }
+          const items = await collectAttention(new FsAttentionStore(context.directory), sources);
+          const lines = [formatAttention(items)];
+          for (const item of items) {
+            if (item.command) lines.push(`  ${item.source}/${item.runId}: ${item.command}`);
+          }
+          return lines.join("\n");
+        },
+      }),
+
+      // ── dao_graph_status ──────────────────────────────────
+      dao_graph_status: tool({
+        description: "Read a Graph Engineering run snapshot (read-only)",
+        args: {
+          runId: schema.string(),
+          evidenceRoot: schema.string().optional(),
+        },
+        // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
+        async execute(args: any, context: any) {
+          const runner = await createGraphRunner({
+            evidenceRoot: path.resolve(context.directory, args.evidenceRoot ?? ".dao/graph-runs"),
+            runId: String(args.runId),
+          });
+          return JSON.stringify(runner.snapshot(), null, 2);
+        },
+      }),
+
+      // ── dao_graph_submit ──────────────────────────────────
+      dao_graph_submit: tool({
+        description:
+          "Submit an AI-source signal (MODEL_DRAFTED, IMPLEMENTATION_READY, IMPLEMENTATION_FAILED) to a Graph Engineering run. Human events (MODEL_APPROVED, MODEL_REJECTED, RETRY_AUTHORIZED, CANCEL) go through the swarm-dao CLI, never through AI-facing tools.",
+        args: {
+          runId: schema.string(),
+          type: schema.enum([...GRAPH_AI_EVENT_TYPES]),
+          producer: schema.string(),
+          payload: schema.string({ description: "JSON-encoded payload object" }).optional(),
+          evidence: schema.array(schema.string()).optional(),
+          evidenceRoot: schema.string().optional(),
+        },
+        // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
+        async execute(args: any, context: any) {
+          const payload = parsePayloadParam(args.payload);
+          if (typeof payload === "string") return payload;
+          const result = await submitAiGraphSignal(
+            {
+              evidenceRoot: path.resolve(context.directory, args.evidenceRoot ?? ".dao/graph-runs"),
+            },
+            {
+              runId: String(args.runId),
+              type: args.type as GraphAiEventType,
+              producer: String(args.producer),
+              payload,
+              evidence: Array.isArray(args.evidence) ? args.evidence.map(String) : [],
+            },
+          );
+          return JSON.stringify(result, null, 2);
+        },
+      }),
+
+      // ── dao_product_status ────────────────────────────────
+      dao_product_status: tool({
+        description: "Read a product-loop run snapshot (read-only)",
+        args: {
+          runId: schema.string(),
+          evidenceRoot: schema.string().optional(),
+        },
+        // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
+        async execute(args: any, context: any) {
+          const runner = await createProductRunner({
+            evidenceRoot: path.resolve(context.directory, args.evidenceRoot ?? ".dao/product-loops"),
+            runId: String(args.runId),
+          });
+          return JSON.stringify(runner.snapshot(), null, 2);
+        },
+      }),
+
+      // ── dao_product_submit ────────────────────────────────
+      dao_product_submit: tool({
+        description:
+          "Submit an AI-source signal (AGENT_SIGNAL, FEEDBACK_AGGREGATED, PROPOSAL_DRAFTED) to a product-loop run. Human events (REVIEW_RESOLVED, RETRY_VERIFICATION_AUTHORIZED, CONTACT_RELAY_AUTHORIZED, CANCEL) go through the swarm-dao CLI, never through AI-facing tools.",
+        args: {
+          runId: schema.string(),
+          type: schema.enum([...PRODUCT_AI_EVENT_TYPES]),
+          producer: schema.string(),
+          payload: schema.string({ description: "JSON-encoded payload object" }).optional(),
+          evidence: schema.array(schema.string()).optional(),
+          evidenceRoot: schema.string().optional(),
+        },
+        // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
+        async execute(args: any, context: any) {
+          const payload = parsePayloadParam(args.payload);
+          if (typeof payload === "string") return payload;
+          const result = await submitAiProductSignal(
+            {
+              evidenceRoot: path.resolve(context.directory, args.evidenceRoot ?? ".dao/product-loops"),
+            },
+            {
+              runId: String(args.runId),
+              type: args.type as ProductAiEventType,
+              producer: String(args.producer),
+              payload,
+              evidence: Array.isArray(args.evidence) ? args.evidence.map(String) : [],
+            },
+          );
+          return JSON.stringify(result, null, 2);
+        },
+      }),
+
+      // ── dao_improve_status ────────────────────────────────
+      dao_improve_status: tool({
+        description:
+          "Read an improvement series snapshot (read-only): state, scope, cooldown, pending reason. Evidence root defaults to .dao/improvement-series under the workspace.",
+        args: {
+          seriesId: schema.string(),
+          evidenceRoot: schema.string().optional(),
+        },
+        // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
+        async execute(args: any, context: any) {
+          const runner = await OrchestratorRunner.create({
+            seriesId: String(args.seriesId),
+            evidenceRoot: path.resolve(context.directory, args.evidenceRoot ?? ".dao/improvement-series"),
+          });
+          return JSON.stringify(runner.snapshot(), null, 2);
+        },
+      }),
+
+      // ── dao_improve_once ──────────────────────────────────
+      dao_improve_once: tool({
+        description:
+          "Advance an improvement series by exactly one state-authorized effect (deterministic executor). Runs workers/anchors from the persisted .dao/improvement.json configuration inside the per-series worktree — the caller supplies no execution options. No-op when the series waits on a human decision, has failed workers, is halted, or is terminal. Can be long-running (spawns worker agents).",
+        args: {
+          seriesId: schema.string(),
+          evidenceRoot: schema.string().optional(),
+        },
+        // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
+        async execute(args: any, context: any) {
+          const result = await advanceSeriesOnce({
+            seriesId: String(args.seriesId),
+            workDir: context.directory,
+            ...(typeof args.evidenceRoot === "string" ? { evidenceRoot: args.evidenceRoot } : {}),
+          });
+          return JSON.stringify(result, null, 2);
         },
       }),
 
