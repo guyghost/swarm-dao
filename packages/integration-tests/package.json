@@ -1,6 +1,6 @@
 {
   "name": "@guyghost/swarm-dao-integration-tests",
-  "version": "0.1.15",
+  "version": "0.1.16",
   "description": "Cross-package integration tests for Swarm DAO multi-host governance",
   "private": true,
   "type": "module",
@@ -23,6 +23,6 @@
     "@guyghost/swarm-dao-core": "workspace:*",
     "@guyghost/swarm-dao-mcp": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "@guyghost/swarm-dao-improvement": "^0.5.1"
+    "@guyghost/swarm-dao-improvement": "^0.5.3"
   }
 }

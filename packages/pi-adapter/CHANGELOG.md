@@ -1,5 +1,15 @@
 # @guyghost/swarm-dao-pi-adapter
 
+## 0.6.4
+
+### Patch Changes
+
+- Updated dependencies [1538199]
+  - @guyghost/swarm-dao-core@0.12.0
+  - @guyghost/swarm-dao-improvement@0.5.3
+  - @guyghost/swarm-dao-graph@0.3.1
+  - @guyghost/swarm-dao-product@0.3.1
+
 ## 0.6.3
 
 ### Patch Changes

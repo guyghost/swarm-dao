@@ -1,5 +1,12 @@
 # @guyghost/swarm-dao-tmux-adapter
 
+## 0.2.6
+
+### Patch Changes
+
+- Updated dependencies [1538199]
+  - @guyghost/swarm-dao-core@0.12.0
+
 ## 0.2.5
 
 ### Patch Changes
