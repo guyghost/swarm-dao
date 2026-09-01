@@ -1,4 +1,4 @@
-import { type Dirent } from "node:fs";
+import type { Dirent } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
 import {

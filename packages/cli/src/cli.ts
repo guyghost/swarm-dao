@@ -167,7 +167,7 @@ const CLI_USAGE_DETAILS: Record<string, string> = {
   "github-pr": "  github-pr <proposal-id> --head-branch <b>",
   config: "  config",
   audit: "  audit [--proposal <id>]",
-  attention: "  attention [--source <graph-engineering|improvement-loop|product-loop>,...]",
+  attention: "  attention [--source <graph-engineering|improvement-loop|improvement-series|product-loop>,...]",
   graph:
     "  graph <init|status|submit> --run-id <id> [--evidence-root <path>]\n        graph submit --run-id <id> --signal <file.json>",
   product:
