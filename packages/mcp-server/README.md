@@ -88,3 +88,24 @@ MCP hosts cannot have the server spawn sub-agents, so Swarm DAO uses
 ## License
 
 MIT
+
+## Long-running tools
+
+`dao_improve_once` executes real worker agents (herdr) during the sampling and
+auditing phases — a single call routinely takes one to several minutes. MCP
+clients default to a 60-second request timeout, which kills the call mid-flight
+(leaving the series state untouched, but orphaning the spawned herdr workspace;
+the next call cleans it up). Hosts driving improvement series should raise
+their request timeout:
+
+```ts
+// per call
+const result = await client.callTool(
+  { name: "dao_improve_once", arguments: { seriesId: "…" } },
+  undefined,
+  { timeout: 15 * 60_000 },
+);
+// or globally
+const client = new Client(info, { defaultRequestTimeout: 15 * 60_000 });
+```
+

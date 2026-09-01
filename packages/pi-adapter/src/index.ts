@@ -1541,7 +1541,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
     name: "dao_improve_once",
     label: "DAO Improve Once",
     description:
-      "Advance an improvement series by exactly one state-authorized effect (deterministic executor). Runs workers/anchors from the persisted .dao/improvement.json configuration inside the per-series worktree — the caller supplies no execution options. No-op when the series waits on a human decision, has failed workers, is halted, or is terminal. Can be long-running (spawns worker agents).",
+      "Advance an improvement series by exactly one state-authorized effect (deterministic executor). Runs workers/anchors from the persisted .dao/improvement.json configuration inside the per-series worktree — the caller supplies no execution options. No-op when the series waits on a human decision, has failed workers, is halted, or is terminal. Can be long-running (spawns worker agents): worker phases take minutes — raise the host request timeout accordingly.",
     parameters: Type.Object({
       seriesId: Type.String(),
       evidenceRoot: Type.Optional(Type.String()),

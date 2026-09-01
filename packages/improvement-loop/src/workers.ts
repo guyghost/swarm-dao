@@ -139,6 +139,7 @@ interface HerdrJson {
     root_pane?: { pane_id?: string };
     workspace?: { workspace_id?: string };
     agent?: { status?: string; state?: string };
+    workspaces?: Array<{ label?: string; workspace_id?: string }>;
   };
 }
 
@@ -153,6 +154,27 @@ function parseHerdrJson(raw: string): HerdrJson | null {
 
 function agentState(result: HerdrJson["result"]): string | null {
   return result?.agent?.status ?? result?.agent?.state ?? null;
+}
+
+/** Close workspaces left behind by a run killed mid-flight (host timeout,
+ * crash): the labels are deterministic per worker, so any workspace carrying
+ * our label (or a retry variant) when we start is an orphan from a previous
+ * attempt. Retries must converge instead of accumulating orphan panes
+ * (dogfood-003 c6 finding: two MCP client timeouts left two workspaces). */
+async function closeLingeringWorkspaces(runner: HerdrRunner, baseName: string): Promise<void> {
+  let listed: Awaited<ReturnType<HerdrRunner["exec"]>>;
+  try {
+    listed = await runner.exec("herdr workspace list");
+  } catch {
+    return; // listing is best-effort; creation will surface real errors
+  }
+  if (listed.exitCode !== 0) return;
+  const workspaces = parseHerdrJson(listed.stdout)?.result?.workspaces ?? [];
+  for (const workspace of workspaces) {
+    const label = typeof workspace.label === "string" ? workspace.label : "";
+    if (!workspace.workspace_id || (label !== baseName && !label.startsWith(`${baseName}-r`))) continue;
+    await runner.exec(`herdr workspace close ${workspace.workspace_id}`).catch(() => undefined);
+  }
 }
 
 /**
@@ -180,6 +202,10 @@ export async function runHerdrWorker(
 
   const maxAttempts = ORCHESTRATOR_MAX_WORKER_RETRIES + 1;
   let lastError = "unknown worker error";
+
+  // Orphaned workspace from a killed previous run under the same label?
+  // Close it before carving a fresh one.
+  await closeLingeringWorkspaces(runner, baseName);
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const agentName = attempt === 1 ? baseName : `${baseName}-r${attempt}`.slice(0, 32);
