@@ -1,0 +1,25 @@
+{
+  "runId": "run-3",
+  "state": "exploration",
+  "status": "active",
+  "context": {
+    "runId": "run-3",
+    "proposalId": null,
+    "improvementCycleId": null,
+    "draft": null,
+    "voteConfig": null,
+    "favorableVotes": 0,
+    "budget": null,
+    "controls": {},
+    "observationSamples": [],
+    "contactVoteOpen": false,
+    "contactVoteQuorumReached": false,
+    "contactRelayAuthorized": false,
+    "reviewReason": null,
+    "permissionsCleared": false,
+    "permissionEvidence": null,
+    "signalLog": [],
+    "anchors": {},
+    "terminalReason": null
+  }
+}

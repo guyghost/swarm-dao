@@ -76,6 +76,14 @@ All tools are registered as MCP tools and can be invoked by the LLM or manually.
 | `dao_rollback` | Revert a proposal to its pre-execution snapshot | `proposalId` |
 | `dao_roundtable` | Ask every agent to suggest a proposal idea | *(none)* |
 | `dao_update_proposal` | Update structured fields on an open proposal | `proposalId`, `problemStatement?`, `acceptanceCriteria?`, `successMetrics?`, `rollbackConditions?` |
+| `dao_attention` | List pending human gates across workflow runs (read-only) | `sources?` |
+| `dao_graph_status` | Read a Graph Engineering run snapshot (read-only) | `runId`, `evidenceRoot?` |
+| `dao_graph_submit` | Submit an AI-source signal to a graph run (human events stay on the CLI) | `runId`, `type`, `producer`, `payload?` (JSON), `evidence?`, `evidenceRoot?` |
+| `dao_product_status` | Read a product-loop run snapshot (read-only) | `runId`, `evidenceRoot?` |
+| `dao_product_submit` | Submit an AI-source signal to a product loop (human events stay on the CLI) | `runId`, `type`, `producer`, `payload?` (JSON), `evidence?`, `evidenceRoot?` |
+| `dao_improve_status` | Read an improvement series snapshot (read-only) | `seriesId`, `evidenceRoot?` |
+
+The workflow-run submit tools route through the packages' AI channel, which forces `source: "ai"` — an agent can never emit human, tool, or system events. All of them are also reachable as `/dao <subcommand>` (`/dao graph-status <runId>`, `/dao graph-submit <runId> <TYPE> <producer> [payload JSON] [evidence a,b]`, …).
 
 ### Commands
 

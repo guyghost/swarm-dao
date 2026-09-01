@@ -5,23 +5,29 @@
 // Registers tools, commands, and event hooks.
 
 import { spawn } from "node:child_process";
+import path from "node:path";
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import type {
   AgentOutput,
+  AttentionSource,
   DaoStateRepositoryPort,
   HostAdapter,
   Proposal,
   ProposalType,
 } from "@guyghost/swarm-dao-core";
 import {
+  ATTENTION_SOURCES,
   // Commands registry (source of truth for the /dao surface)
   buildDaoCommandHelp,
+  collectAttention,
   computeHealthScore,
   // Delivery
   execCommand,
   FileDaoStateRepository,
+  FsAttentionStore,
   formatAllArtefacts,
+  formatAttention,
   formatAuditTrail,
   formatHealthScore,
   formatPlan,
@@ -56,6 +62,19 @@ import {
   suggestDaoCommand,
   writeFileContained,
 } from "@guyghost/swarm-dao-core";
+import {
+  createGraphRunner,
+  GRAPH_AI_EVENT_TYPES,
+  type GraphAiEventType,
+  submitAiGraphSignal,
+} from "@guyghost/swarm-dao-graph";
+import { OrchestratorRunner } from "@guyghost/swarm-dao-improvement";
+import {
+  createProductRunner,
+  PRODUCT_AI_EVENT_TYPES,
+  type ProductAiEventType,
+  submitAiProductSignal,
+} from "@guyghost/swarm-dao-product";
 import { Type } from "typebox";
 
 // ── Pi Host Adapter Implementation ───────────────────────────
@@ -507,6 +526,14 @@ const DAO_ARG_USAGE: Record<string, string> = {
   dao_github_create_branch: "/dao github-branch <proposalId>",
   dao_github_open_pr: "/dao github-pr <proposalId> <headBranch>",
   dao_roundtable: "/dao roundtable",
+  dao_attention: "/dao attention [--source <graph-engineering|improvement-loop|improvement-series|product-loop>,...]",
+  dao_graph_status: "/dao graph-status <runId> [--evidence-root <dir>]",
+  dao_graph_submit:
+    "/dao graph-submit <runId> <MODEL_DRAFTED|IMPLEMENTATION_READY|IMPLEMENTATION_FAILED> <producer> [payload JSON] [evidence a,b]",
+  dao_product_status: "/dao product-status <runId> [--evidence-root <dir>]",
+  dao_product_submit:
+    "/dao product-submit <runId> <AGENT_SIGNAL|FEEDBACK_AGGREGATED|PROPOSAL_DRAFTED> <producer> [payload JSON] [evidence a,b]",
+  dao_improve_status: "/dao improve-status <seriesId> [--evidence-root <dir>]",
 };
 
 function daoUsage(toolName: string): string {
@@ -637,6 +664,47 @@ export function parseDaoToolArgs(toolName: string, tokens: string[]): Record<str
       const headBranch = split.flags["head-branch"] ?? split.positional[1];
       if (typeof headBranch !== "string" || headBranch.length === 0) return usage;
       return { proposalId, headBranch };
+    }
+
+    case "dao_attention": {
+      const split = splitFlags({ source: "string" });
+      if (typeof split === "string") return split;
+      const sources = typeof split.flags.source === "string" ? commaList(split.flags.source) : undefined;
+      return { sources };
+    }
+
+    case "dao_graph_status": {
+      const split = splitFlags({ "evidence-root": "string" });
+      if (typeof split === "string") return split;
+      const runId = split.positional[0];
+      if (!runId) return usage;
+      return { runId, ...(split.flags["evidence-root"] ? { evidenceRoot: split.flags["evidence-root"] } : {}) };
+    }
+
+    case "dao_product_status":
+    case "dao_improve_status": {
+      const split = splitFlags({ "evidence-root": "string" });
+      if (typeof split === "string") return split;
+      const id = split.positional[0];
+      if (!id) return usage;
+      const key = toolName === "dao_improve_status" ? "seriesId" : "runId";
+      return { [key]: id, ...(split.flags["evidence-root"] ? { evidenceRoot: split.flags["evidence-root"] } : {}) };
+    }
+
+    case "dao_graph_submit":
+    case "dao_product_submit": {
+      const split = splitFlags({ "evidence-root": "string" });
+      if (typeof split === "string") return split;
+      const [runId, type, producer, rawPayload, rawEvidence] = split.positional;
+      if (!runId || !type || !producer) return usage;
+      return {
+        runId,
+        type,
+        producer,
+        ...(rawPayload !== undefined ? { payload: rawPayload } : {}),
+        ...(rawEvidence !== undefined ? { evidence: commaList(rawEvidence) } : { evidence: [] }),
+        ...(split.flags["evidence-root"] ? { evidenceRoot: split.flags["evidence-root"] } : {}),
+      };
     }
 
     default:
@@ -808,6 +876,30 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
   const daoToolExecutors = new Map<string, DaoToolExecute>();
 
   /** Register a dao tool with Pi and capture its executor for `/dao`. */
+  /** Shared params of the run-submit tools (graph/product AI signals). */
+  interface DaoRunSubmitParams {
+    runId: string;
+    type: string;
+    producer: string;
+    payload?: string;
+    evidence?: string[];
+    evidenceRoot?: string;
+  }
+
+  /** Normalise the JSON-encoded payload parameter of run-submit tools. */
+  const parsePayloadParam = (raw: string | undefined): Record<string, unknown> | string => {
+    if (raw === undefined) return {};
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+        return "Payload must be a JSON object.";
+      }
+      return parsed as Record<string, unknown>;
+    } catch {
+      return "Invalid payload JSON.";
+    }
+  };
+
   const registerDaoTool = <TParams>(tool: {
     name: string;
     label?: string;
@@ -878,7 +970,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
       }
     }
     daoContext += `\n- Config: quorum=${state.config.quorumPercent}%, approval=${state.config.approvalThreshold}%, risk=${state.config.riskThreshold}/10`;
-    daoContext += `\n\nAvailable tools: dao_setup, dao_propose, dao_deliberate, dao_check, dao_plan, dao_execute, dao_ship, dao_audit, dao_artefacts, dao_rate, dao_dashboard, dao_dry_run, dao_rollback, dao_roundtable, dao_update_proposal, dao_check_edit, dao_config_github, dao_github_create_branch, dao_github_open_pr`;
+    daoContext += `\n\nAvailable tools: dao_setup, dao_propose, dao_deliberate, dao_check, dao_plan, dao_execute, dao_ship, dao_audit, dao_artefacts, dao_rate, dao_dashboard, dao_dry_run, dao_rollback, dao_roundtable, dao_update_proposal, dao_check_edit, dao_config_github, dao_github_create_branch, dao_github_open_pr, dao_attention, dao_graph_status, dao_graph_submit, dao_product_status, dao_product_submit, dao_improve_status`;
 
     return { systemPrompt: event.systemPrompt + daoContext };
   });
@@ -1291,7 +1383,151 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
     },
   });
 
-  // ── Tool: dao_github_open_pr ────────────────────────────
+  // ── Tool: dao_attention ──────────────────────────────
+  registerDaoTool({
+    name: "dao_attention",
+    label: "DAO Attention",
+    description:
+      "List pending human gates across Graph Engineering runs, improvement cycles and series, and product loops (read-only projection of persisted snapshots)",
+    parameters: Type.Object({
+      sources: Type.Optional(Type.Array(StringEnum([...ATTENTION_SOURCES]))),
+    }),
+    async execute(_id, params: { sources?: string[] }) {
+      let sources: readonly AttentionSource[] | undefined;
+      if (Array.isArray(params.sources)) {
+        const invalid = params.sources.filter((source) => !ATTENTION_SOURCES.includes(source as AttentionSource));
+        if (invalid.length > 0) {
+          return toolResult(`Invalid source '${invalid.join(", ")}'. Allowed: ${ATTENTION_SOURCES.join(", ")}`);
+        }
+        sources = params.sources as AttentionSource[];
+      }
+      const items = await collectAttention(new FsAttentionStore(process.cwd()), sources);
+      const lines = [formatAttention(items)];
+      for (const item of items) {
+        if (item.command) lines.push(`  ${item.source}/${item.runId}: ${item.command}`);
+      }
+      return toolResult(lines.join("\n"));
+    },
+  });
+
+  // ── Tool: dao_graph_status ────────────────────────────
+  registerDaoTool({
+    name: "dao_graph_status",
+    label: "DAO Graph Status",
+    description: "Read a Graph Engineering run snapshot (read-only)",
+    parameters: Type.Object({
+      runId: Type.String(),
+      evidenceRoot: Type.Optional(Type.String()),
+    }),
+    async execute(_id, params: { runId: string; evidenceRoot?: string }) {
+      const runner = await createGraphRunner({
+        evidenceRoot: path.resolve(process.cwd(), params.evidenceRoot ?? ".dao/graph-runs"),
+        runId: params.runId,
+      });
+      return toolResult(JSON.stringify(runner.snapshot(), null, 2));
+    },
+  });
+
+  // ── Tool: dao_graph_submit ────────────────────────────
+  registerDaoTool({
+    name: "dao_graph_submit",
+    label: "DAO Graph Submit",
+    description:
+      "Submit an AI-source signal (MODEL_DRAFTED, IMPLEMENTATION_READY, IMPLEMENTATION_FAILED) to a Graph Engineering run. Human events (MODEL_APPROVED, MODEL_REJECTED, RETRY_AUTHORIZED, CANCEL) go through the swarm-dao CLI, never through AI-facing tools.",
+    parameters: Type.Object({
+      runId: Type.String(),
+      type: StringEnum([...GRAPH_AI_EVENT_TYPES]),
+      producer: Type.String(),
+      payload: Type.Optional(Type.String({ description: "JSON-encoded payload object" })),
+      evidence: Type.Optional(Type.Array(Type.String())),
+      evidenceRoot: Type.Optional(Type.String()),
+    }),
+    async execute(_id, params: DaoRunSubmitParams) {
+      const payload = parsePayloadParam(params.payload);
+      if (typeof payload === "string") return toolResult(payload);
+      const result = await submitAiGraphSignal(
+        { evidenceRoot: path.resolve(process.cwd(), params.evidenceRoot ?? ".dao/graph-runs") },
+        {
+          runId: params.runId,
+          type: params.type as GraphAiEventType,
+          producer: params.producer,
+          payload,
+          evidence: params.evidence ?? [],
+        },
+      );
+      const text = JSON.stringify(result, null, 2);
+      return result.accepted ? toolResult(text) : toolResult(text);
+    },
+  });
+  // ── Tool: dao_product_status ──────────────────────
+  registerDaoTool({
+    name: "dao_product_status",
+    label: "DAO Product Status",
+    description: "Read a product-loop run snapshot (read-only)",
+    parameters: Type.Object({
+      runId: Type.String(),
+      evidenceRoot: Type.Optional(Type.String()),
+    }),
+    async execute(_id, params: { runId: string; evidenceRoot?: string }) {
+      const runner = await createProductRunner({
+        evidenceRoot: path.resolve(process.cwd(), params.evidenceRoot ?? ".dao/product-loops"),
+        runId: params.runId,
+      });
+      return toolResult(JSON.stringify(runner.snapshot(), null, 2));
+    },
+  });
+
+  // ── Tool: dao_product_submit ──────────────────────
+  registerDaoTool({
+    name: "dao_product_submit",
+    label: "DAO Product Submit",
+    description:
+      "Submit an AI-source signal (AGENT_SIGNAL, FEEDBACK_AGGREGATED, PROPOSAL_DRAFTED) to a product-loop run. Human events (REVIEW_RESOLVED, RETRY_VERIFICATION_AUTHORIZED, CONTACT_RELAY_AUTHORIZED, CANCEL) go through the swarm-dao CLI, never through AI-facing tools.",
+    parameters: Type.Object({
+      runId: Type.String(),
+      type: StringEnum([...PRODUCT_AI_EVENT_TYPES]),
+      producer: Type.String(),
+      payload: Type.Optional(Type.String({ description: "JSON-encoded payload object" })),
+      evidence: Type.Optional(Type.Array(Type.String())),
+      evidenceRoot: Type.Optional(Type.String()),
+    }),
+    async execute(_id, params: DaoRunSubmitParams) {
+      const payload = parsePayloadParam(params.payload);
+      if (typeof payload === "string") return toolResult(payload);
+      const result = await submitAiProductSignal(
+        { evidenceRoot: path.resolve(process.cwd(), params.evidenceRoot ?? ".dao/product-loops") },
+        {
+          runId: params.runId,
+          type: params.type as ProductAiEventType,
+          producer: params.producer,
+          payload,
+          evidence: params.evidence ?? [],
+        },
+      );
+      return toolResult(JSON.stringify(result, null, 2));
+    },
+  });
+
+  // ── Tool: dao_improve_status ──────────────────────
+  registerDaoTool({
+    name: "dao_improve_status",
+    label: "DAO Improve Status",
+    description:
+      "Read an improvement series snapshot (read-only): state, scope, cooldown, pending reason. Evidence root defaults to .dao/improvement-series under the workspace.",
+    parameters: Type.Object({
+      seriesId: Type.String(),
+      evidenceRoot: Type.Optional(Type.String()),
+    }),
+    async execute(_id, params: { seriesId: string; evidenceRoot?: string }) {
+      const runner = await OrchestratorRunner.create({
+        seriesId: params.seriesId,
+        evidenceRoot: path.resolve(process.cwd(), params.evidenceRoot ?? ".dao/improvement-series"),
+      });
+      return toolResult(JSON.stringify(runner.snapshot(), null, 2));
+    },
+  });
+
+  // ── Tool: dao_github_open_pr ──────────────────────────
   registerDaoTool({
     name: "dao_github_open_pr",
     label: "DAO GitHub PR",

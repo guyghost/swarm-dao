@@ -3,6 +3,7 @@
 // with strict signal validation (producer-bound authority; AI signals never
 // carry votes, approvals, retries, or cancellations).
 
+export * from "./ai-channel.js";
 export * from "./cli.js";
 export * from "./runner.js";
 export * from "./signal.js";

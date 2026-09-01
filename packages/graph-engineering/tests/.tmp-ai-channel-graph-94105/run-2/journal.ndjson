@@ -1,0 +1,1 @@
+{"sequence":1,"runId":"run-2","receivedAt":"2026-09-01T17:32:39.692Z","eventType":"MODEL_APPROVED","producer":null,"accepted":false,"issues":["source for MODEL_APPROVED must be human","payload.modelHash must be a non-empty string"],"beforeState":"draft","afterState":"draft"}

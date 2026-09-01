@@ -188,7 +188,7 @@ export const DAO_COMMANDS: readonly DaoCommand[] = [
     summary: "List pending human gates across workflow runs (read-only)",
     tool: "dao_attention",
     args: "[--source <graph-engineering|improvement-loop|improvement-series|product-loop>,...]",
-    hosts: ["cli", "mcp"],
+    hosts: ["cli", "mcp", "pi"],
   },
   {
     id: "graph-status",
@@ -196,7 +196,15 @@ export const DAO_COMMANDS: readonly DaoCommand[] = [
     summary: "Read a Graph Engineering run snapshot (read-only)",
     tool: "dao_graph_status",
     args: "runId [evidenceRoot]",
-    hosts: ["mcp"],
+    hosts: ["mcp", "pi"],
+  },
+  {
+    id: "improve-status",
+    phase: "discover",
+    summary: "Read an improvement series snapshot (read-only)",
+    tool: "dao_improve_status",
+    args: "seriesId [evidenceRoot]",
+    hosts: ["mcp", "pi"],
   },
   {
     id: "graph-submit",
@@ -206,7 +214,7 @@ export const DAO_COMMANDS: readonly DaoCommand[] = [
     tool: "dao_graph_submit",
     mutating: true,
     args: "runId type producer payload evidence",
-    hosts: ["mcp"],
+    hosts: ["mcp", "pi"],
   },
   {
     id: "product-status",
@@ -214,7 +222,7 @@ export const DAO_COMMANDS: readonly DaoCommand[] = [
     summary: "Read a product-loop run snapshot (read-only)",
     tool: "dao_product_status",
     args: "runId [evidenceRoot]",
-    hosts: ["mcp"],
+    hosts: ["mcp", "pi"],
   },
   {
     id: "product-submit",
@@ -224,7 +232,7 @@ export const DAO_COMMANDS: readonly DaoCommand[] = [
     tool: "dao_product_submit",
     mutating: true,
     args: "runId type producer payload evidence",
-    hosts: ["mcp"],
+    hosts: ["mcp", "pi"],
   },
   {
     id: "dry-run",
