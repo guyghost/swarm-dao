@@ -534,7 +534,7 @@ const DAO_ARG_USAGE: Record<string, string> = {
   dao_product_submit:
     "/dao product-submit <runId> <AGENT_SIGNAL|FEEDBACK_AGGREGATED|PROPOSAL_DRAFTED> <producer> [payload JSON] [evidence a,b]",
   dao_improve_status: "/dao improve-status <seriesId> [--evidence-root <dir>]",
-  dao_improve_once: "/dao improve-once <seriesId> [--evidence-root <dir>]",
+  dao_improve_once: "/dao improve-once <seriesId> [--evidence-root <dir>] [--cycle-root <dir>]",
 };
 
 function daoUsage(toolName: string): string {
@@ -685,12 +685,19 @@ export function parseDaoToolArgs(toolName: string, tokens: string[]): Record<str
     case "dao_product_status":
     case "dao_improve_status":
     case "dao_improve_once": {
-      const split = splitFlags({ "evidence-root": "string" });
+      const split = splitFlags({
+        "evidence-root": "string",
+        ...(toolName === "dao_improve_once" ? { "cycle-root": "string" } : {}),
+      });
       if (typeof split === "string") return split;
       const id = split.positional[0];
       if (!id) return usage;
       const key = toolName === "dao_improve_status" || toolName === "dao_improve_once" ? "seriesId" : "runId";
-      return { [key]: id, ...(split.flags["evidence-root"] ? { evidenceRoot: split.flags["evidence-root"] } : {}) };
+      return {
+        [key]: id,
+        ...(split.flags["evidence-root"] ? { evidenceRoot: split.flags["evidence-root"] } : {}),
+        ...(split.flags["cycle-root"] ? { cycleRoot: split.flags["cycle-root"] } : {}),
+      };
     }
 
     case "dao_graph_submit":
@@ -1538,12 +1545,14 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
     parameters: Type.Object({
       seriesId: Type.String(),
       evidenceRoot: Type.Optional(Type.String()),
+      cycleRoot: Type.Optional(Type.String()),
     }),
-    async execute(_id, params: { seriesId: string; evidenceRoot?: string }) {
+    async execute(_id, params: { seriesId: string; evidenceRoot?: string; cycleRoot?: string }) {
       const result = await advanceSeriesOnce({
         seriesId: params.seriesId,
         workDir: process.cwd(),
         ...(params.evidenceRoot !== undefined ? { evidenceRoot: params.evidenceRoot } : {}),
+        ...(params.cycleRoot !== undefined ? { cycleEvidenceRoot: params.cycleRoot } : {}),
       });
       return toolResult(JSON.stringify(result, null, 2));
     },

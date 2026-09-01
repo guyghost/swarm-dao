@@ -353,7 +353,11 @@ export function createSwarmDaoMcpServer(workDir = resolveDaoRoot(), repository?:
         inputSchema: {
           type: "object",
           required: ["seriesId"],
-          properties: { seriesId: { type: "string" }, evidenceRoot: { type: "string" } },
+          properties: {
+            seriesId: { type: "string" },
+            evidenceRoot: { type: "string" },
+            cycleRoot: { type: "string" },
+          },
         },
       },
       {
@@ -582,6 +586,7 @@ export function createSwarmDaoMcpServer(workDir = resolveDaoRoot(), repository?:
             seriesId,
             workDir: ctx.workDir,
             ...(typeof args.evidenceRoot === "string" ? { evidenceRoot: args.evidenceRoot } : {}),
+            ...(typeof args.cycleRoot === "string" ? { cycleEvidenceRoot: args.cycleRoot } : {}),
           });
           const text = JSON.stringify(result, null, 2);
           return result.event && !result.accepted ? errorResult(text) : textResult(text);

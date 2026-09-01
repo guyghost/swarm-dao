@@ -32,13 +32,17 @@ export interface AdvanceSeriesOnceOptions {
   /** Series evidence root, resolved against workDir. Defaults to
    * `.dao/improvement-series` (the CLI default). */
   evidenceRoot?: string;
+  /** Improvement cycle evidence root, resolved against workDir. Defaults to
+   * `.dao/improvement-cycles` (the CLI default). Series that live under
+   * `evidence/` (the repo's own dogfood) pass their cycle root here. */
+  cycleEvidenceRoot?: string;
 }
 
 /** Advance a series by one authorized effect using only persisted configuration. */
 export async function advanceSeriesOnce(options: AdvanceSeriesOnceOptions): Promise<OrchestratorOnceResult> {
   const { seriesId, workDir } = options;
   const evidenceRoot = resolve(workDir, options.evidenceRoot ?? ".dao/improvement-series");
-  const cycleEvidenceRoot = resolve(workDir, ".dao/improvement-cycles");
+  const cycleEvidenceRoot = resolve(workDir, options.cycleEvidenceRoot ?? ".dao/improvement-cycles");
 
   const config = await loadProjectImprovementConfig(workDir);
   const worktree = await ensureSeriesWorktree({ repoDir: workDir, seriesId });

@@ -32,8 +32,10 @@ describe("cli.ts — improve sandbox flags", () => {
 
 describe("cli.ts — improve series roots", () => {
   it("answers status for an unknown series (fresh idle runner; no DAO proposal state touched)", async () => {
-    const code = await main(["improve", "status", "--series-id", "nope"], process.cwd());
+    const tmp = await fs.mkdtemp(path.join(tmpdir(), "swarm-cli-status-"));
+    const code = await main(["improve", "status", "--series-id", "nope", "--evidence-root", tmp], process.cwd());
     expect(code).toBe(0);
+    await fs.rm(tmp, { recursive: true, force: true });
   });
 
   it("fails fast on a value-less --cycle-root or --evidence-root flag", async () => {

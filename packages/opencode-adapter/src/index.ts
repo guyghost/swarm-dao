@@ -792,6 +792,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
         args: {
           seriesId: schema.string(),
           evidenceRoot: schema.string().optional(),
+          cycleRoot: schema.string().optional(),
         },
         // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
         async execute(args: any, context: any) {
@@ -799,6 +800,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
             seriesId: String(args.seriesId),
             workDir: context.directory,
             ...(typeof args.evidenceRoot === "string" ? { evidenceRoot: args.evidenceRoot } : {}),
+            ...(typeof args.cycleRoot === "string" ? { cycleEvidenceRoot: args.cycleRoot } : {}),
           });
           return JSON.stringify(result, null, 2);
         },
