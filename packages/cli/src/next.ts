@@ -19,7 +19,8 @@ const TERMINAL_STATES: Readonly<Record<AttentionSource, ReadonlySet<string>>> = 
   "product-loop": new Set(["succeeded", "failed", "abandoned"]),
 };
 
-export async function cmdNext(cwd: string): Promise<number> {
+/** One frame of `next` output — shared by the command and `watch`. */
+export async function renderNext(cwd: string): Promise<string> {
   const store = new FsAttentionStore(cwd);
   const items = await collectAttention(store);
   const gated = new Set(items.map((i) => `${i.source}/${i.runId}`));
@@ -38,27 +39,30 @@ export async function cmdNext(cwd: string): Promise<number> {
   }
 
   if (items.length === 0 && progress.length === 0) {
-    process.stdout.write("nothing pending — no human gates, no active workflows\n");
-    return 0;
+    return "nothing pending — no human gates, no active workflows\n";
   }
 
+  const lines: string[] = [];
   if (items.length > 0) {
-    process.stdout.write(`${c.bold("Needs you")} — human gates\n`);
+    lines.push(`${c.bold("Needs you")} — human gates`);
     for (const item of items) {
-      process.stdout.write(
-        `  ${GLYPH.warn} ${c.bold(item.runId)} — ${item.action}${c.dim(` [${item.source}, ${item.state}]`)}\n`,
-      );
-      if (item.detail) process.stdout.write(`      ${c.dim(`detail: ${item.detail}`)}\n`);
-      if (item.command) process.stdout.write(`      ${GLYPH.arrow} ${item.command}\n`);
+      lines.push(`  ${GLYPH.warn} ${c.bold(item.runId)} — ${item.action}${c.dim(` [${item.source}, ${item.state}]`)}`);
+      if (item.detail) lines.push(`      ${c.dim(`detail: ${item.detail}`)}`);
+      if (item.command) lines.push(`      ${GLYPH.arrow} ${item.command}`);
     }
   } else {
-    process.stdout.write(`${c.bold("Needs you")} — nothing; no human gates are pending\n`);
+    lines.push(`${c.bold("Needs you")} — nothing; no human gates are pending`);
   }
 
   if (progress.length > 0) {
-    process.stdout.write(`\n${c.bold("In progress")} — no action needed\n`);
-    for (const line of progress) process.stdout.write(`  ${GLYPH.wait} ${line}\n`);
+    lines.push(``, `${c.bold("In progress")} — no action needed`);
+    for (const line of progress) lines.push(`  ${GLYPH.wait} ${line}`);
   }
+  return `${lines.join("\n")}\n`;
+}
+
+export async function cmdNext(cwd: string): Promise<number> {
+  process.stdout.write(await renderNext(cwd));
   return 0;
 }
 

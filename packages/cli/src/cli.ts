@@ -61,6 +61,7 @@ import { cmdDoctor } from "./doctor.js";
 import {
   cmdApprove,
   cmdImproveCancel,
+  cmdImproveCancelCycle,
   cmdImproveReference,
   cmdImproveRestart,
   cmdImproveRetry,
@@ -88,6 +89,7 @@ import {
   readJsonOrNull,
   SERIES_ROOT_CANDIDATES,
 } from "./roots.js";
+import { cmdWatch } from "./watch.js";
 
 // ── Helpers ─────────────────────────────────────────────────
 
@@ -178,6 +180,7 @@ const CLI_IMPLEMENTED = [
   "attention",
   "next",
   "doctor",
+  "watch",
   "approve",
   "reject",
   "status",
@@ -204,6 +207,7 @@ const CLI_USAGE_DETAILS: Record<string, string> = {
   audit: "  audit [--proposal <id>]",
   attention: "  attention [--source <graph-engineering|improvement-loop|improvement-series|product-loop>,...]",
   next: "  next              what needs you now (human gates + live workflows)",
+  watch: "  watch [--interval <s>] [--once]   live pane of gates + workflows (Ctrl-C exits)",
   doctor: "  doctor            environment & configuration diagnostic (runtime, agents, gates)",
   approve:
     "  approve --run-id <id> [--evidence-root <path>] [--yes]\n        approve the exact model hash of a graph run awaiting approval",
@@ -788,6 +792,7 @@ const IMPROVE_USAGE = `usage: swarm-dao improve <init|status|once|submit|cycles|
   retry-workers  --series-id <id>                      after a worker failure
   restart        --series-id <id>                      restart a halted series
   cancel         --series-id <id> --reason <text>      terminal
+  cancel-cycle   --cycle-id <id> --reason <text>        terminal (standalone cycle)
   reference      --cycle-id <id> --decision approve|reject [--reason <text>]
 
 Execution environments (--exec, default branch):
@@ -892,6 +897,7 @@ async function cmdImprove(cwd: string, positional: string[], flags: Record<strin
   if (sub === "retry-workers") return cmdImproveRetryWorkers(cwd, flags);
   if (sub === "restart") return cmdImproveRestart(cwd, flags);
   if (sub === "cancel") return cmdImproveCancel(cwd, flags);
+  if (sub === "cancel-cycle") return cmdImproveCancelCycle(cwd, flags);
   if (sub === "reference") return cmdImproveReference(cwd, flags);
   if (sub !== "init" && sub !== "status" && sub !== "once" && sub !== "submit" && sub !== "cycles") err(IMPROVE_USAGE);
 
@@ -1192,6 +1198,8 @@ export async function main(argv: string[], cwd: string = process.cwd()): Promise
         return 0;
       case "next":
         return await cmdNext(cwd);
+      case "watch":
+        return await cmdWatch(cwd, flags);
       case "doctor":
         return await cmdDoctor(cwd);
       case "approve":

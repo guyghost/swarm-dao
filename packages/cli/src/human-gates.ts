@@ -236,6 +236,32 @@ export async function cmdImproveReference(cwd: string, flags: Record<string, str
   return reportSubmission(result.accepted, snapshot.state, result.snapshot.state ?? "?", "REFERENCE_CHANGE_APPROVED");
 }
 
+export async function cmdImproveCancelCycle(cwd: string, flags: Record<string, string | true>): Promise<number> {
+  const reason = stringFlag(flags, "reason");
+  if (!reason) gateErr("--reason is required (the journal records why the cycle was cancelled)");
+  const cycleId = await resolveCycleId(cwd, flags);
+  const { runner, snapshot } = await loadCycleRunner(cwd, cycleId, flags);
+  if (snapshot.state === "cancelled" || snapshot.state === "succeeded" || snapshot.state === "failed") {
+    gateErr(`cycle '${cycleId}' is already terminal (${snapshot.state}) — nothing to cancel`);
+  }
+  process.stdout.write(`cycle:  ${c.bold(cycleId)} (${snapshot.state})\nreason:  ${reason}\n`);
+  const ok = await confirm("Cancel this cycle? This is terminal.", flags.yes === true);
+  if (!ok) {
+    process.stdout.write("aborted — nothing was submitted\n");
+    return 0;
+  }
+  const result = await runner.submit({
+    cycleId,
+    type: "CANCEL",
+    source: "human",
+    producer: "human-owner",
+    occurredAt: nowIso(),
+    payload: { reason },
+    evidence: ["owner cancellation via swarm-dao improve cancel-cycle"],
+  });
+  return reportSubmission(result.accepted, snapshot.state, result.snapshot.state ?? "?", "CANCEL");
+}
+
 async function seriesRunner(
   cwd: string,
   flags: Record<string, string | true>,
