@@ -1,5 +1,14 @@
 # @guyghost/swarm-dao-pi-adapter
 
+## 0.6.1
+
+### Patch Changes
+
+- e073b9a: `advanceSeriesOnce` (and the `dao_improve_once` tools on MCP, Pi and OpenCode) accepts an optional cycle evidence root, mirroring the CLI's `--cycle-root`. Series that live under `evidence/improvement-series` can now keep their cycles under `evidence/improvement-cycles` instead of splitting across roots. The CLI test that polluted the repo's real evidence roots with a stray `nope` snapshot now uses a temp directory.
+- Updated dependencies [e073b9a]
+  - @guyghost/swarm-dao-improvement@0.5.0
+  - @guyghost/swarm-dao-core@0.11.4
+
 ## 0.6.0
 
 ### Minor Changes
