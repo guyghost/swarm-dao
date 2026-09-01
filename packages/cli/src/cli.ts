@@ -42,9 +42,10 @@ import {
   setRepository,
   systemClock,
 } from "@guyghost/swarm-dao-core";
-
+import { createGraphRunner } from "@guyghost/swarm-dao-graph";
 import {
   assertNoActiveSeriesForScope,
+  ensureSeriesWorktree,
   isHumanChannelEvent,
   loadProjectImprovementConfig,
   ORCHESTRATOR_MIN_COOLDOWN_MS,
@@ -52,8 +53,10 @@ import {
   OrchestratorRunner,
   resolveAnchorCommands,
   resolveSandboxRunCommand,
+  SAFE_HERDR_KIND,
   type SandboxMode,
 } from "@guyghost/swarm-dao-improvement";
+import { createProductRunner } from "@guyghost/swarm-dao-product";
 
 // ── Helpers ─────────────────────────────────────────────────
 
@@ -143,6 +146,8 @@ const CLI_IMPLEMENTED = [
   "audit",
   "attention",
   "status",
+  "graph",
+  "product",
   "improve",
   "help",
 ] as const;
@@ -163,6 +168,10 @@ const CLI_USAGE_DETAILS: Record<string, string> = {
   config: "  config",
   audit: "  audit [--proposal <id>]",
   attention: "  attention [--source <graph-engineering|improvement-loop|product-loop>,...]",
+  graph:
+    "  graph <init|status|submit> --run-id <id> [--evidence-root <path>]\n        graph submit --run-id <id> --signal <file.json>",
+  product:
+    "  product <init|status|submit> --run-id <id> [--evidence-root <path>]\n        product submit --run-id <id> --signal <file.json>",
   improve: `  improve init --series-id <id> --scope <s> --reference-hash <hash> [--cooldown-ms <ms>]
         improve status --series-id <id>
         improve once --series-id <id> [--sandbox <docker|container|auto|none>] [--image <img>]
@@ -591,6 +600,109 @@ async function cmdGithubPr(cwd: string, positional: string[], flags: Record<stri
   info(`✓ PR created: #${result.number} — ${result.url}`);
 }
 
+// ── Graph Engineering and Product loop runs (in any project) ──
+
+const GRAPH_RUN_ROOT = ".dao/graph-runs";
+const PRODUCT_RUN_ROOT = ".dao/product-loops";
+
+const GRAPH_USAGE = `usage: swarm-dao graph <init|status|submit> [options]
+
+  init   --run-id <id> [--evidence-root <path>]
+  status --run-id <id> [--evidence-root <path>]
+  submit --run-id <id> --signal <file.json> [--evidence-root <path>]
+
+Graph runs live under .dao/graph-runs by default; override with --evidence-root
+(repos carrying the frozen graph use evidence/graph-runs). Signals are
+validated against the frozen Graph Engineering machine; human-source events
+require explicit owner authorization (see models/graph-engineering.md).`;
+
+const PRODUCT_USAGE = `usage: swarm-dao product <init|status|submit> [options]
+
+  init   --run-id <id> [--evidence-root <path>]
+  status --run-id <id> [--evidence-root <path>]
+  submit --run-id <id> --signal <file.json> [--evidence-root <path>]
+
+Product runs live under .dao/product-loops by default; override with
+--evidence-root. Signals are validated against the frozen product-loop
+machine (producer-bound authority; see models/product-loop.md).`;
+
+interface RunCommandRunner {
+  snapshot(): unknown;
+  submit(input: unknown): Promise<{ accepted: boolean }>;
+}
+
+interface RunCommandSpec {
+  defaultRoot: string;
+  usage: string;
+  create: (options: { evidenceRoot: string; runId: string }) => Promise<RunCommandRunner>;
+  /** Extra effect on init (graph runs mark the active run). */
+  onInit?: (evidenceRoot: string, runId: string) => Promise<void>;
+}
+
+/** Shared init/status/submit body for graph and product runs: identical flag
+ * handling, exit codes, and machine-only authority. */
+async function cmdRunCommand(
+  cwd: string,
+  positional: string[],
+  flags: Record<string, string | true>,
+  spec: RunCommandSpec,
+): Promise<number> {
+  const sub = positional[0];
+  if (sub !== "init" && sub !== "status" && sub !== "submit") err(spec.usage);
+
+  const stringFlag = (name: string): string | undefined => {
+    const value = flags[name];
+    if (value === undefined) return undefined;
+    if (typeof value !== "string" || value.trim().length === 0) err(`--${name} requires a value`);
+    return value;
+  };
+  const runId = stringFlag("run-id");
+  if (!runId) err(`--run-id is required\n${spec.usage}`);
+  const evidenceRoot = path.resolve(cwd, stringFlag("evidence-root") ?? spec.defaultRoot);
+
+  const runner = await spec.create({ evidenceRoot, runId });
+
+  if (sub === "init") {
+    if (spec.onInit) await spec.onInit(evidenceRoot, runId);
+    info(JSON.stringify(runner.snapshot(), null, 2));
+    return 0;
+  }
+  if (sub === "status") {
+    info(JSON.stringify(runner.snapshot(), null, 2));
+    return 0;
+  }
+
+  const signalFile = stringFlag("signal");
+  if (!signalFile) err(`--signal is required\n${spec.usage}`);
+  const signal: unknown = JSON.parse(await fs.readFile(path.resolve(cwd, signalFile), "utf8"));
+  const result = await runner.submit(signal);
+  info(JSON.stringify(result, null, 2));
+  return result.accepted ? 0 : 2;
+}
+
+const GRAPH_SPEC: RunCommandSpec = {
+  defaultRoot: GRAPH_RUN_ROOT,
+  usage: GRAPH_USAGE,
+  create: createGraphRunner,
+  onInit: async (evidenceRoot, runId) => {
+    await fs.writeFile(path.join(evidenceRoot, "active-run.json"), `${JSON.stringify({ runId }, null, 2)}\n`, "utf8");
+  },
+};
+
+const PRODUCT_SPEC: RunCommandSpec = {
+  defaultRoot: PRODUCT_RUN_ROOT,
+  usage: PRODUCT_USAGE,
+  create: createProductRunner,
+};
+
+function cmdGraph(cwd: string, positional: string[], flags: Record<string, string | true>): Promise<number> {
+  return cmdRunCommand(cwd, positional, flags, GRAPH_SPEC);
+}
+
+function cmdProduct(cwd: string, positional: string[], flags: Record<string, string | true>): Promise<number> {
+  return cmdRunCommand(cwd, positional, flags, PRODUCT_SPEC);
+}
+
 // ── Improve (continuous improvement series in any project) ──
 
 const IMPROVE_SERIES_ROOT = ".dao/improvement-series";
@@ -600,9 +712,22 @@ const IMPROVE_USAGE = `usage: swarm-dao improve <init|status|once|submit> [optio
 
   init   --series-id <id> --scope <s> --reference-hash <hash> [--cooldown-ms <ms>]
   status --series-id <id>
-  once   --series-id <id> [--sandbox <docker|container|auto|none>] [--image <ref>]
+  once   --series-id <id> [--exec <branch|worktree|container>]
+                      [--sandbox <docker|container|auto|none>] [--image <ref>]
                       [--cpus <n>] [--memory-mb <mb>]
+                      [--agent <kind>] [--agent-args "<args>"]
   submit --series-id <id> --event <file.json>
+
+Execution environments (--exec, default branch):
+  branch    workers and anchors run in the current checkout
+  worktree  idempotent git worktree per series (branch dao/loop/<series-id>,
+            path .dao/worktrees/<series-id>); evidence stays in this repo
+  container anchor commands run in a throwaway bounded container (workers are
+            herdr agents on the host; --sandbox overrides the runtime choice)
+
+Worker agents run in herdr: --agent selects the kind (pi, codex, claude, …;
+  default pi or .dao/improvement.json "worker"). --agent-args overrides the
+  kind's default extra arguments (pi defaults to "-ne").
 
 Anchor commands come from .dao/improvement.json in the project (create it with
 an 'anchorCommands' object binding the four command-backed anchors). Evidence
@@ -611,6 +736,7 @@ defaults to .dao/improvement-series and .dao/improvement-cycles; override with
 use evidence/ paths).`;
 
 const SANDBOX_MODES = new Set(["none", "docker", "container", "auto"]);
+const EXEC_MODES = new Set(["branch", "worktree", "container"]);
 
 function sandboxRequestFrom(
   flags: Record<string, string | true>,
@@ -651,6 +777,39 @@ function sandboxRequestFrom(
     memoryMb:
       numberFlag("memory-mb") ?? (typeof configSandbox.memoryMb === "number" ? configSandbox.memoryMb : undefined),
   };
+}
+
+/** herdr worker options (agent kind and extra args) from flags layered over
+ * the optional `worker` section of .dao/improvement.json. Explicit flags win;
+ * the kind must be a safe herdr identifier. */
+function workerOptionsFrom(
+  flags: Record<string, string | true>,
+  config: { raw: Record<string, unknown> } | null,
+): { kind?: string; agentArgs?: readonly string[] } {
+  const stringFlag = (name: string): string | undefined => {
+    const value = flags[name];
+    if (value === undefined) return undefined;
+    if (typeof value !== "string" || value.trim().length === 0) err(`--${name} requires a value`);
+    return value;
+  };
+  const configWorker =
+    config && typeof config.raw.worker === "object" && config.raw.worker !== null
+      ? (config.raw.worker as Record<string, unknown>)
+      : {};
+  const configKind =
+    typeof configWorker.kind === "string" && configWorker.kind.trim().length > 0 ? configWorker.kind : undefined;
+  const kind = stringFlag("agent") ?? configKind;
+  if (kind !== undefined && !SAFE_HERDR_KIND.test(kind)) {
+    err(`--agent must be a valid herdr agent kind (e.g. pi, codex, claude), got '${kind}'`);
+  }
+  const argsFlag = stringFlag("agent-args");
+  const agentArgs =
+    argsFlag !== undefined
+      ? argsFlag.split(/\s+/).filter(Boolean)
+      : Array.isArray(configWorker.agentArgs) && configWorker.agentArgs.every((a) => typeof a === "string")
+        ? (configWorker.agentArgs as string[])
+        : undefined;
+  return { ...(kind !== undefined ? { kind } : {}), ...(agentArgs !== undefined ? { agentArgs } : {}) };
 }
 
 async function cmdImprove(cwd: string, positional: string[], flags: Record<string, string | true>): Promise<number> {
@@ -708,12 +867,33 @@ async function cmdImprove(cwd: string, positional: string[], flags: Record<strin
     return result.accepted ? 0 : 2;
   }
 
-  // once — one authorized effect; anchor commands may run in a bounded sandbox.
+  // once — one authorized effect; the execution environment chooses where
+  // workers observe and where anchor commands run.
   const config = await loadProjectImprovementConfig(cwd);
-  const runCommand = await resolveSandboxRunCommand(sandboxRequestFrom(flags, config), cwd);
+  const execFlag = flags.exec;
+  // Value-less --exec must fail fast — silently running on the branch (or
+  // auto-detecting) would hide operator typos (same policy as sandbox flags).
+  if (execFlag !== undefined && (typeof execFlag !== "string" || execFlag.trim().length === 0)) {
+    err("--exec requires a value");
+  }
+  const execMode = execFlag === undefined ? "branch" : (execFlag as string);
+  if (!EXEC_MODES.has(execMode)) err(`--exec must be one of branch|worktree|container, got '${execMode}'`);
+
+  let workDir = cwd;
+  if (execMode === "worktree") {
+    const worktree = await ensureSeriesWorktree({ repoDir: cwd, seriesId });
+    workDir = worktree.path;
+  }
+
+  const sandboxRequest = sandboxRequestFrom(flags, config);
+  if (execMode === "container" && sandboxRequest.sandbox === undefined) {
+    sandboxRequest.sandbox = "auto";
+  }
+  const runCommand = await resolveSandboxRunCommand(sandboxRequest, workDir);
   const deps: OrchestratorOnceDeps = {
-    workDir: cwd,
+    workDir,
     cycleEvidenceRoot: cycleRoot,
+    worker: workerOptionsFrom(flags, config),
     ...(runCommand ? { runCommand } : {}),
   };
   const runner = await OrchestratorRunner.create({ seriesId, evidenceRoot });
@@ -825,6 +1005,10 @@ export async function main(argv: string[], cwd: string = process.cwd()): Promise
         return 0;
       case "improve":
         return await cmdImprove(cwd, positional, flags);
+      case "graph":
+        return await cmdGraph(cwd, positional, flags);
+      case "product":
+        return await cmdProduct(cwd, positional, flags);
       case "vote":
         await cmdVote(cwd, positional, flags);
         return 0;

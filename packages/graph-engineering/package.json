@@ -1,7 +1,7 @@
 {
-  "name": "@guyghost/swarm-dao-improvement",
-  "version": "0.3.0",
-  "description": "Swarm DAO improvement loop executor — continuous improvement series over journal-replayed cycles, with herdr workers and bounded sandbox execution (Docker / Apple container)",
+  "name": "@guyghost/swarm-dao-graph",
+  "version": "0.2.0",
+  "description": "Swarm DAO Graph Engineering run executor — journal-replayed change-control runs with strict signal validation",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -24,8 +24,7 @@
     "prepublishOnly": "bun run build"
   },
   "dependencies": {
-    "@guyghost/swarm-dao-core": "^0.10.2",
-    "@guyghost/swarm-dao-herdr-adapter": "^0.2.4"
+    "@guyghost/swarm-dao-core": "^0.10.2"
   },
   "devDependencies": {
     "@types/bun": "1.3.14",
@@ -33,19 +32,17 @@
   },
   "keywords": [
     "swarm-dao",
-    "improvement-loop",
-    "continuous-improvement",
+    "graph-engineering",
+    "change-control",
     "dao",
-    "sandbox",
-    "docker",
-    "apple-container"
+    "xstate"
   ],
   "author": "guyghost",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/guyghost/swarm-dao.git",
-    "directory": "packages/improvement-loop"
+    "directory": "packages/graph-engineering"
   },
   "bugs": {
     "url": "https://github.com/guyghost/swarm-dao/issues"

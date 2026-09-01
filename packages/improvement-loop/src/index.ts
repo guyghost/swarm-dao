@@ -9,3 +9,4 @@ export * from "./runner.js";
 export * from "./sandbox.js";
 export * from "./signal.js";
 export * from "./workers.js";
+export * from "./worktree.js";

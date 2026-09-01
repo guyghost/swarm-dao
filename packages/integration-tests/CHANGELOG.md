@@ -1,5 +1,12 @@
 # @guyghost/swarm-dao-integration-tests
 
+## 0.1.8
+
+### Patch Changes
+
+- Updated dependencies [dfb8fd5]
+  - @guyghost/swarm-dao-core@0.10.2
+
 ## 0.1.7
 
 ### Patch Changes

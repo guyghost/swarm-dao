@@ -77,6 +77,24 @@ if (srcTouched.length === 0) {
   process.exit(0);
 }
 
+// A changeset that was already consumed by `changeset version` (its package
+// version bumped, its CHANGELOG.md updated in this same diff) has reached its
+// terminal form — the change is versioned for release, exactly what a pending
+// changeset declares. The bot's "Version Packages" PRs and manually versioned
+// releases would otherwise be rejected with no way to re-declare coverage.
+const versioned = new Set(
+  changed
+    .filter((f) => /^packages\/[^/]+\/CHANGELOG\.md$/.test(f))
+    .map((f) => {
+      const pkgDir = path.join("packages", f.split("/")[1]);
+      const manifest = path.join(pkgDir, "package.json");
+      if (!existsSync(manifest)) return null;
+      const pkg = JSON.parse(readFileSync(manifest, "utf-8")) as { name?: string };
+      return pkg.name ?? null;
+    })
+    .filter((name): name is string => name !== null),
+);
+
 // ── Map src changes to published packages ────────────────────
 
 const required = new Set<string>();
@@ -118,7 +136,7 @@ if (existsSync(changesetDir)) {
 
 // ── Compare ──────────────────────────────────────────────────
 
-const missing = [...required].filter((p) => !declared.has(p));
+const missing = [...required].filter((p) => !declared.has(p) && !versioned.has(p));
 if (missing.length > 0) {
   console.error("check:changesets — FAILED");
   console.error(

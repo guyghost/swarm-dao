@@ -286,6 +286,20 @@ export const DAO_COMMANDS: readonly DaoCommand[] = [
     args: "<init|status|once|submit> [options]",
     hosts: ["cli"],
   },
+  {
+    id: "graph",
+    phase: "init",
+    summary: "Run a Graph Engineering change-control run in any project (init/status/submit)",
+    args: "<init|status|submit> [options]",
+    hosts: ["cli"],
+  },
+  {
+    id: "product",
+    phase: "init",
+    summary: "Run a product-loop run in any project (init/status/submit)",
+    args: "<init|status|submit> [options]",
+    hosts: ["cli"],
+  },
 ];
 
 const PHASE_ORDER: DaoCommandPhase[] = [

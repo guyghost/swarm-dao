@@ -1,5 +1,11 @@
 # @guyghost/swarm-dao-core
 
+## 0.10.2
+
+### Patch Changes
+
+- dfb8fd5: Declare the new CLI-only commands `graph` and `product` in the DAO command registry (run surfaces for the Graph Engineering and product-loop executors).
+
 ## 0.10.1
 
 ### Patch Changes

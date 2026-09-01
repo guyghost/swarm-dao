@@ -1,5 +1,19 @@
 # @guyghost/swarm-dao-improvement
 
+## 0.3.0
+
+### Minor Changes
+
+- 1b210ea: Add worktree execution environments and configurable herdr worker agents.
+
+  - `ensureSeriesWorktree`: idempotent per-series git worktree (branch `dao/loop/<series-id>`, path `.dao/worktrees/<series-id>`), re-syncing the gitignored `.dao/improvement.json` into the worktree on every prepare.
+  - `OrchestratorOnceDeps.worker` threads the herdr agent kind and extra args to the default worker executor; only `pi` defaults to `-ne`, other kinds (codex, claude, …) start with their own defaults. `SAFE_HERDR_KIND` is exported for host validation.
+
+### Patch Changes
+
+- Updated dependencies [dfb8fd5]
+  - @guyghost/swarm-dao-core@0.10.2
+
 ## 0.2.2
 
 ### Patch Changes
