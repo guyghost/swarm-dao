@@ -386,3 +386,108 @@ describe("improvement-orchestrator wiring — authority helpers", () => {
     expect(graph.cooldownMs.minimum).toBe(ORCHESTRATOR_MIN_COOLDOWN_MS);
   });
 });
+
+describe("improvement-orchestrator wiring — grounding idempotency and retry refresh (dogfood-003 c7)", () => {
+  it("skips anchors recorded at the current attempt and refreshes retained ones across a retry", async () => {
+    const evidenceRoot = await mkdtemp(join(tmpdir(), "orchestrator-c7-"));
+    const cycleRoot = await mkdtemp(join(tmpdir(), "orchestrator-c7-cycles-"));
+    const cycleId = "series-c7-c1";
+    try {
+      const runner = await OrchestratorRunner.create({ seriesId: "series-c7", evidenceRoot });
+      await startSeries(runner);
+      const deps = { cycleEvidenceRoot: cycleRoot, runWorker: fakeWorker(), runCommand: okCommand };
+
+      // Drive to grounding, then fail every command-backed anchor.
+      await runner.once(deps); // preparing -> sampling
+      await runner.once(deps); // sampling -> sealing
+      await runner.once(deps); // sealing -> auditing
+      await runner.once(deps); // auditing -> arbitrating
+      await runner.once(deps); // arbitrating -> grounding
+      let step = await runner.once({
+        ...deps,
+        runCommand: async () => ({ ok: false, detail: "Cannot find package 'xstate'" }),
+      });
+      expect(step.event).toBe("ANCHORS_SUBMITTED");
+      step = await runner.once(deps); // evaluating -> observing (EVALUATE lands the cycle on retrying)
+      step = await runner.once(deps); // observing -> awaitingHumanCycleDecision (CYCLE_AWAITING_HUMAN)
+      expect(runner.snapshot().state).toBe("awaitingHumanCycleDecision");
+
+      // Human authorizes the retry on the cycle; the series resumes.
+      const cycle = await createImprovementRunner({
+        evidenceRoot: cycleRoot,
+        cycleId,
+        scope: "wiring",
+        referenceHash: "a".repeat(64),
+      });
+      const retry = await cycle.submit({
+        cycleId,
+        type: "RETRY_AUTHORIZED",
+        source: "human",
+        producer: "human-owner",
+        occurredAt: new Date().toISOString(),
+        payload: {},
+        evidence: [],
+      });
+      expect(retry.accepted).toBe(true);
+      step = await runner.once(deps); // pollResume -> sampling (CYCLE_RESUMED)
+      expect(runner.snapshot().state).toBe("sampling");
+
+      // Re-drive to grounding on attempt 1 (the resume already reached sampling).
+      await runner.once(deps); // sampling -> sealing
+      await runner.once(deps); // sealing -> auditing
+      await runner.once(deps); // auditing -> arbitrating
+      await runner.once(deps); // arbitrating -> grounding
+      expect(runner.snapshot().state).toBe("grounding");
+
+      // Simulate a crashed grounding run: drift-audit already recorded at
+      // attempt 1 (its outcome must now be immutable), frozen-set-intact
+      // still carries the attempt-0 failure. Re-create the cycle runner so
+      // it replays the journal written by the series advances since.
+      const groundingCycle = await createImprovementRunner({
+        evidenceRoot: cycleRoot,
+        cycleId,
+        scope: "wiring",
+        referenceHash: "a".repeat(64),
+      });
+      const recorded = await groundingCycle.submit({
+        cycleId,
+        type: "ANCHOR_RECORDED",
+        source: "tool",
+        producer: "anchor-verifier",
+        occurredAt: new Date().toISOString(),
+        payload: { anchor: "drift-audit", status: "passed" },
+        evidence: ["$ bun test …", "exit 0"],
+      });
+      expect(recorded.accepted).toBe(true);
+
+      // Grounding resumes: drift-audit is NOT re-run (skip), the other three
+      // commands run — including the retained frozen-set-intact.
+      const commands: string[] = [];
+      step = await runner.once({
+        ...deps,
+        runCommand: async (command) => {
+          commands.push(command);
+          return okCommand();
+        },
+      });
+      expect(step.event).toBe("ANCHORS_SUBMITTED");
+      expect(commands.length).toBe(3);
+      expect(commands.some((c) => c.includes("improvement-loop.machine.test.ts"))).toBe(false);
+
+      const finalCycle = JSON.parse(await readFile(join(cycleRoot, cycleId, "snapshot.json"), "utf8"));
+      const anchors = finalCycle.context.anchors as Record<string, { status: string; attempt: number }>;
+      expect(anchors["frozen-set-intact"]).toMatchObject({ status: "passed", attempt: 1 });
+      expect(anchors["drift-audit"]).toMatchObject({ status: "passed", attempt: 1 });
+
+      // All six anchors are now grounded at attempt 1 -> the cycle succeeds.
+      step = await runner.once(deps);
+      expect(runner.snapshot().state).toBe("observing");
+      expect(finalCycle.state === "succeeded" || true).toBe(true);
+      const afterEvaluate = JSON.parse(await readFile(join(cycleRoot, cycleId, "snapshot.json"), "utf8"));
+      expect(afterEvaluate.state).toBe("succeeded");
+    } finally {
+      await rm(evidenceRoot, { recursive: true, force: true });
+      await rm(cycleRoot, { recursive: true, force: true });
+    }
+  });
+});

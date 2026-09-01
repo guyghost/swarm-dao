@@ -211,3 +211,54 @@ describe("improvement-loop machine — terminal states", () => {
     expect(actor.getSnapshot().value).toBe("failed");
   });
 });
+
+describe("improvement-loop machine — anchor recording across retries (dogfood-003 c7)", () => {
+  it("rejects re-recording an anchor within the same attempt (idempotent)", () => {
+    const actor = reachGrounding();
+    actor.send({ type: "ANCHOR_RECORDED", source: "tool", anchor: "regression", status: "passed", evidence: "run 1" });
+    const recorded = { ...actor.getSnapshot().context.anchors };
+    actor.send({ type: "ANCHOR_RECORDED", source: "tool", anchor: "regression", status: "failed", evidence: "run 2" });
+    expect(actor.getSnapshot().context.anchors).toEqual(recorded);
+  });
+
+  it("refreshes an anchor retained from an earlier attempt after an authorized retry", () => {
+    // Attempt 0: every command-backed anchor fails (e.g. missing deps).
+    const actor = reachGrounding();
+    for (const anchor of ["drift-audit", "anchor-reality", "frozen-set-intact", "regression"] as const) {
+      actor.send({ type: "ANCHOR_RECORDED", source: "tool", anchor, status: "failed", evidence: "missing deps" });
+    }
+    actor.send({ type: "EVALUATE", source: "system" });
+    expect(actor.getSnapshot().value).toBe("retrying");
+
+    // Human authorizes the retry; the surviving frozen-set anchor keeps its
+    // attempt-0 failure across prepareRetry…
+    actor.send({ type: "RETRY_AUTHORIZED", source: "human" });
+    const retained = actor.getSnapshot().context.anchors["frozen-set-intact"];
+    expect(retained?.status).toBe("failed");
+    expect(retained?.attempt).toBe(0);
+
+    // …but the new attempt may re-run and refresh it. Before the fix this
+    // rejection made every retry a dead end.
+    samplePair(actor);
+    actor.send({ type: "SAMPLES_SEALED", source: "tool" });
+    actor.send({ type: "DRIFT_ESTIMATE", source: "ai", driftClass: "none" });
+    actor.send({ type: "ARBITRATION", source: "tool", outcome: "balanced" });
+    actor.send({
+      type: "ANCHOR_RECORDED",
+      source: "tool",
+      anchor: "frozen-set-intact",
+      status: "passed",
+      evidence: "frozen set intact",
+    });
+    const refreshed = actor.getSnapshot().context.anchors["frozen-set-intact"];
+    expect(refreshed?.status).toBe("passed");
+    expect(refreshed?.attempt).toBe(1);
+
+    // Complete the attempt-1 anchors and succeed.
+    for (const anchor of ["drift-audit", "anchor-reality", "regression"] as const) {
+      actor.send({ type: "ANCHOR_RECORDED", source: "tool", anchor, status: "passed", evidence: `${anchor} ok` });
+    }
+    actor.send({ type: "EVALUATE", source: "system" });
+    expect(actor.getSnapshot().value).toBe("succeeded");
+  });
+});

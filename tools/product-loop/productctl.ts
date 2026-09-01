@@ -6,7 +6,9 @@
 // pointed at it. Dogfood evidence stays repo-local: default root remains
 // evidence/product-loops.
 
-export { runProductCli } from "../../packages/product-loop/src/cli.js";
+import { runProductCli } from "../../packages/product-loop/src/cli.js";
+
+export { runProductCli };
 
 if (import.meta.main) {
   runProductCli(process.argv.slice(2), { evidenceRoot: "evidence/product-loops" }).then((code) => process.exit(code));

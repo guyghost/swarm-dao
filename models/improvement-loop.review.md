@@ -58,7 +58,9 @@ provided.
 - A metric cannot leave `sampling` without its counter-metric.
 - A reference value cannot enter the cycle except through a human event.
 - Arbitration cannot be overridden by an AI signal.
-- A failed anchor is immutable for the current attempt.
+- A failed anchor is immutable for the current attempt; an authorized retry
+  may re-run and refresh it (a retained failure from an earlier attempt never
+  dead-ends a retry — dogfood-003 c7 finding).
 - A retry keeps the approved model, the counter-metric pairing, the frozen-set
   evidence, and the reference, but clears other attempt-scoped evidence.
 - The regression and frozen-set anchors cannot be replaced by the implementer.

@@ -92,7 +92,7 @@ sampling
 | `SAMPLES_SEALED` | `tool` | `sampling` | `auditing` only when both samples are present and non-empty |
 | `DRIFT_ESTIMATE` | `ai` | `auditing` | `arbitrating`; record the drift class as a signal only |
 | `ARBITRATION` | `tool` | `arbitrating` | `grounding`; record the deterministic arbitration outcome |
-| `ANCHOR_RECORDED` | `tool` | `grounding` | Record one immutable anchor result for the current attempt |
+| `ANCHOR_RECORDED` | `tool` | `grounding` | Record one anchor result; immutable within the current attempt, refreshable across an authorized retry |
 | `EVALUATE` | `system` | `grounding` | `succeeded`, `adjusting`, `retrying`, or `failed` per anchors, drift, and retry budget |
 | `REFERENCE_CHANGE_APPROVED` | `human` | `adjusting` | `sampling`; apply the new reference and clear cycle evidence |
 | `REFERENCE_CHANGE_REJECTED` | `human` | `adjusting` | `failed`; record the reason |
@@ -142,7 +142,11 @@ are stable identifiers and never change, so journals replay deterministically.
 
 Every anchor must be present, `passed`, non-empty, and bound to the current
 attempt. The `counter-metric-paired` and `frozen-set-intact` anchors are bound
-to the reviewed model hash and survive an authorized retry.
+to the reviewed model hash and survive an authorized retry. A surviving anchor
+retained from an earlier attempt is NOT frozen in a failed state: grounding may
+re-run it and refresh its result at the current attempt (dogfood-003 c7: an
+infra-failed `frozen-set-intact` made every subsequent retry a dead end).
+Within one attempt an anchor result stays immutable — re-recording is rejected.
 
 1. `counter-metric-paired` — the optimizing metric's paired counter-metric was
    sampled and is non-empty. A metric never travels alone.
@@ -172,7 +176,9 @@ command.
   adapter and are not transition guards.
 - On retry, retain the approved model hash, the `counter-metric-paired` and
   `frozen-set-intact` evidence, and the reference, but clear all other
-  attempt-scoped evidence.
+  attempt-scoped evidence. Retained anchor evidence may be refreshed by a new
+  `ANCHOR_RECORDED` at the current attempt; results recorded at the current
+  attempt are immutable.
 - A project-local scheduler or Stop hook may block while an active cycle is
   non-terminal. The hook reads the snapshot; it does not decide state.
 

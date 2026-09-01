@@ -6,7 +6,9 @@
 // at it. Dogfood evidence stays repo-local: default root remains
 // evidence/graph-runs (repos without the frozen graph default to .dao/graph-runs).
 
-export { runGraphCli } from "../../packages/graph-engineering/src/cli.js";
+import { runGraphCli } from "../../packages/graph-engineering/src/cli.js";
+
+export { runGraphCli };
 
 if (import.meta.main) {
   runGraphCli(process.argv.slice(2), { evidenceRoot: "evidence/graph-runs" }).then((code) => process.exit(code));
