@@ -104,6 +104,20 @@ const firstEvidence = (evidence: readonly string[], issues: string[]): string =>
   return value;
 };
 
+/** The frozen machine declares `evidence: string` for ANCHOR_RECORDED; join
+ * every non-empty entry (command line + outcome tail) so anchor failures keep
+ * their diagnosis. dogfood-003 c7 recorded only the command — the
+ * missing-dependency cause was invisible in the snapshot until reproduced by
+ * hand. */
+const joinedEvidence = (evidence: readonly string[], issues: string[]): string => {
+  const lines = evidence.filter(nonEmptyString);
+  if (lines.length === 0) {
+    issues.push("evidence must contain at least one non-empty entry");
+    return "";
+  }
+  return lines.join("\n");
+};
+
 const requireSample = (
   payload: Readonly<Record<string, unknown>>,
   issues: string[],
@@ -163,7 +177,7 @@ const buildEvent = (
         source,
         anchor: isRequiredImprovementAnchor(anchor) ? anchor : "regression",
         status: status === "failed" ? "failed" : "passed",
-        evidence: firstEvidence(evidence, issues),
+        evidence: joinedEvidence(evidence, issues),
       };
     }
     case "EVALUATE":

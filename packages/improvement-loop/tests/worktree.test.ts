@@ -140,3 +140,38 @@ describe("ensureSeriesWorktree", () => {
     }
   });
 });
+
+describe("ensureSeriesWorktree — dependency installation (dogfood-003 c7 finding)", () => {
+  it("installs the frozen lockfile when the worktree is a bun project (create path)", async () => {
+    const repo = await mkdtemp(join(tmpdir(), "swarm-worktree-install-"));
+    const commands: string[] = [];
+    try {
+      const worktreePath = seriesWorktreePath(repo, "s-1");
+      // Simulate a carved worktree containing a bun manifest (reuse path).
+      await mkdir(worktreePath, { recursive: true });
+      await writeFile(join(worktreePath, ".git"), "gitdir: ../../.git/worktrees/s-1\n", "utf8");
+      await writeFile(join(worktreePath, "package.json"), "{}", "utf8");
+
+      const handle = await ensureSeriesWorktree({ repoDir: repo, seriesId: "s-1", runner: fakeGit(commands) });
+      expect(handle.created).toBe(false);
+      expect(commands).toContain("bun install --frozen-lockfile");
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it("skips installation for non-bun worktrees", async () => {
+    const repo = await mkdtemp(join(tmpdir(), "swarm-worktree-nobun-"));
+    const commands: string[] = [];
+    try {
+      const worktreePath = seriesWorktreePath(repo, "s-1");
+      await mkdir(worktreePath, { recursive: true });
+      await writeFile(join(worktreePath, ".git"), "gitdir: ../../.git/worktrees/s-1\n", "utf8");
+
+      await ensureSeriesWorktree({ repoDir: repo, seriesId: "s-1", runner: fakeGit(commands) });
+      expect(commands.some((c) => c.startsWith("bun install"))).toBe(false);
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+});

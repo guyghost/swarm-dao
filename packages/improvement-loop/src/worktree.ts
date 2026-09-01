@@ -74,6 +74,7 @@ export async function ensureSeriesWorktree(options: {
   if (!validSeriesId(options.seriesId)) throw new Error("seriesId must be a safe non-empty filesystem identifier");
   const branch = seriesBranchName(options.seriesId);
   const worktreePath = seriesWorktreePath(path.resolve(options.repoDir), options.seriesId);
+  const runner = options.runner ?? defaultRunner();
 
   // A worktree is identified by its `.git` FILE (not directory) pointing at
   // the main repository's admin area. Anything else at the path is refused —
@@ -89,10 +90,12 @@ export async function ensureSeriesWorktree(options: {
       throw new Error(`worktree path exists but is not a git worktree: ${worktreePath}`);
     }
     await syncProjectDaoConfig(path.resolve(options.repoDir), worktreePath);
+    // Idempotent: a reused worktree whose node_modules was wiped (partial
+    // `.dao/` cleanup) gets its dependencies restored too.
+    await installWorktreeDependencies(runner, worktreePath);
     return { path: worktreePath, branch, created: false };
   }
 
-  const runner = options.runner ?? defaultRunner();
   // Stale registrations (the worktree directory was removed without `git
   // worktree remove`, e.g. an operator wiping `.dao/`) must not brick the
   // series: prune them before creating, so `add` never collides with a
@@ -115,7 +118,20 @@ export async function ensureSeriesWorktree(options: {
     throw new Error(`git worktree add failed: ${(created.stderr || created.stdout).trim().slice(0, 300)}`);
   }
   await syncProjectDaoConfig(path.resolve(options.repoDir), worktreePath);
+  await installWorktreeDependencies(runner, worktreePath);
   return { path: worktreePath, branch, created: true };
+}
+
+/** A freshly carved worktree has no `node_modules`, so anchor commands
+ * (`bun test …`, `bun run …`) and workers fail on unresolved imports —
+ * dogfood-003 c7 lost all four anchors to a missing `xstate`. Install the
+ * frozen lockfile when the worktree is a bun project; best-effort (non-bun
+ * projects are skipped, and a failed install surfaces through the anchor
+ * outcome evidence rather than blocking the prepare). */
+async function installWorktreeDependencies(runner: HerdrRunner, worktreePath: string): Promise<void> {
+  const manifest = await fs.stat(path.join(worktreePath, "package.json")).catch(() => null);
+  if (manifest === null) return;
+  await runner.exec("bun install --frozen-lockfile", { cwd: worktreePath, timeout: 300_000 }).catch(() => undefined);
 }
 
 /** `.dao/` is gitignored, so a fresh worktree lacks the project's improvement
