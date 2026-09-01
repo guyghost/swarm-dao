@@ -1,5 +1,24 @@
 # @guyghost/swarm-dao-cli
 
+## 0.4.0
+
+### Minor Changes
+
+- 1b210ea: `improve once` gains `--exec branch|worktree|container` (where the series runs: current checkout, an isolated per-series git worktree, or anchor commands in a bounded container) and `--agent <kind>` / `--agent-args` (which herdr agent executable runs the workers — pi, codex, claude, …; also configurable via `worker` in `.dao/improvement.json`).
+- aaa716e: Add `swarm-dao graph <init|status|submit>` — Graph Engineering change-control runs in any project (evidence under `.dao/graph-runs` by default), alongside the existing `improve` loop commands.
+- 90ba1f4: Add `swarm-dao product <init|status|submit>` — product-loop runs in any project (evidence under `.dao/product-loops` by default), completing the CLI trio: DAO proposals, Graph Engineering runs, product loops, and improvement series.
+
+### Patch Changes
+
+- Updated dependencies [dfb8fd5]
+- Updated dependencies [aaa716e]
+- Updated dependencies [1b210ea]
+- Updated dependencies [90ba1f4]
+  - @guyghost/swarm-dao-core@0.10.2
+  - @guyghost/swarm-dao-graph@0.2.0
+  - @guyghost/swarm-dao-improvement@0.3.0
+  - @guyghost/swarm-dao-product@0.2.0
+
 ## 0.3.1
 
 ### Patch Changes
