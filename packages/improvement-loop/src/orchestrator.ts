@@ -114,6 +114,10 @@ export interface OrchestratorOnceDeps {
   cycleEvidenceRoot?: string;
   /** Repository root for herdr workspaces and anchor commands (default cwd). */
   workDir?: string;
+  /** herdr worker executor options: agent kind (pi, codex, claude, …) and
+   * extra agent args for the default worker executor. Executor configuration
+   * only — never model state. */
+  worker?: { kind?: string; agentArgs?: readonly string[] };
 }
 
 export type OrchestratorOnceResult = Readonly<{
@@ -247,7 +251,11 @@ const defaultRunWorker =
   async (_phase: WorkerPhase, worker: string): Promise<WorkerHarvest> => {
     const prompt = WORKER_PROMPTS[worker]?.(scope);
     if (!prompt) return { ok: false, error: `no prompt configured for worker '${worker}'` };
-    return runHerdrWorker({ workDir: resolve(deps.workDir ?? process.cwd()) }, `orchestrator-${worker}`, prompt);
+    return runHerdrWorker(
+      { workDir: resolve(deps.workDir ?? process.cwd()), ...(deps.worker ?? {}) },
+      `orchestrator-${worker}`,
+      prompt,
+    );
   };
 
 const sampleFromAnswer = (answer: unknown): Record<string, unknown> => ({

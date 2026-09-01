@@ -1,7 +1,9 @@
 import { describe, expect, it } from "bun:test";
+import { exec as execCallback } from "node:child_process";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 import { main } from "../src/cli.js";
 
 describe("cli.ts", () => {
@@ -37,6 +39,32 @@ describe("cli.ts — improve series roots", () => {
   it("fails fast on a value-less --cycle-root or --evidence-root flag", async () => {
     expect(await main(["improve", "once", "--series-id", "t", "--cycle-root"], process.cwd())).toBe(1);
     expect(await main(["improve", "once", "--series-id", "t", "--evidence-root"], process.cwd())).toBe(1);
+  });
+
+  it("fails fast on an unknown --exec mode or an invalid --agent kind", async () => {
+    expect(await main(["improve", "once", "--series-id", "t", "--exec", "vm"], process.cwd())).toBe(1);
+    expect(await main(["improve", "once", "--series-id", "t", "--exec"], process.cwd())).toBe(1);
+    expect(await main(["improve", "once", "--series-id", "t", "--agent"], process.cwd())).toBe(1);
+    expect(await main(["improve", "once", "--series-id", "t", "--agent", "Codex; rm-rf"], process.cwd())).toBe(1);
+    expect(await main(["improve", "once", "--series-id", "t", "--agent-args"], process.cwd())).toBe(1);
+  });
+
+  it("once --exec worktree prepares a dao/loop worktree in a git repo", async () => {
+    const exec = promisify(execCallback);
+    const cwd = await fs.mkdtemp(path.join(tmpdir(), "swarm-improve-wt-"));
+    try {
+      await exec("git init -q .", { cwd });
+      await exec("git -c user.email=t@t -c user.name=t commit -q --allow-empty -m init", { cwd });
+      // Idle series: once is a gate result, but the worktree is still prepared.
+      const code = await main(["improve", "once", "--series-id", "wt-1", "--exec", "worktree"], cwd);
+      expect(code).toBe(0);
+      const marker = await fs.readFile(path.join(cwd, ".dao/worktrees/wt-1/.git"), "utf8");
+      expect(marker).toContain("gitdir:");
+      // Second run reuses the worktree instead of failing.
+      expect(await main(["improve", "once", "--series-id", "wt-1", "--exec", "worktree"], cwd)).toBe(0);
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
   });
 });
 

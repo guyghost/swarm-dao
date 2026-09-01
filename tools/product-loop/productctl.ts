@@ -9,7 +9,5 @@
 export { runProductCli } from "../../packages/product-loop/src/cli.js";
 
 if (import.meta.main) {
-  runProductCli(process.argv.slice(2), { evidenceRoot: "evidence/product-loops" }).then((code) =>
-    process.exit(code),
-  );
+  runProductCli(process.argv.slice(2), { evidenceRoot: "evidence/product-loops" }).then((code) => process.exit(code));
 }

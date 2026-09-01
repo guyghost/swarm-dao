@@ -153,6 +153,25 @@ seal → audit → arbitrate → anchor → evaluate → observe → cooldown) a
 the resulting state as JSON. Loop it — from a script, a cron job, or an agent —
 to drive the series.
 
+Choose where the series runs with `--exec` (default `branch`, the current
+checkout):
+
+```bash
+# Isolated git worktree per series (branch dao/loop/s1, path .dao/worktrees/s1)
+swarm-dao improve once --series-id s1 --exec worktree
+
+# Anchor commands in a throwaway bounded container (sandbox auto-detected)
+swarm-dao improve once --series-id s1 --exec container --image node:22-bookworm
+```
+
+Worker agents run as real coding agents in [herdr](https://herdr.dev); pick
+the executable with `--agent` (default `pi`, or `worker.kind` in
+`.dao/improvement.json`):
+
+```bash
+swarm-dao improve once --series-id s1 --exec worktree --agent codex
+```
+
 ```bash
 swarm-dao improve status --series-id s1
 

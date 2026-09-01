@@ -42,9 +42,9 @@ export interface HerdrWorkerOptions {
   workDir: string;
   /** herdr agent kind (default "pi"). */
   kind?: string;
-  /** Extra args passed to the agent executable. Default ["-ne"]: worker agents
-   * are signal-only and must not carry the dao_* extension tools; disabling
-   * extension discovery also sidesteps the local .pi extension conflict. */
+  /** Extra args passed to the agent executable. Default: ["-ne"] for the pi
+   * kind (signal-only workers must not carry the dao_* extension tools);
+   * other kinds default to no extra args. */
   agentArgs?: readonly string[];
   /** Per-attempt prompt timeout in ms (default 5 min; herdr max 300000). */
   timeoutMs?: number;
@@ -60,7 +60,14 @@ export interface HerdrWorkerOptions {
 
 export type WorkerHarvest = Readonly<{ ok: true; content: string } | { ok: false; error: string }>;
 
-const SAFE_KIND = /^[a-z][a-z0-9_-]{0,31}$/;
+/** herdr kinds are identifiers — anything else is refused, never interpolated. */
+export const SAFE_HERDR_KIND = /^[a-z][a-z0-9_-]{0,31}$/;
+
+/** Default extra args for the pi kind: worker agents are signal-only and must
+ * not carry the dao_* extension tools; disabling extension discovery also
+ * sidesteps the local .pi extension conflict. Other kinds use their own
+ * defaults unless the caller passes explicit agentArgs. */
+export const DEFAULT_PI_AGENT_ARGS: readonly string[] = ["-ne"];
 
 /**
  * Escape raw control characters that are illegal inside JSON string literals.
@@ -159,7 +166,7 @@ export async function runHerdrWorker(
 ): Promise<WorkerHarvest> {
   const runner = options.runner ?? defaultRunner();
   const kind = options.kind ?? "pi";
-  const agentArgs = options.agentArgs ?? ["-ne"];
+  const agentArgs = options.agentArgs ?? (kind === "pi" ? DEFAULT_PI_AGENT_ARGS : []);
   // herdr's own timeout ceiling is 300000ms; readLines is capped to keep the
   // read command (and the harvested transcript) bounded.
   const timeoutMs = toBoundedInt(options.timeoutMs, 300_000, 1_000, 300_000);
@@ -167,7 +174,8 @@ export async function runHerdrWorker(
   const readLines = toBoundedInt(options.readLines, 200, 1, 10_000);
   const extraArgs = agentArgs.map((arg) => quote(arg)).join(" ");
 
-  if (!SAFE_KIND.test(kind)) return { ok: false, error: `herdr kind '${kind}' is not a valid agent kind identifier.` };
+  if (!SAFE_HERDR_KIND.test(kind))
+    return { ok: false, error: `herdr kind '${kind}' is not a valid agent kind identifier.` };
   const baseName = sanitizeHerdrName(name);
 
   const maxAttempts = ORCHESTRATOR_MAX_WORKER_RETRIES + 1;

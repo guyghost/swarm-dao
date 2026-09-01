@@ -45,6 +45,7 @@ import {
 import { createGraphRunner } from "@guyghost/swarm-dao-graph";
 import {
   assertNoActiveSeriesForScope,
+  ensureSeriesWorktree,
   isHumanChannelEvent,
   loadProjectImprovementConfig,
   ORCHESTRATOR_MIN_COOLDOWN_MS,
@@ -52,6 +53,7 @@ import {
   OrchestratorRunner,
   resolveAnchorCommands,
   resolveSandboxRunCommand,
+  SAFE_HERDR_KIND,
   type SandboxMode,
 } from "@guyghost/swarm-dao-improvement";
 import { createProductRunner } from "@guyghost/swarm-dao-product";
@@ -710,9 +712,22 @@ const IMPROVE_USAGE = `usage: swarm-dao improve <init|status|once|submit> [optio
 
   init   --series-id <id> --scope <s> --reference-hash <hash> [--cooldown-ms <ms>]
   status --series-id <id>
-  once   --series-id <id> [--sandbox <docker|container|auto|none>] [--image <ref>]
+  once   --series-id <id> [--exec <branch|worktree|container>]
+                      [--sandbox <docker|container|auto|none>] [--image <ref>]
                       [--cpus <n>] [--memory-mb <mb>]
+                      [--agent <kind>] [--agent-args "<args>"]
   submit --series-id <id> --event <file.json>
+
+Execution environments (--exec, default branch):
+  branch    workers and anchors run in the current checkout
+  worktree  idempotent git worktree per series (branch dao/loop/<series-id>,
+            path .dao/worktrees/<series-id>); evidence stays in this repo
+  container anchor commands run in a throwaway bounded container (workers are
+            herdr agents on the host; --sandbox overrides the runtime choice)
+
+Worker agents run in herdr: --agent selects the kind (pi, codex, claude, …;
+  default pi or .dao/improvement.json "worker"). --agent-args overrides the
+  kind's default extra arguments (pi defaults to "-ne").
 
 Anchor commands come from .dao/improvement.json in the project (create it with
 an 'anchorCommands' object binding the four command-backed anchors). Evidence
@@ -721,6 +736,7 @@ defaults to .dao/improvement-series and .dao/improvement-cycles; override with
 use evidence/ paths).`;
 
 const SANDBOX_MODES = new Set(["none", "docker", "container", "auto"]);
+const EXEC_MODES = new Set(["branch", "worktree", "container"]);
 
 function sandboxRequestFrom(
   flags: Record<string, string | true>,
@@ -761,6 +777,39 @@ function sandboxRequestFrom(
     memoryMb:
       numberFlag("memory-mb") ?? (typeof configSandbox.memoryMb === "number" ? configSandbox.memoryMb : undefined),
   };
+}
+
+/** herdr worker options (agent kind and extra args) from flags layered over
+ * the optional `worker` section of .dao/improvement.json. Explicit flags win;
+ * the kind must be a safe herdr identifier. */
+function workerOptionsFrom(
+  flags: Record<string, string | true>,
+  config: { raw: Record<string, unknown> } | null,
+): { kind?: string; agentArgs?: readonly string[] } {
+  const stringFlag = (name: string): string | undefined => {
+    const value = flags[name];
+    if (value === undefined) return undefined;
+    if (typeof value !== "string" || value.trim().length === 0) err(`--${name} requires a value`);
+    return value;
+  };
+  const configWorker =
+    config && typeof config.raw.worker === "object" && config.raw.worker !== null
+      ? (config.raw.worker as Record<string, unknown>)
+      : {};
+  const configKind =
+    typeof configWorker.kind === "string" && configWorker.kind.trim().length > 0 ? configWorker.kind : undefined;
+  const kind = stringFlag("agent") ?? configKind;
+  if (kind !== undefined && !SAFE_HERDR_KIND.test(kind)) {
+    err(`--agent must be a valid herdr agent kind (e.g. pi, codex, claude), got '${kind}'`);
+  }
+  const argsFlag = stringFlag("agent-args");
+  const agentArgs =
+    argsFlag !== undefined
+      ? argsFlag.split(/\s+/).filter(Boolean)
+      : Array.isArray(configWorker.agentArgs) && configWorker.agentArgs.every((a) => typeof a === "string")
+        ? (configWorker.agentArgs as string[])
+        : undefined;
+  return { ...(kind !== undefined ? { kind } : {}), ...(agentArgs !== undefined ? { agentArgs } : {}) };
 }
 
 async function cmdImprove(cwd: string, positional: string[], flags: Record<string, string | true>): Promise<number> {
@@ -818,12 +867,33 @@ async function cmdImprove(cwd: string, positional: string[], flags: Record<strin
     return result.accepted ? 0 : 2;
   }
 
-  // once — one authorized effect; anchor commands may run in a bounded sandbox.
+  // once — one authorized effect; the execution environment chooses where
+  // workers observe and where anchor commands run.
   const config = await loadProjectImprovementConfig(cwd);
-  const runCommand = await resolveSandboxRunCommand(sandboxRequestFrom(flags, config), cwd);
+  const execFlag = flags.exec;
+  // Value-less --exec must fail fast — silently running on the branch (or
+  // auto-detecting) would hide operator typos (same policy as sandbox flags).
+  if (execFlag !== undefined && (typeof execFlag !== "string" || execFlag.trim().length === 0)) {
+    err("--exec requires a value");
+  }
+  const execMode = execFlag === undefined ? "branch" : (execFlag as string);
+  if (!EXEC_MODES.has(execMode)) err(`--exec must be one of branch|worktree|container, got '${execMode}'`);
+
+  let workDir = cwd;
+  if (execMode === "worktree") {
+    const worktree = await ensureSeriesWorktree({ repoDir: cwd, seriesId });
+    workDir = worktree.path;
+  }
+
+  const sandboxRequest = sandboxRequestFrom(flags, config);
+  if (execMode === "container" && sandboxRequest.sandbox === undefined) {
+    sandboxRequest.sandbox = "auto";
+  }
+  const runCommand = await resolveSandboxRunCommand(sandboxRequest, workDir);
   const deps: OrchestratorOnceDeps = {
-    workDir: cwd,
+    workDir,
     cycleEvidenceRoot: cycleRoot,
+    worker: workerOptionsFrom(flags, config),
     ...(runCommand ? { runCommand } : {}),
   };
   const runner = await OrchestratorRunner.create({ seriesId, evidenceRoot });

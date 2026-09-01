@@ -46,6 +46,42 @@ command inside a throwaway container: repository mounted at `/workspace`,
 on `auto`; a missing runtime fails loudly instead of degrading to the host. A
 flagged gate failure never runs on the host implicitly — bounded means bounded.
 
+## Execution environments
+
+`improve once --exec branch|worktree|container` selects where the series runs
+(executor configuration — never model state):
+
+- `branch` (default): workers and anchor commands run in the current checkout.
+- `worktree`: an idempotent git worktree per series — branch
+  `dao/loop/<series-id>`, path `.dao/worktrees/<series-id>`. Workers observe
+  and anchors execute inside the pinned checkout; the gitignored
+  `.dao/improvement.json` is re-synced into the worktree on every prepare.
+  Series and cycle evidence stays in the repository's own evidence roots. The
+  worktree is never removed automatically (`git worktree remove` is an
+  operator decision; the branch survives for the next cycle).
+- `container`: anchor commands run in a throwaway bounded container (sandbox
+  mode `auto` unless `--sandbox` narrows it). Workers are herdr agents on the
+  host — herdr needs a terminal pane, so it never runs inside the image.
+
+`--exec worktree` composes with `--sandbox`: the sandbox mounts the worktree.
+
+## Worker agents
+
+Improvement workers run as real coding agents in [herdr](https://herdr.dev)
+workspaces. `--agent <kind>` selects the executable (`pi`, `codex`, `claude`,
+`gemini`, `cursor`, … — whatever herdr supports and you have installed);
+defaults to `pi` or the `worker.kind` field of `.dao/improvement.json`:
+
+```json
+{ "worker": { "kind": "codex", "agentArgs": ["--sandbox", "read-only"] } }
+```
+
+`--agent-args "…"` (whitespace-separated) overrides the kind's default extra
+arguments. Only `pi` carries defaults (`-ne`: signal-only workers must not
+discover the dao_* extension tools); other kinds start with their own
+defaults. Kind identifiers are validated — anything else is refused, never
+interpolated into a shell command.
+
 ## Programmatic use
 
 ```typescript

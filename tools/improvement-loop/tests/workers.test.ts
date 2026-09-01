@@ -80,3 +80,43 @@ describe("herdr worker executor — numeric option sanitization", () => {
     expect(readCommand).toBe("herdr agent read worker-sanitize --source recent-unwrapped --lines 10000"); // numeric string -> capped at ceiling
   });
 });
+
+describe("herdr worker executor — agent kind defaults", () => {
+  const okRunner = (commands: string[]) =>
+    ({
+      exec: async (command: string) => {
+        commands.push(command);
+        if (command.startsWith("herdr workspace create")) {
+          return {
+            stdout: JSON.stringify({ result: { root_pane: { pane_id: "p1" }, workspace: { workspace_id: "w1" } } }),
+            stderr: "",
+            exitCode: 0,
+          };
+        }
+        return { stdout: "{}", stderr: "", exitCode: 0 };
+      },
+    }) satisfies import("@guyghost/swarm-dao-herdr-adapter").HerdrRunner;
+
+  it("defaults to '-ne' only for the pi kind", async () => {
+    const piCommands: string[] = [];
+    const pi = await runHerdrWorker({ workDir: "/repo", runner: okRunner(piCommands) }, "worker-pi", "prompt");
+    expect(pi.ok).toBe(true);
+    expect(piCommands.find((c) => c.startsWith("herdr agent start"))).toContain("-- '-ne'");
+
+    const codexCommands: string[] = [];
+    const codex = await runHerdrWorker({ workDir: "/repo", kind: "codex", runner: okRunner(codexCommands) }, "w", "p");
+    expect(codex.ok).toBe(true);
+    expect(codexCommands.find((c) => c.startsWith("herdr agent start"))).not.toContain("-ne");
+  });
+
+  it("explicit agentArgs override the kind default", async () => {
+    const commands: string[] = [];
+    const harvest = await runHerdrWorker(
+      { workDir: "/repo", kind: "claude", agentArgs: ["--permission-mode", "read-only"], runner: okRunner(commands) },
+      "worker-claude",
+      "prompt",
+    );
+    expect(harvest.ok).toBe(true);
+    expect(commands.find((c) => c.startsWith("herdr agent start"))).toContain("-- '--permission-mode' 'read-only'");
+  });
+});
