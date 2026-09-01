@@ -17,7 +17,7 @@
     },
     "packages/benchmarks": {
       "name": "@guyghost/swarm-dao-benchmarks",
-      "version": "0.1.7",
+      "version": "0.1.8",
       "dependencies": {
         "@guyghost/swarm-dao-core": "workspace:*",
       },
@@ -42,7 +42,7 @@
     },
     "packages/cli": {
       "name": "@guyghost/swarm-dao-cli",
-      "version": "0.3.1",
+      "version": "0.4.0",
       "bin": {
         "swarm-dao": "./dist/cli.js",
       },
@@ -86,7 +86,7 @@
     },
     "packages/core": {
       "name": "@guyghost/swarm-dao-core",
-      "version": "0.10.1",
+      "version": "0.10.2",
       "dependencies": {
         "xstate": "^5.32.2",
       },
@@ -97,9 +97,9 @@
     },
     "packages/graph-engineering": {
       "name": "@guyghost/swarm-dao-graph",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "dependencies": {
-        "@guyghost/swarm-dao-core": "^0.10.0",
+        "@guyghost/swarm-dao-core": "^0.10.2",
       },
       "devDependencies": {
         "@types/bun": "1.3.14",
@@ -119,7 +119,7 @@
     },
     "packages/improvement-loop": {
       "name": "@guyghost/swarm-dao-improvement",
-      "version": "0.2.2",
+      "version": "0.3.0",
       "dependencies": {
         "@guyghost/swarm-dao-core": "^0.10.0",
         "@guyghost/swarm-dao-herdr-adapter": "^0.2.4",
@@ -131,7 +131,7 @@
     },
     "packages/integration-tests": {
       "name": "@guyghost/swarm-dao-integration-tests",
-      "version": "0.1.7",
+      "version": "0.1.8",
       "dependencies": {
         "@guyghost/swarm-dao-claude-adapter": "workspace:*",
         "@guyghost/swarm-dao-codex-adapter": "workspace:*",
@@ -152,7 +152,9 @@
         "swarm-dao-mcp": "./dist/cli.js",
       },
       "dependencies": {
-        "@guyghost/swarm-dao-core": "^0.5.0",
+        "@guyghost/swarm-dao-core": "^0.10.2",
+        "@guyghost/swarm-dao-graph": "^0.2.0",
+        "@guyghost/swarm-dao-product": "^0.2.0",
         "@modelcontextprotocol/sdk": "^1.29.0",
       },
       "devDependencies": {
@@ -197,9 +199,9 @@
     },
     "packages/product-loop": {
       "name": "@guyghost/swarm-dao-product",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "dependencies": {
-        "@guyghost/swarm-dao-core": "^0.10.0",
+        "@guyghost/swarm-dao-core": "^0.10.2",
       },
       "devDependencies": {
         "@types/bun": "1.3.14",

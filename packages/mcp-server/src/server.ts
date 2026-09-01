@@ -1,3 +1,4 @@
+import path from "node:path";
 import type { DaoStateRepositoryPort, ProposalType, RecordOutputInput } from "@guyghost/swarm-dao-core";
 import {
   buildDaoHelpMessage,
@@ -30,6 +31,8 @@ import {
   PROPOSAL_TYPES,
   setRepository,
 } from "@guyghost/swarm-dao-core";
+import { createGraphRunner } from "@guyghost/swarm-dao-graph";
+import { createProductRunner } from "@guyghost/swarm-dao-product";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { createMcpHostAdapter, resolveDaoRoot } from "./host-adapter.js";
@@ -59,6 +62,41 @@ function createToolContext(workDir: string, repository?: DaoStateRepositoryPort)
     controlToolName: "dao_control" as const,
     failOnGateFailure: false,
     repository,
+  };
+}
+
+/** AI-source event types the MCP surface may submit to a graph run. Human
+ * events (MODEL_APPROVED, MODEL_REJECTED, RETRY_AUTHORIZED, CANCEL) and
+ * tool/system events never pass through MCP: the host hardcodes source
+ * "ai", so an agent cannot forge another channel's authority. */
+const GRAPH_AI_EVENT_TYPES = ["MODEL_DRAFTED", "IMPLEMENTATION_READY", "IMPLEMENTATION_FAILED"] as const;
+
+/** AI-source event types the MCP surface may submit to a product run. */
+const PRODUCT_AI_EVENT_TYPES = ["AGENT_SIGNAL", "FEEDBACK_AGGREGATED", "PROPOSAL_DRAFTED"] as const;
+
+interface RunSubmitArgs {
+  runId: string;
+  producer: string;
+  payload: Record<string, unknown>;
+  evidence: string[];
+  evidenceRoot?: string;
+}
+
+function parseRunSubmitArgs(args: Record<string, unknown>): RunSubmitArgs {
+  const runId = typeof args.runId === "string" && args.runId.trim().length > 0 ? args.runId : undefined;
+  if (!runId) throw new Error("runId is required");
+  const producer = typeof args.producer === "string" && args.producer.trim().length > 0 ? args.producer : undefined;
+  if (!producer) throw new Error("producer is required");
+  return {
+    runId,
+    producer,
+    payload:
+      typeof args.payload === "object" && args.payload !== null && !Array.isArray(args.payload)
+        ? (args.payload as Record<string, unknown>)
+        : {},
+    evidence: Array.isArray(args.evidence) ? args.evidence.map(String).filter((e) => e.trim().length > 0) : [],
+    evidenceRoot:
+      typeof args.evidenceRoot === "string" && args.evidenceRoot.trim().length > 0 ? args.evidenceRoot : undefined,
   };
 }
 
@@ -276,6 +314,62 @@ export function createSwarmDaoMcpServer(workDir = resolveDaoRoot(), repository?:
           properties: { proposalId: { type: "number" }, headBranch: { type: "string" } },
         },
       },
+      {
+        name: "dao_graph_status",
+        description:
+          "Read a Graph Engineering run snapshot (read-only). Evidence root defaults to .dao/graph-runs under the workspace.",
+        inputSchema: {
+          type: "object",
+          required: ["runId"],
+          properties: { runId: { type: "string" }, evidenceRoot: { type: "string" } },
+        },
+      },
+      {
+        name: "dao_graph_submit",
+        description:
+          "Submit an AI-source signal to a Graph Engineering run (MODEL_DRAFTED, IMPLEMENTATION_READY, IMPLEMENTATION_FAILED). " +
+          "The host sets source=ai; human events (MODEL_APPROVED, MODEL_REJECTED, RETRY_AUTHORIZED, CANCEL) belong to the swarm-dao CLI human channel.",
+        inputSchema: {
+          type: "object",
+          required: ["runId", "type", "producer", "payload", "evidence"],
+          properties: {
+            runId: { type: "string" },
+            type: { type: "string", enum: [...GRAPH_AI_EVENT_TYPES] },
+            producer: { type: "string" },
+            payload: { type: "object" },
+            evidence: { type: "array", items: { type: "string" } },
+            evidenceRoot: { type: "string" },
+          },
+        },
+      },
+      {
+        name: "dao_product_status",
+        description:
+          "Read a product-loop run snapshot (read-only). Evidence root defaults to .dao/product-loops under the workspace.",
+        inputSchema: {
+          type: "object",
+          required: ["runId"],
+          properties: { runId: { type: "string" }, evidenceRoot: { type: "string" } },
+        },
+      },
+      {
+        name: "dao_product_submit",
+        description:
+          "Submit an AI-source signal to a product-loop run (AGENT_SIGNAL, FEEDBACK_AGGREGATED, PROPOSAL_DRAFTED from a declared AI producer). " +
+          "The host sets source=ai; human events (REVIEW_RESOLVED, RETRY_VERIFICATION_AUTHORIZED, CONTACT_RELAY_AUTHORIZED, CANCEL) belong to the swarm-dao CLI human channel.",
+        inputSchema: {
+          type: "object",
+          required: ["runId", "type", "producer", "payload", "evidence"],
+          properties: {
+            runId: { type: "string" },
+            type: { type: "string", enum: [...PRODUCT_AI_EVENT_TYPES] },
+            producer: { type: "string" },
+            payload: { type: "object" },
+            evidence: { type: "array", items: { type: "string" } },
+            evidenceRoot: { type: "string" },
+          },
+        },
+      },
     ],
   }));
 
@@ -410,6 +504,67 @@ export function createSwarmDaoMcpServer(workDir = resolveDaoRoot(), repository?:
           return textResult(await handleDaoGithubCreateBranch(ctx, Number(args.proposalId)));
         case "dao_github_open_pr":
           return textResult(await handleDaoGithubOpenPr(ctx, Number(args.proposalId), String(args.headBranch)));
+        case "dao_graph_status": {
+          const runId = String(args.runId ?? "").trim();
+          if (!runId) throw new Error("runId is required");
+          const runner = await createGraphRunner({
+            evidenceRoot: path.resolve(
+              ctx.workDir,
+              typeof args.evidenceRoot === "string" ? args.evidenceRoot : ".dao/graph-runs",
+            ),
+            runId,
+          });
+          return textResult(JSON.stringify(runner.snapshot(), null, 2));
+        }
+        case "dao_graph_submit": {
+          const parsed = parseRunSubmitArgs(args);
+          const runner = await createGraphRunner({
+            evidenceRoot: path.resolve(ctx.workDir, parsed.evidenceRoot ?? ".dao/graph-runs"),
+            runId: parsed.runId,
+          });
+          // The host — never the agent — owns the source: AI artifacts only.
+          const result = await runner.submit({
+            runId: parsed.runId,
+            type: String(args.type),
+            source: "ai",
+            producer: parsed.producer,
+            occurredAt: new Date().toISOString(),
+            payload: parsed.payload,
+            evidence: parsed.evidence,
+          });
+          const text = JSON.stringify(result, null, 2);
+          return result.accepted ? textResult(text) : errorResult(text);
+        }
+        case "dao_product_status": {
+          const runId = String(args.runId ?? "").trim();
+          if (!runId) throw new Error("runId is required");
+          const runner = await createProductRunner({
+            evidenceRoot: path.resolve(
+              ctx.workDir,
+              typeof args.evidenceRoot === "string" ? args.evidenceRoot : ".dao/product-loops",
+            ),
+            runId,
+          });
+          return textResult(JSON.stringify(runner.snapshot(), null, 2));
+        }
+        case "dao_product_submit": {
+          const parsed = parseRunSubmitArgs(args);
+          const runner = await createProductRunner({
+            evidenceRoot: path.resolve(ctx.workDir, parsed.evidenceRoot ?? ".dao/product-loops"),
+            runId: parsed.runId,
+          });
+          const result = await runner.submit({
+            runId: parsed.runId,
+            type: String(args.type),
+            source: "ai",
+            producer: parsed.producer,
+            occurredAt: new Date().toISOString(),
+            payload: parsed.payload,
+            evidence: parsed.evidence,
+          });
+          const text = JSON.stringify(result, null, 2);
+          return result.accepted ? textResult(text) : errorResult(text);
+        }
         default:
           return errorResult(`Unknown tool: ${name}`);
       }

@@ -190,6 +190,42 @@ export const DAO_COMMANDS: readonly DaoCommand[] = [
     hosts: ["cli"],
   },
   {
+    id: "graph-status",
+    phase: "discover",
+    summary: "Read a Graph Engineering run snapshot (read-only)",
+    tool: "dao_graph_status",
+    args: "runId [evidenceRoot]",
+    hosts: ["mcp"],
+  },
+  {
+    id: "graph-submit",
+    phase: "control",
+    summary:
+      "Submit an AI-source signal to a Graph Engineering run (model/implementation artifacts only; human events go through the CLI)",
+    tool: "dao_graph_submit",
+    mutating: true,
+    args: "runId type producer payload evidence",
+    hosts: ["mcp"],
+  },
+  {
+    id: "product-status",
+    phase: "discover",
+    summary: "Read a product-loop run snapshot (read-only)",
+    tool: "dao_product_status",
+    args: "runId [evidenceRoot]",
+    hosts: ["mcp"],
+  },
+  {
+    id: "product-submit",
+    phase: "control",
+    summary:
+      "Submit an AI-source signal to a product-loop run (explorer/aggregator/proposer artifacts only; human events go through the CLI)",
+    tool: "dao_product_submit",
+    mutating: true,
+    args: "runId type producer payload evidence",
+    hosts: ["mcp"],
+  },
+  {
     id: "dry-run",
     phase: "discover",
     summary: "Preview execution without applying changes",
