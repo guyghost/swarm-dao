@@ -1,5 +1,14 @@
 # @guyghost/swarm-dao-improvement
 
+## 0.3.1
+
+### Patch Changes
+
+- Updated dependencies [a947880]
+- Updated dependencies [1e33d15]
+  - @guyghost/swarm-dao-core@0.11.0
+  - @guyghost/swarm-dao-herdr-adapter@0.2.5
+
 ## 0.3.0
 
 ### Minor Changes

@@ -1,5 +1,12 @@
 # @guyghost/swarm-dao-core
 
+## 0.11.0
+
+### Minor Changes
+
+- a947880: `swarm-dao attention` (and every host reusing `FsAttentionStore`) now also sweeps the CLI-default project roots (`.dao/graph-runs`, `.dao/improvement-cycles`, `.dao/product-loops`) alongside the documented `evidence/` roots, so foreign projects that keep all state under `.dao/` finally surface their pending human gates. A runId present in both roots resolves to the documented root's snapshot. Suggested graph/product resolution commands now use the `swarm-dao` CLI form, which works in any project.
+- 1e33d15: `swarm-dao attention` gains an `improvement-series` source: series parked in `workerFailed` (RETRY_WORKERS pending) or `halted` (RESTART_SERIES / CANCEL_SERIES pending) now surface with the pending reason and a runnable `swarm-dao improve submit --series-id …` suggestion. Series evidence is swept from `evidence/improvement-series` and `.dao/improvement-series`. `awaitingHumanCycleDecision` is deliberately not a series gate — the human decision lives on the cycle and is already surfaced by the `improvement-loop` source.
+
 ## 0.10.3
 
 ### Patch Changes

@@ -1,5 +1,17 @@
 # @guyghost/swarm-dao-cli
 
+## 0.4.1
+
+### Patch Changes
+
+- 1e33d15: `swarm-dao attention` gains an `improvement-series` source: series parked in `workerFailed` (RETRY_WORKERS pending) or `halted` (RESTART_SERIES / CANCEL_SERIES pending) now surface with the pending reason and a runnable `swarm-dao improve submit --series-id …` suggestion. Series evidence is swept from `evidence/improvement-series` and `.dao/improvement-series`. `awaitingHumanCycleDecision` is deliberately not a series gate — the human decision lives on the cycle and is already surfaced by the `improvement-loop` source.
+- Updated dependencies [a947880]
+- Updated dependencies [1e33d15]
+  - @guyghost/swarm-dao-core@0.11.0
+  - @guyghost/swarm-dao-graph@0.2.1
+  - @guyghost/swarm-dao-improvement@0.3.1
+  - @guyghost/swarm-dao-product@0.2.1
+
 ## 0.4.0
 
 ### Minor Changes
