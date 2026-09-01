@@ -1,7 +1,7 @@
 {
   "name": "swarm-dao",
   "version": "0.1.4",
-  "description": "Unified Swarm DAO — Multi-host AI agent governance (Pi, OpenCode, and beyond)",
+  "description": "Unified Swarm DAO \u2014 Multi-host AI agent governance (Pi, OpenCode, and beyond)",
   "private": true,
   "workspaces": [
     "packages/*"
@@ -84,6 +84,10 @@
   },
   "homepage": "https://github.com/guyghost/swarm-dao#readme",
   "dependencies": {
+    "@guyghost/swarm-dao-core": "workspace:*",
+    "@guyghost/swarm-dao-graph": "workspace:*",
+    "@guyghost/swarm-dao-improvement": "workspace:*",
+    "@guyghost/swarm-dao-product": "workspace:*",
     "typebox": "^1.3.1"
   }
 }
