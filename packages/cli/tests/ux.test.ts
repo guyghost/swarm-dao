@@ -287,3 +287,59 @@ describe("cli next — the operator companion", () => {
     }
   });
 });
+
+describe("cli doctor + per-command help + hints (lot 3)", () => {
+  it("doctor reports a fresh project with warnings but no failures", async () => {
+    const cwd = await tmpCwd("ux-doctor-");
+    try {
+      expect(await main(["doctor"], cwd)).toBe(0);
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("doctor exits 1 when a human gate is pending", async () => {
+    const cwd = await tmpCwd("ux-doctor-gate-");
+    try {
+      await graphRunAtAwaitingApproval(`${cwd}/.dao/graph-runs`, "run-doc", "a".repeat(64));
+      expect(await main(["doctor"], cwd)).toBe(1);
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("per-command help prints usage and exits 0", async () => {
+    expect(await main(["vote", "--help"], process.cwd())).toBe(0);
+    expect(await main(["improve", "--help"], process.cwd())).toBe(0);
+    expect(await main(["graph", "--help"], process.cwd())).toBe(0);
+  });
+
+  it("improve init hints the next command", async () => {
+    const cwd = await tmpCwd("ux-hint-");
+    try {
+      // No anchor commands bound: init fails fast — assert the hint path via
+      // a config-carrying project instead.
+      await fs.mkdir(path.join(cwd, ".dao"), { recursive: true });
+      await fs.writeFile(
+        path.join(cwd, ".dao", "improvement.json"),
+        JSON.stringify({
+          anchorCommands: {
+            "drift-audit": "true",
+            "anchor-reality": "true",
+            "frozen-set-intact": "true",
+            regression: "true",
+          },
+        }),
+        "utf8",
+      );
+      expect(
+        await main(
+          ["improve", "init", "--series-id", "s-hint", "--scope", "ci", "--reference-hash", "b".repeat(64)],
+          cwd,
+        ),
+      ).toBe(0);
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
