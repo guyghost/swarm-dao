@@ -1,5 +1,13 @@
 # @guyghost/swarm-dao-codex-adapter
 
+## 0.2.12
+
+### Patch Changes
+
+- Updated dependencies [184216d]
+  - @guyghost/swarm-dao-mcp@0.7.0
+  - @guyghost/swarm-dao-core@0.11.3
+
 ## 0.2.11
 
 ### Patch Changes

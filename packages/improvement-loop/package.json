@@ -1,6 +1,6 @@
 {
   "name": "@guyghost/swarm-dao-improvement",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "Swarm DAO improvement loop executor — continuous improvement series over journal-replayed cycles, with herdr workers and bounded sandbox execution (Docker / Apple container)",
   "type": "module",
   "main": "./dist/index.js",
@@ -24,7 +24,7 @@
     "prepublishOnly": "bun run build"
   },
   "dependencies": {
-    "@guyghost/swarm-dao-core": "^0.11.0",
+    "@guyghost/swarm-dao-core": "^0.11.3",
     "@guyghost/swarm-dao-herdr-adapter": "^0.2.5"
   },
   "devDependencies": {
