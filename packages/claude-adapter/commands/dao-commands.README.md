@@ -17,9 +17,12 @@
 
 ## Control
 - [`/dao:control`](dao:control.md) `proposalId` — Run the quality-control gates
+- [`/dao:graph-submit`](dao:graph-submit.md) `runId type producer payload evidence` — Submit an AI-source signal to a Graph Engineering run (model/implementation artifacts only; human events go through the CLI)
+- [`/dao:product-submit`](dao:product-submit.md) `runId type producer payload evidence` — Submit an AI-source signal to a product-loop run (explorer/aggregator/proposer artifacts only; human events go through the CLI)
 
 ## Execute
 - [`/dao:execute`](dao:execute.md) `proposalId` — Execute an approved / controlled proposal
+- [`/dao:improve-once`](dao:improve-once.md) `seriesId [evidenceRoot]` — Advance an improvement series by one state-authorized effect (deterministic executor; persisted worker configuration, per-series worktree)
 
 ## Ship
 - [`/dao:ship`](dao:ship.md) `proposalId [cascade] [force]` — Ship a controlled proposal (optionally cascade dependencies)
@@ -36,6 +39,10 @@
 - [`/dao:plan`](dao:plan.md) `proposalId` — Show the delivery plan for a proposal
 - [`/dao:artefacts`](dao:artefacts.md) `proposalId` — View the auto-generated artefacts for a proposal
 - [`/dao:audit`](dao:audit.md) `[proposalId]` — View the audit trail
+- [`/dao:attention`](dao:attention.md) `[--source <graph-engineering|improvement-loop|improvement-series|product-loop>,...]` — List pending human gates across workflow runs (read-only)
+- [`/dao:graph-status`](dao:graph-status.md) `runId [evidenceRoot]` — Read a Graph Engineering run snapshot (read-only)
+- [`/dao:improve-status`](dao:improve-status.md) `seriesId [evidenceRoot]` — Read an improvement series snapshot (read-only)
+- [`/dao:product-status`](dao:product-status.md) `runId [evidenceRoot]` — Read a product-loop run snapshot (read-only)
 - [`/dao:dry-run`](dao:dry-run.md) `proposalId` — Preview execution without applying changes
 - [`/dao:roundtable`](dao:roundtable.md) — Ask every agent to suggest a proposal idea
 

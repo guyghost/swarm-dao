@@ -10,6 +10,8 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { REQUIRED_IMPROVEMENT_ANCHORS } from "@guyghost/swarm-dao-core/models/improvement";
+import type { SandboxMode, SandboxRequest } from "./sandbox.js";
+import { SAFE_HERDR_KIND } from "./workers.js";
 
 export const PROJECT_CONFIG_PATH = ".dao/improvement.json";
 
@@ -93,4 +95,46 @@ export async function loadProjectImprovementConfig(workDir: string): Promise<Pro
   if (!isRecord(parsed)) throw new Error(`${PROJECT_CONFIG_PATH} must contain a JSON object`);
   const anchorCommands = validateProjectAnchorCommands(parsed.anchorCommands);
   return { path, raw: { ...parsed, anchorCommands } };
+}
+
+const configSection = (config: ProjectImprovementConfig | null, key: string): Record<string, unknown> => {
+  const value = config?.raw[key];
+  return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
+};
+
+const configString = (value: unknown): string | undefined =>
+  typeof value === "string" && value.trim().length > 0 ? value : undefined;
+
+/** herdr worker options from the `worker` section of .dao/improvement.json
+ * (host-triggered advances never accept per-call overrides). */
+export function workerOptionsFromConfig(config: ProjectImprovementConfig | null): {
+  kind?: string;
+  agentArgs?: readonly string[];
+} {
+  const section = configSection(config, "worker");
+  const kind = configString(section.kind);
+  if (kind !== undefined && !SAFE_HERDR_KIND.test(kind)) {
+    throw new Error(`worker.kind must be a valid herdr agent kind (e.g. pi, codex, claude), got '${kind}'`);
+  }
+  const agentArgs =
+    Array.isArray(section.agentArgs) && section.agentArgs.every((a) => typeof a === "string")
+      ? (section.agentArgs as string[])
+      : undefined;
+  return { ...(kind !== undefined ? { kind } : {}), ...(agentArgs !== undefined ? { agentArgs } : {}) };
+}
+
+/** Sandbox request from the `sandbox` section of .dao/improvement.json. */
+export function sandboxRequestFromConfig(config: ProjectImprovementConfig | null): SandboxRequest {
+  const section = configSection(config, "sandbox");
+  const mode = configString(section.mode) as SandboxMode | undefined;
+  if (mode !== undefined && !["none", "docker", "container", "auto"].includes(mode)) {
+    throw new Error(`sandbox.mode must be one of none|docker|container|auto, got '${mode}'`);
+  }
+  return {
+    ...(mode !== undefined ? { sandbox: mode } : {}),
+    ...(configString(section.image) !== undefined ? { image: configString(section.image) } : {}),
+    ...(typeof section.cpus === "number" ? { cpus: section.cpus } : {}),
+    ...(typeof section.memoryMb === "number" ? { memoryMb: section.memoryMb } : {}),
+    ...(typeof section.timeoutMs === "number" ? { timeoutMs: section.timeoutMs } : {}),
+  };
 }

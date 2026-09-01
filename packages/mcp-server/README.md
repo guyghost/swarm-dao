@@ -47,7 +47,7 @@ see the sibling adapters:
 
 ## Tools
 
-29 tools covering the full governance lifecycle:
+30 tools covering the full governance lifecycle:
 
 | Group | Tools |
 | --- | --- |
@@ -58,7 +58,7 @@ see the sibling adapters:
 | Tracking | `dao_dashboard`, `dao_audit`, `dao_rate`, `dao_attention` |
 | Agents | `dao_agents` |
 | GitHub | `dao_config_github`, `dao_github_create_branch`, `dao_github_open_pr` |
-| Workflow runs | `dao_graph_status`, `dao_graph_submit`, `dao_product_status`, `dao_product_submit`, `dao_improve_status` |
+| Workflow runs | `dao_graph_status`, `dao_graph_submit`, `dao_product_status`, `dao_product_submit`, `dao_improve_status`, `dao_improve_once` |
 
 Workflow-run tools expose Graph Engineering and product-loop runs to AI
 agents with a hard authority boundary: the host sets `source: "ai"` on every

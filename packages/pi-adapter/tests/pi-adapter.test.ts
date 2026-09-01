@@ -125,6 +125,7 @@ const EXPECTED_TOOLS = [
   "dao_product_status",
   "dao_product_submit",
   "dao_improve_status",
+  "dao_improve_once",
 ];
 
 const DAO_ROOT = path.join(process.cwd(), ".dao");
@@ -312,6 +313,21 @@ describe("swarmDaoExtension", () => {
       const snapshot = JSON.parse(text) as { seriesId: string; state: string };
       expect(snapshot.seriesId).toBe("probe");
       expect(snapshot.state).toBe("idle");
+    });
+
+    it("dao_improve_once is a no-op for a fresh idle series", async () => {
+      const mod = await import("@guyghost/swarm-dao-pi-adapter");
+      const pi = createMockPi();
+      mod.default(pi);
+
+      const tool = pi.tools.find((t) => t.name === "dao_improve_once");
+      const result = await tool?.execute("test-id", { seriesId: "pi-idle-1" });
+      const text = (result?.content as Array<{ type: string; text: string }> | undefined)?.[0]?.text ?? "";
+      const parsed = JSON.parse(text) as { executed: boolean; event: null; stateAfter: string; detail: string };
+      expect(parsed.executed).toBe(false);
+      expect(parsed.event).toBeNull();
+      expect(parsed.stateAfter).toBe("idle");
+      expect(parsed.detail).toContain("terminal");
     });
 
     it("each tool has name, description, and execute function", async () => {

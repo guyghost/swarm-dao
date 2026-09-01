@@ -188,7 +188,7 @@ export const DAO_COMMANDS: readonly DaoCommand[] = [
     summary: "List pending human gates across workflow runs (read-only)",
     tool: "dao_attention",
     args: "[--source <graph-engineering|improvement-loop|improvement-series|product-loop>,...]",
-    hosts: ["cli", "mcp", "pi"],
+    hosts: ["cli", "mcp", "pi", "claude", "copilot", "codex", "opencode"],
   },
   {
     id: "graph-status",
@@ -196,7 +196,7 @@ export const DAO_COMMANDS: readonly DaoCommand[] = [
     summary: "Read a Graph Engineering run snapshot (read-only)",
     tool: "dao_graph_status",
     args: "runId [evidenceRoot]",
-    hosts: ["mcp", "pi"],
+    hosts: ["mcp", "pi", "claude", "copilot", "codex", "opencode"],
   },
   {
     id: "improve-status",
@@ -204,7 +204,17 @@ export const DAO_COMMANDS: readonly DaoCommand[] = [
     summary: "Read an improvement series snapshot (read-only)",
     tool: "dao_improve_status",
     args: "seriesId [evidenceRoot]",
-    hosts: ["mcp", "pi"],
+    hosts: ["mcp", "pi", "claude", "copilot", "codex", "opencode"],
+  },
+  {
+    id: "improve-once",
+    phase: "execute",
+    summary:
+      "Advance an improvement series by one state-authorized effect (deterministic executor; persisted worker configuration, per-series worktree)",
+    tool: "dao_improve_once",
+    mutating: true,
+    args: "seriesId [evidenceRoot]",
+    hosts: ["mcp", "pi", "claude", "copilot", "codex", "opencode"],
   },
   {
     id: "graph-submit",
@@ -214,7 +224,7 @@ export const DAO_COMMANDS: readonly DaoCommand[] = [
     tool: "dao_graph_submit",
     mutating: true,
     args: "runId type producer payload evidence",
-    hosts: ["mcp", "pi"],
+    hosts: ["mcp", "pi", "claude", "copilot", "codex", "opencode"],
   },
   {
     id: "product-status",
@@ -222,7 +232,7 @@ export const DAO_COMMANDS: readonly DaoCommand[] = [
     summary: "Read a product-loop run snapshot (read-only)",
     tool: "dao_product_status",
     args: "runId [evidenceRoot]",
-    hosts: ["mcp", "pi"],
+    hosts: ["mcp", "pi", "claude", "copilot", "codex", "opencode"],
   },
   {
     id: "product-submit",
@@ -232,7 +242,7 @@ export const DAO_COMMANDS: readonly DaoCommand[] = [
     tool: "dao_product_submit",
     mutating: true,
     args: "runId type producer payload evidence",
-    hosts: ["mcp", "pi"],
+    hosts: ["mcp", "pi", "claude", "copilot", "codex", "opencode"],
   },
   {
     id: "dry-run",

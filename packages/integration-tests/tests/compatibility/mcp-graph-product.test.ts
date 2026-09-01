@@ -68,6 +68,49 @@ describe("Compatibility: MCP graph & product run surface", () => {
     await fs.access(path.join(workDir, ".dao/improvement-series/probe/snapshot.json"));
   });
 
+  it("advances a started series by one authorized effect via dao_improve_once", async () => {
+    // Host-triggered advances carve a per-series worktree: the fixture must be
+    // a git repository, and the series must already be started (START_SERIES
+    // is a human decision — never available to AI hosts).
+    await Bun.$`git init -q`.cwd(workDir);
+    await Bun.$`git config user.email test@example.com`.cwd(workDir);
+    await Bun.$`git config user.name test`.cwd(workDir);
+    await Bun.$`git commit -q --allow-empty -m init`.cwd(workDir);
+    const { OrchestratorRunner } = await import("@guyghost/swarm-dao-improvement");
+    const runner = await OrchestratorRunner.create({
+      seriesId: "once-1",
+      evidenceRoot: path.join(workDir, ".dao/improvement-series"),
+    });
+    const started = await runner.submit({
+      type: "START_SERIES",
+      source: "human",
+      scope: "mcp-test",
+      referenceHash: "deadbeef",
+      cooldownMs: 60_000,
+    });
+    expect(started.accepted).toBe(true);
+
+    const text = textOf(await client.callTool({ name: "dao_improve_once", arguments: { seriesId: "once-1" } }));
+    const result = JSON.parse(text) as { executed: boolean; event: string | null; stateAfter: string };
+    expect(result.executed).toBe(true);
+    expect(result.event).toBe("CYCLE_INITIALIZED");
+    expect(result.stateAfter).toBe("sampling");
+  });
+
+  it("is a read-shape no-op for a fresh idle series", async () => {
+    await Bun.$`git init -q`.cwd(workDir);
+    await Bun.$`git config user.email test@example.com`.cwd(workDir);
+    await Bun.$`git config user.name test`.cwd(workDir);
+    await Bun.$`git commit -q --allow-empty -m init`.cwd(workDir);
+
+    const text = textOf(await client.callTool({ name: "dao_improve_once", arguments: { seriesId: "idle-1" } }));
+    const result = JSON.parse(text) as { executed: boolean; event: null; stateAfter: string; detail: string };
+    expect(result.executed).toBe(false);
+    expect(result.event).toBeNull();
+    expect(result.stateAfter).toBe("idle");
+    expect(result.detail).toContain("terminal");
+  });
+
   it("reads a fresh graph run snapshot and submits an AI model draft", async () => {
     const status = JSON.parse(
       textOf(await client.callTool({ name: "dao_graph_status", arguments: { runId: "mcp-g1" } })),

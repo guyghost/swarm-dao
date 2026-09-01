@@ -93,6 +93,11 @@ export async function ensureSeriesWorktree(options: {
   }
 
   const runner = options.runner ?? defaultRunner();
+  // Stale registrations (the worktree directory was removed without `git
+  // worktree remove`, e.g. an operator wiping `.dao/`) must not brick the
+  // series: prune them before creating, so `add` never collides with a
+  // registration whose directory no longer exists.
+  await runner.exec("git worktree prune", { cwd: path.resolve(options.repoDir) });
 
   const branchExists = await runner.exec(`git rev-parse --verify --quiet refs/heads/${branch}`, {
     cwd: options.repoDir,

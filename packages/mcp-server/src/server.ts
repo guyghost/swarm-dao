@@ -41,7 +41,7 @@ import {
   setRepository,
 } from "@guyghost/swarm-dao-core";
 import { createGraphRunner, GRAPH_AI_EVENT_TYPES, submitAiGraphSignal } from "@guyghost/swarm-dao-graph";
-import { OrchestratorRunner } from "@guyghost/swarm-dao-improvement";
+import { advanceSeriesOnce, OrchestratorRunner } from "@guyghost/swarm-dao-improvement";
 import { createProductRunner, PRODUCT_AI_EVENT_TYPES, submitAiProductSignal } from "@guyghost/swarm-dao-product";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
@@ -347,6 +347,16 @@ export function createSwarmDaoMcpServer(workDir = resolveDaoRoot(), repository?:
         },
       },
       {
+        name: "dao_improve_once",
+        description:
+          "Advance an improvement series by exactly one state-authorized effect (deterministic executor). Runs workers/anchors from the persisted .dao/improvement.json configuration inside the per-series worktree — the caller supplies no execution options. No-op when the series waits on a human decision, has failed workers, is halted, or is terminal. Can be long-running (spawns worker agents).",
+        inputSchema: {
+          type: "object",
+          required: ["seriesId"],
+          properties: { seriesId: { type: "string" }, evidenceRoot: { type: "string" } },
+        },
+      },
+      {
         name: "dao_graph_status",
         description:
           "Read a Graph Engineering run snapshot (read-only). Evidence root defaults to .dao/graph-runs under the workspace.",
@@ -564,6 +574,17 @@ export function createSwarmDaoMcpServer(workDir = resolveDaoRoot(), repository?:
             ),
           });
           return textResult(JSON.stringify(runner.snapshot(), null, 2));
+        }
+        case "dao_improve_once": {
+          const seriesId = String(args.seriesId ?? "").trim();
+          if (!seriesId) throw new Error("seriesId is required");
+          const result = await advanceSeriesOnce({
+            seriesId,
+            workDir: ctx.workDir,
+            ...(typeof args.evidenceRoot === "string" ? { evidenceRoot: args.evidenceRoot } : {}),
+          });
+          const text = JSON.stringify(result, null, 2);
+          return result.event && !result.accepted ? errorResult(text) : textResult(text);
         }
         case "dao_graph_status": {
           const runId = String(args.runId ?? "").trim();
