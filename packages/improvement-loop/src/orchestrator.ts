@@ -686,8 +686,24 @@ export class OrchestratorRunner {
 
     const commands = await resolveAnchorCommands(workDir);
     const runCommand = deps.runCommand ?? defaultRunCommand(workDir);
+    // Crash-resume idempotency: an anchor already recorded at the current
+    // attempt is immutable (machine contract) — re-running its command and
+    // re-submitting would be rejected and throw. Skip what is already
+    // grounded; anchors retained from earlier attempts are re-run and
+    // refreshed (dogfood-003 c7).
+    const cycleSnapshot = runner.snapshot();
+    const currentAttempt = cycleSnapshot.context.attempt;
+    const recordedThisAttempt = new Set(
+      Object.entries(cycleSnapshot.context.anchors)
+        .filter(([, result]) => result.attempt === currentAttempt)
+        .map(([anchor]) => anchor),
+    );
     const outcomes: string[] = [];
     for (const [anchor, command] of commands) {
+      if (recordedThisAttempt.has(anchor)) {
+        outcomes.push(`${anchor}: already recorded at attempt ${currentAttempt}`);
+        continue;
+      }
       const outcome = await runCommand(command);
       const result = await runner.submit({
         cycleId,

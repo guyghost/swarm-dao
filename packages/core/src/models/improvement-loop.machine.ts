@@ -211,7 +211,14 @@ const improvementSetup = setup({
       };
     }),
     recordAnchorOnce: assign(({ context, event }) => {
-      if (event.type !== "ANCHOR_RECORDED" || context.anchors[event.anchor] !== undefined) return context;
+      if (event.type !== "ANCHOR_RECORDED") return context;
+      // Immutable within the current attempt (idempotent re-recording is
+      // rejected); refreshable across an authorized retry — a surviving
+      // anchor retained from an earlier attempt must never dead-end a retry
+      // (dogfood-003 c7: an infra-failed frozen-set-intact survived every
+      // retry and could not be re-recorded).
+      const existing = context.anchors[event.anchor];
+      if (existing !== undefined && existing.attempt === context.attempt) return context;
       return {
         ...context,
         anchors: {
