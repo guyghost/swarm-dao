@@ -1,6 +1,6 @@
 {
   "name": "@guyghost/swarm-dao-cli",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Swarm DAO standalone CLI",
   "type": "module",
   "main": "./dist/cli.js",
