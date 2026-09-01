@@ -70,6 +70,36 @@ describe("attention: human-gate classification", () => {
     }
   });
 
+  test("improvement-series workerFailed carries the pending reason and the series submit command", () => {
+    const item = classifyAttention(
+      "improvement-series",
+      snapshot("workerFailed", { pendingReason: "sensor failed after 3 attempts" }, "ser-4"),
+    );
+    expect(item).not.toBeNull();
+    expect(item?.detail).toBe("sensor failed after 3 attempts");
+    expect(item?.command).toBe("swarm-dao improve submit --series-id ser-4 --event <event.json>");
+  });
+
+  test("improvement-series halted is a human gate; progressing states are not", () => {
+    expect(
+      classifyAttention("improvement-series", snapshot("halted", { pendingReason: "cycle failed" })),
+    ).not.toBeNull();
+    // awaitingHumanCycleDecision is deliberately NOT a series gate: the human
+    // decision lives on the cycle (adjusting/retrying), already surfaced by
+    // the improvement-loop source.
+    for (const state of [
+      "preparing",
+      "sampling",
+      "cooldown",
+      "observing",
+      "awaitingHumanCycleDecision",
+      "succeeded",
+      "cancelled",
+    ]) {
+      expect(classifyAttention("improvement-series", snapshot(state))).toBeNull();
+    }
+  });
+
   test("product-loop review is a human gate carrying the review reason", () => {
     const item = classifyAttention("product-loop", snapshot("review", { reviewReason: "budget-exhausted" }));
     expect(item).not.toBeNull();

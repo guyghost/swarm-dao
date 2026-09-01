@@ -10,7 +10,7 @@
 // Authority boundary (unchanged): the machines decide states; this view
 // merely classifies which persisted states await a human-source event.
 
-export type AttentionSource = "graph-engineering" | "improvement-loop" | "product-loop";
+export type AttentionSource = "graph-engineering" | "improvement-loop" | "improvement-series" | "product-loop";
 
 /** Minimal persisted-snapshot shape shared by the three runners. */
 export interface AttentionSnapshot {
@@ -44,6 +44,7 @@ export interface AttentionStorePort {
 export const ATTENTION_EVIDENCE_DIRS: Readonly<Record<AttentionSource, string>> = {
   "graph-engineering": "evidence/graph-runs",
   "improvement-loop": "evidence/improvement-cycles",
+  "improvement-series": "evidence/improvement-series",
   "product-loop": "evidence/product-loops",
 };
 
@@ -56,10 +57,16 @@ export const ATTENTION_EVIDENCE_DIRS: Readonly<Record<AttentionSource, string>> 
 export const ATTENTION_CLI_DIRS: Readonly<Record<AttentionSource, string>> = {
   "graph-engineering": ".dao/graph-runs",
   "improvement-loop": ".dao/improvement-cycles",
+  "improvement-series": ".dao/improvement-series",
   "product-loop": ".dao/product-loops",
 };
 
-export const ATTENTION_SOURCES: readonly AttentionSource[] = ["graph-engineering", "improvement-loop", "product-loop"];
+export const ATTENTION_SOURCES: readonly AttentionSource[] = [
+  "graph-engineering",
+  "improvement-loop",
+  "improvement-series",
+  "product-loop",
+];
 
 interface GateDefinition {
   action: string;
@@ -99,6 +106,18 @@ const HUMAN_GATES: Readonly<Record<AttentionSource, Readonly<Record<string, Gate
     retrying: {
       action: "Authorize a retry (RETRY_AUTHORIZED) or cancel the cycle",
       command: "bun run improvement:submit -- --cycle-id <id> --signal <signal.json>",
+    },
+  },
+  "improvement-series": {
+    workerFailed: {
+      action: "Authorize a worker retry (RETRY_WORKERS) or cancel the series",
+      command: "swarm-dao improve submit --series-id <id> --event <event.json>",
+      detail: (ctx) => stringField(ctx, "pendingReason"),
+    },
+    halted: {
+      action: "Restart the series (RESTART_SERIES) or cancel it (CANCEL_SERIES with a reason)",
+      command: "swarm-dao improve submit --series-id <id> --event <event.json>",
+      detail: (ctx) => stringField(ctx, "pendingReason"),
     },
   },
   "product-loop": {

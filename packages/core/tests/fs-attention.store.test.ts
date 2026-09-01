@@ -75,8 +75,34 @@ describe("FsAttentionStore", () => {
   test("documents one CLI root per source alongside the evidence root", () => {
     expect(ATTENTION_CLI_DIRS["graph-engineering"]).toBe(".dao/graph-runs");
     expect(ATTENTION_CLI_DIRS["improvement-loop"]).toBe(".dao/improvement-cycles");
+    expect(ATTENTION_CLI_DIRS["improvement-series"]).toBe(".dao/improvement-series");
     expect(ATTENTION_CLI_DIRS["product-loop"]).toBe(".dao/product-loops");
     expect(ATTENTION_EVIDENCE_DIRS["graph-engineering"]).toBe("evidence/graph-runs");
+  });
+
+  test("surfaces series gates from the improvement-series roots", async () => {
+    // Fresh root: only series evidence present (repo + CLI form).
+    const seriesRoot = await mkdtemp();
+    try {
+      await mkdir(join(seriesRoot, ".dao/improvement-series", "s1"), { recursive: true });
+      await writeFile(
+        join(seriesRoot, ".dao/improvement-series", "s1", "snapshot.json"),
+        JSON.stringify({
+          seriesId: "s1",
+          state: "workerFailed",
+          status: "active",
+          context: { seriesId: "s1", pendingReason: "herdr down" },
+        }),
+      );
+      const store = new FsAttentionStore(seriesRoot);
+      expect(await store.listRuns("improvement-series")).toEqual(["s1"]);
+      // Series snapshots carry seriesId, not runId: the directory name wins.
+      const snapshot = await store.readSnapshot("improvement-series", "s1");
+      expect(snapshot?.state).toBe("workerFailed");
+      expect(snapshot?.runId).toBe("s1");
+    } finally {
+      await rm(seriesRoot, { recursive: true, force: true });
+    }
   });
 
   test("a source with no runs in any root lists none", async () => {
