@@ -788,7 +788,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
       // ── dao_improve_once ──────────────────────────────────
       dao_improve_once: tool({
         description:
-          "Advance an improvement series by exactly one state-authorized effect (deterministic executor). Runs workers/anchors from the persisted .dao/improvement.json configuration inside the per-series worktree — the caller supplies no execution options. No-op when the series waits on a human decision, has failed workers, is halted, or is terminal. Can be long-running (spawns worker agents).",
+          "Advance an improvement series by exactly one state-authorized effect (deterministic executor). Runs workers/anchors from the persisted .dao/improvement.json configuration inside the per-series worktree — the caller supplies no execution options. No-op when the series waits on a human decision, has failed workers, is halted, or is terminal. Can be long-running (spawns worker agents): worker phases take minutes — raise the host request timeout accordingly.",
         args: {
           seriesId: schema.string(),
           evidenceRoot: schema.string().optional(),

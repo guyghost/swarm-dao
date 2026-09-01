@@ -120,3 +120,64 @@ describe("herdr worker executor — agent kind defaults", () => {
     expect(commands.find((c) => c.startsWith("herdr agent start"))).toContain("-- '--permission-mode' 'read-only'");
   });
 });
+
+describe("herdr worker executor — orphaned workspace cleanup (dogfood-003 c6 finding)", () => {
+  const ok = (stdout: unknown) => ({ stdout: JSON.stringify(stdout), stderr: "", exitCode: 0 });
+
+  it("closes a lingering same-label workspace before creating a fresh one", async () => {
+    const commands: string[] = [];
+    const runner = {
+      exec: async (command: string) => {
+        commands.push(command);
+        if (command === "herdr workspace list") {
+          return ok({
+            result: {
+              workspaces: [
+                { label: "~", workspace_id: "wHome" },
+                { label: "orchestrator-sensor", workspace_id: "wOrphan" },
+                { label: "orchestrator-sensor-r1", workspace_id: "wOrphanRetry" },
+                { label: "someone-elses", workspace_id: "wOther" },
+              ],
+            },
+          });
+        }
+        if (command.startsWith("herdr workspace create")) {
+          return ok({ result: { root_pane: { pane_id: "p1" }, workspace: { workspace_id: "w1" } } });
+        }
+        return ok({});
+      },
+    };
+
+    const harvest = await runHerdrWorker({ workDir: "/repo", runner }, "orchestrator-sensor", "prompt");
+    expect(harvest.ok).toBe(true);
+
+    const closeIndex = commands.indexOf("herdr workspace close wOrphan");
+    const closeRetryIndex = commands.indexOf("herdr workspace close wOrphanRetry");
+    const createIndex = commands.findIndex((c) => c.startsWith("herdr workspace create"));
+    expect(closeIndex).toBeGreaterThan(-1);
+    expect(closeRetryIndex).toBeGreaterThan(-1);
+    expect(closeIndex).toBeLessThan(createIndex);
+    expect(closeRetryIndex).toBeLessThan(createIndex);
+    // Unrelated workspaces (the operator's own, other labels) stay untouched.
+    expect(commands).not.toContain("herdr workspace close wHome");
+    expect(commands).not.toContain("herdr workspace close wOther");
+  });
+
+  it("tolerates a failing workspace list without breaking the run", async () => {
+    const commands: string[] = [];
+    const runner = {
+      exec: async (command: string) => {
+        commands.push(command);
+        if (command === "herdr workspace list") return { stdout: "", stderr: "boom", exitCode: 1 };
+        if (command.startsWith("herdr workspace create")) {
+          return ok({ result: { root_pane: { pane_id: "p1" }, workspace: { workspace_id: "w1" } } });
+        }
+        return ok({});
+      },
+    };
+
+    const harvest = await runHerdrWorker({ workDir: "/repo", runner }, "orchestrator-sensor", "prompt");
+    expect(harvest.ok).toBe(true);
+    expect(commands.some((c) => c.startsWith("herdr workspace create"))).toBe(true);
+  });
+});
