@@ -89,7 +89,7 @@ const HUMAN_GATES: Readonly<Record<AttentionSource, Readonly<Record<string, Gate
   "graph-engineering": {
     awaitingApproval: {
       action: "Approve or reject the exact model hash (MODEL_APPROVED / MODEL_REJECTED)",
-      command: "swarm-dao graph submit --run-id <id> --signal <signal.json>",
+      command: "swarm-dao approve --run-id <id>",
       detail: (ctx) => stringField(ctx, "modelHash"),
     },
     retrying: {
@@ -100,23 +100,23 @@ const HUMAN_GATES: Readonly<Record<AttentionSource, Readonly<Record<string, Gate
   "improvement-loop": {
     adjusting: {
       action: "Approve or reject the reference change (REFERENCE_CHANGE_APPROVED / REJECTED)",
-      command: "bun run improvement:submit -- --cycle-id <id> --signal <signal.json>",
+      command: "swarm-dao improve reference --cycle-id <id> --decision approve",
       detail: (ctx) => stringField(ctx, "referenceHash"),
     },
     retrying: {
       action: "Authorize a retry (RETRY_AUTHORIZED) or cancel the cycle",
-      command: "bun run improvement:submit -- --cycle-id <id> --signal <signal.json>",
+      command: "swarm-dao improve retry --cycle-id <id>",
     },
   },
   "improvement-series": {
     workerFailed: {
       action: "Authorize a worker retry (RETRY_WORKERS) or cancel the series",
-      command: "swarm-dao improve submit --series-id <id> --event <event.json>",
+      command: "swarm-dao improve retry-workers --series-id <id>",
       detail: (ctx) => stringField(ctx, "pendingReason"),
     },
     halted: {
       action: "Restart the series (RESTART_SERIES) or cancel it (CANCEL_SERIES with a reason)",
-      command: "swarm-dao improve submit --series-id <id> --event <event.json>",
+      command: "swarm-dao improve restart --series-id <id>",
       detail: (ctx) => stringField(ctx, "pendingReason"),
     },
   },
