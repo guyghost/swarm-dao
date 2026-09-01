@@ -54,6 +54,7 @@ import {
   resolveSandboxRunCommand,
   type SandboxMode,
 } from "@guyghost/swarm-dao-improvement";
+import { createProductRunner } from "@guyghost/swarm-dao-product";
 
 // ── Helpers ─────────────────────────────────────────────────
 
@@ -144,6 +145,7 @@ const CLI_IMPLEMENTED = [
   "attention",
   "status",
   "graph",
+  "product",
   "improve",
   "help",
 ] as const;
@@ -166,6 +168,8 @@ const CLI_USAGE_DETAILS: Record<string, string> = {
   attention: "  attention [--source <graph-engineering|improvement-loop|product-loop>,...]",
   graph:
     "  graph <init|status|submit> --run-id <id> [--evidence-root <path>]\n        graph submit --run-id <id> --signal <file.json>",
+  product:
+    "  product <init|status|submit> --run-id <id> [--evidence-root <path>]\n        product submit --run-id <id> --signal <file.json>",
   improve: `  improve init --series-id <id> --scope <s> --reference-hash <hash> [--cooldown-ms <ms>]
         improve status --series-id <id>
         improve once --series-id <id> [--sandbox <docker|container|auto|none>] [--image <img>]
@@ -594,9 +598,10 @@ async function cmdGithubPr(cwd: string, positional: string[], flags: Record<stri
   info(`✓ PR created: #${result.number} — ${result.url}`);
 }
 
-// ── Graph Engineering runs (change-control runs in any project) ──
+// ── Graph Engineering and Product loop runs (in any project) ──
 
 const GRAPH_RUN_ROOT = ".dao/graph-runs";
+const PRODUCT_RUN_ROOT = ".dao/product-loops";
 
 const GRAPH_USAGE = `usage: swarm-dao graph <init|status|submit> [options]
 
@@ -609,9 +614,39 @@ Graph runs live under .dao/graph-runs by default; override with --evidence-root
 validated against the frozen Graph Engineering machine; human-source events
 require explicit owner authorization (see models/graph-engineering.md).`;
 
-async function cmdGraph(cwd: string, positional: string[], flags: Record<string, string | true>): Promise<number> {
+const PRODUCT_USAGE = `usage: swarm-dao product <init|status|submit> [options]
+
+  init   --run-id <id> [--evidence-root <path>]
+  status --run-id <id> [--evidence-root <path>]
+  submit --run-id <id> --signal <file.json> [--evidence-root <path>]
+
+Product runs live under .dao/product-loops by default; override with
+--evidence-root. Signals are validated against the frozen product-loop
+machine (producer-bound authority; see models/product-loop.md).`;
+
+interface RunCommandRunner {
+  snapshot(): unknown;
+  submit(input: unknown): Promise<{ accepted: boolean }>;
+}
+
+interface RunCommandSpec {
+  defaultRoot: string;
+  usage: string;
+  create: (options: { evidenceRoot: string; runId: string }) => Promise<RunCommandRunner>;
+  /** Extra effect on init (graph runs mark the active run). */
+  onInit?: (evidenceRoot: string, runId: string) => Promise<void>;
+}
+
+/** Shared init/status/submit body for graph and product runs: identical flag
+ * handling, exit codes, and machine-only authority. */
+async function cmdRunCommand(
+  cwd: string,
+  positional: string[],
+  flags: Record<string, string | true>,
+  spec: RunCommandSpec,
+): Promise<number> {
   const sub = positional[0];
-  if (sub !== "init" && sub !== "status" && sub !== "submit") err(GRAPH_USAGE);
+  if (sub !== "init" && sub !== "status" && sub !== "submit") err(spec.usage);
 
   const stringFlag = (name: string): string | undefined => {
     const value = flags[name];
@@ -620,13 +655,13 @@ async function cmdGraph(cwd: string, positional: string[], flags: Record<string,
     return value;
   };
   const runId = stringFlag("run-id");
-  if (!runId) err(`--run-id is required\n${GRAPH_USAGE}`);
-  const evidenceRoot = path.resolve(cwd, stringFlag("evidence-root") ?? GRAPH_RUN_ROOT);
+  if (!runId) err(`--run-id is required\n${spec.usage}`);
+  const evidenceRoot = path.resolve(cwd, stringFlag("evidence-root") ?? spec.defaultRoot);
 
-  const runner = await createGraphRunner({ evidenceRoot, runId });
+  const runner = await spec.create({ evidenceRoot, runId });
 
   if (sub === "init") {
-    await fs.writeFile(path.join(evidenceRoot, "active-run.json"), `${JSON.stringify({ runId }, null, 2)}\n`, "utf8");
+    if (spec.onInit) await spec.onInit(evidenceRoot, runId);
     info(JSON.stringify(runner.snapshot(), null, 2));
     return 0;
   }
@@ -636,11 +671,34 @@ async function cmdGraph(cwd: string, positional: string[], flags: Record<string,
   }
 
   const signalFile = stringFlag("signal");
-  if (!signalFile) err(`--signal is required\n${GRAPH_USAGE}`);
+  if (!signalFile) err(`--signal is required\n${spec.usage}`);
   const signal: unknown = JSON.parse(await fs.readFile(path.resolve(cwd, signalFile), "utf8"));
   const result = await runner.submit(signal);
   info(JSON.stringify(result, null, 2));
   return result.accepted ? 0 : 2;
+}
+
+const GRAPH_SPEC: RunCommandSpec = {
+  defaultRoot: GRAPH_RUN_ROOT,
+  usage: GRAPH_USAGE,
+  create: createGraphRunner,
+  onInit: async (evidenceRoot, runId) => {
+    await fs.writeFile(path.join(evidenceRoot, "active-run.json"), `${JSON.stringify({ runId }, null, 2)}\n`, "utf8");
+  },
+};
+
+const PRODUCT_SPEC: RunCommandSpec = {
+  defaultRoot: PRODUCT_RUN_ROOT,
+  usage: PRODUCT_USAGE,
+  create: createProductRunner,
+};
+
+function cmdGraph(cwd: string, positional: string[], flags: Record<string, string | true>): Promise<number> {
+  return cmdRunCommand(cwd, positional, flags, GRAPH_SPEC);
+}
+
+function cmdProduct(cwd: string, positional: string[], flags: Record<string, string | true>): Promise<number> {
+  return cmdRunCommand(cwd, positional, flags, PRODUCT_SPEC);
 }
 
 // ── Improve (continuous improvement series in any project) ──
@@ -879,6 +937,8 @@ export async function main(argv: string[], cwd: string = process.cwd()): Promise
         return await cmdImprove(cwd, positional, flags);
       case "graph":
         return await cmdGraph(cwd, positional, flags);
+      case "product":
+        return await cmdProduct(cwd, positional, flags);
       case "vote":
         await cmdVote(cwd, positional, flags);
         return 0;

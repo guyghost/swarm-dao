@@ -95,3 +95,32 @@ describe("cli.ts — graph runs", () => {
     }
   });
 });
+
+describe("cli.ts — product runs", () => {
+  const tmpCwd = async (): Promise<string> => {
+    const dir = await fs.mkdtemp(path.join(tmpdir(), "swarm-product-cli-"));
+    return dir;
+  };
+
+  it("init creates the run under .dao/product-loops and status answers for it", async () => {
+    const cwd = await tmpCwd();
+    try {
+      expect(await main(["product", "init", "--run-id", "cli-test"], cwd)).toBe(0);
+      expect(await main(["product", "status", "--run-id", "cli-test"], cwd)).toBe(0);
+      expect(fs.stat(path.join(cwd, ".dao/product-loops/cli-test/snapshot.json"))).resolves.toBeDefined();
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("fails fast on a missing subcommand, --run-id, or value-less flags", async () => {
+    const cwd = await tmpCwd();
+    try {
+      expect(await main(["product"], cwd)).toBe(1);
+      expect(await main(["product", "status"], cwd)).toBe(1);
+      expect(await main(["product", "init", "--run-id", "x", "--evidence-root"], cwd)).toBe(1);
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
