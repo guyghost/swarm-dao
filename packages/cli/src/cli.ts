@@ -57,6 +57,7 @@ import {
   type SandboxMode,
 } from "@guyghost/swarm-dao-improvement";
 import { createProductRunner } from "@guyghost/swarm-dao-product";
+import { cmdDoctor } from "./doctor.js";
 import {
   cmdApprove,
   cmdImproveCancel,
@@ -71,6 +72,7 @@ import { cmdNext } from "./next.js";
 import {
   type CycleHistoryRow,
   type CycleStatusView,
+  c,
   GLYPH,
   type GraphStatusView,
   renderCyclesTable,
@@ -175,6 +177,7 @@ const CLI_IMPLEMENTED = [
   "audit",
   "attention",
   "next",
+  "doctor",
   "approve",
   "reject",
   "status",
@@ -201,6 +204,7 @@ const CLI_USAGE_DETAILS: Record<string, string> = {
   audit: "  audit [--proposal <id>]",
   attention: "  attention [--source <graph-engineering|improvement-loop|improvement-series|product-loop>,...]",
   next: "  next              what needs you now (human gates + live workflows)",
+  doctor: "  doctor            environment & configuration diagnostic (runtime, agents, gates)",
   approve:
     "  approve --run-id <id> [--evidence-root <path>] [--yes]\n        approve the exact model hash of a graph run awaiting approval",
   reject: "  reject --run-id <id> --reason <text> [--yes]\n        send an awaiting model back to draft",
@@ -323,6 +327,11 @@ async function cmdPropose(cwd: string, flags: Record<string, string | true>): Pr
   const p = result.proposal;
   info(`✓ Proposal #${p.id} created (${p.status})`);
   info(`  ${p.title} | ${p.type}`);
+  info(
+    c.dim(
+      `  → next: swarm-dao show ${p.id} · agents vote with: swarm-dao vote ${p.id} --position <for|against|abstain> --reasoning <text>`,
+    ),
+  );
   if (p.dependsOn && p.dependsOn.length > 0) {
     info(`  depends-on: #${p.dependsOn.join(", #")}`);
   }
@@ -480,6 +489,7 @@ async function cmdVote(cwd: string, positional: string[], flags: Record<string, 
   await recordAudit(id, "governance", "vote-cast", agent, `${position} (w=${weight}): ${reasoning}`);
   await saveState();
   info(`✓ Vote recorded for #${id}: ${positionRaw} by ${agent}`);
+  info(c.dim(`  → next: swarm-dao show ${id} · ship when votes settle: swarm-dao ship ${id}`));
 }
 
 async function cmdShip(cwd: string, positional: string[], flags: Record<string, string | true>): Promise<void> {
@@ -920,6 +930,8 @@ async function cmdImprove(cwd: string, positional: string[], flags: Record<strin
     const runner = await OrchestratorRunner.create({ seriesId, evidenceRoot });
     const result = await runner.submit({ type: "START_SERIES", source: "human", scope, referenceHash, cooldownMs });
     info(JSON.stringify(result.snapshot, null, 2));
+    if (result.accepted)
+      info(c.dim(`  → next: swarm-dao improve once --series-id ${seriesId} (drives one authorized step)`));
     return result.accepted ? 0 : 2;
   }
 
@@ -1126,6 +1138,26 @@ export async function main(argv: string[], cwd: string = process.cwd()): Promise
   const [cmd, ...rest] = argv;
   const { flags, positional } = parseFlags(rest);
 
+  // Per-command help: `<cmd> --help` (or -h) prints that command's usage.
+  if (
+    cmd !== undefined &&
+    cmd !== "help" &&
+    (CLI_IMPLEMENTED as readonly string[]).includes(cmd) &&
+    (flags.help === true || flags.h === true)
+  ) {
+    const detail =
+      cmd === "improve"
+        ? IMPROVE_USAGE
+        : cmd === "graph"
+          ? GRAPH_USAGE
+          : cmd === "product"
+            ? PRODUCT_USAGE
+            : CLI_USAGE_DETAILS[cmd];
+    const summary = CLI_REGISTRY_INDEX.get(cmd)?.summary ?? "";
+    process.stdout.write(`${detail ?? `  ${cmd}`}\n${summary ? `        ${summary}\n` : ""}`);
+    return 0;
+  }
+
   try {
     switch (cmd) {
       case undefined:
@@ -1160,6 +1192,8 @@ export async function main(argv: string[], cwd: string = process.cwd()): Promise
         return 0;
       case "next":
         return await cmdNext(cwd);
+      case "doctor":
+        return await cmdDoctor(cwd);
       case "approve":
         return await cmdApprove(cwd, flags);
       case "reject":
