@@ -1,5 +1,13 @@
 # @guyghost/swarm-dao-claude-adapter
 
+## 0.2.8
+
+### Patch Changes
+
+- Updated dependencies [006f8db]
+  - @guyghost/swarm-dao-mcp@0.4.0
+  - @guyghost/swarm-dao-core@0.10.3
+
 ## 0.2.7
 
 ### Patch Changes
