@@ -47,6 +47,18 @@ export const ATTENTION_EVIDENCE_DIRS: Readonly<Record<AttentionSource, string>> 
   "product-loop": "evidence/product-loops",
 };
 
+/**
+ * Project-local (.dao) roots the swarm-dao CLI defaults to in foreign
+ * projects (graph runs, improvement cycles, product loops keep their state
+ * under .dao/). Scanned in addition to the documented evidence roots; a
+ * runId present in both resolves to the documented root's snapshot.
+ */
+export const ATTENTION_CLI_DIRS: Readonly<Record<AttentionSource, string>> = {
+  "graph-engineering": ".dao/graph-runs",
+  "improvement-loop": ".dao/improvement-cycles",
+  "product-loop": ".dao/product-loops",
+};
+
 export const ATTENTION_SOURCES: readonly AttentionSource[] = ["graph-engineering", "improvement-loop", "product-loop"];
 
 interface GateDefinition {
@@ -70,12 +82,12 @@ const HUMAN_GATES: Readonly<Record<AttentionSource, Readonly<Record<string, Gate
   "graph-engineering": {
     awaitingApproval: {
       action: "Approve or reject the exact model hash (MODEL_APPROVED / MODEL_REJECTED)",
-      command: "bun run graph:submit -- --run-id <id> --signal <signal.json>",
+      command: "swarm-dao graph submit --run-id <id> --signal <signal.json>",
       detail: (ctx) => stringField(ctx, "modelHash"),
     },
     retrying: {
       action: "Authorize a retry (RETRY_AUTHORIZED) or cancel the run",
-      command: "bun run graph:submit -- --run-id <id> --signal <signal.json>",
+      command: "swarm-dao graph submit --run-id <id> --signal <signal.json>",
     },
   },
   "improvement-loop": {
@@ -92,7 +104,7 @@ const HUMAN_GATES: Readonly<Record<AttentionSource, Readonly<Record<string, Gate
   "product-loop": {
     review: {
       action: "Resolve the review: reduce scope, expand budget, retry verification, or abandon",
-      command: "bun run product:submit -- --run-id <id> --signal <signal.json>",
+      command: "swarm-dao product submit --run-id <id> --signal <signal.json>",
       detail: (ctx) => stringField(ctx, "reviewReason"),
     },
   },
