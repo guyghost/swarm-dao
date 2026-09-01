@@ -42,7 +42,7 @@ import {
   setRepository,
   systemClock,
 } from "@guyghost/swarm-dao-core";
-
+import { createGraphRunner } from "@guyghost/swarm-dao-graph";
 import {
   assertNoActiveSeriesForScope,
   isHumanChannelEvent,
@@ -143,6 +143,7 @@ const CLI_IMPLEMENTED = [
   "audit",
   "attention",
   "status",
+  "graph",
   "improve",
   "help",
 ] as const;
@@ -163,6 +164,8 @@ const CLI_USAGE_DETAILS: Record<string, string> = {
   config: "  config",
   audit: "  audit [--proposal <id>]",
   attention: "  attention [--source <graph-engineering|improvement-loop|product-loop>,...]",
+  graph:
+    "  graph <init|status|submit> --run-id <id> [--evidence-root <path>]\n        graph submit --run-id <id> --signal <file.json>",
   improve: `  improve init --series-id <id> --scope <s> --reference-hash <hash> [--cooldown-ms <ms>]
         improve status --series-id <id>
         improve once --series-id <id> [--sandbox <docker|container|auto|none>] [--image <img>]
@@ -591,6 +594,55 @@ async function cmdGithubPr(cwd: string, positional: string[], flags: Record<stri
   info(`✓ PR created: #${result.number} — ${result.url}`);
 }
 
+// ── Graph Engineering runs (change-control runs in any project) ──
+
+const GRAPH_RUN_ROOT = ".dao/graph-runs";
+
+const GRAPH_USAGE = `usage: swarm-dao graph <init|status|submit> [options]
+
+  init   --run-id <id> [--evidence-root <path>]
+  status --run-id <id> [--evidence-root <path>]
+  submit --run-id <id> --signal <file.json> [--evidence-root <path>]
+
+Graph runs live under .dao/graph-runs by default; override with --evidence-root
+(repos carrying the frozen graph use evidence/graph-runs). Signals are
+validated against the frozen Graph Engineering machine; human-source events
+require explicit owner authorization (see models/graph-engineering.md).`;
+
+async function cmdGraph(cwd: string, positional: string[], flags: Record<string, string | true>): Promise<number> {
+  const sub = positional[0];
+  if (sub !== "init" && sub !== "status" && sub !== "submit") err(GRAPH_USAGE);
+
+  const stringFlag = (name: string): string | undefined => {
+    const value = flags[name];
+    if (value === undefined) return undefined;
+    if (typeof value !== "string" || value.trim().length === 0) err(`--${name} requires a value`);
+    return value;
+  };
+  const runId = stringFlag("run-id");
+  if (!runId) err(`--run-id is required\n${GRAPH_USAGE}`);
+  const evidenceRoot = path.resolve(cwd, stringFlag("evidence-root") ?? GRAPH_RUN_ROOT);
+
+  const runner = await createGraphRunner({ evidenceRoot, runId });
+
+  if (sub === "init") {
+    await fs.writeFile(path.join(evidenceRoot, "active-run.json"), `${JSON.stringify({ runId }, null, 2)}\n`, "utf8");
+    info(JSON.stringify(runner.snapshot(), null, 2));
+    return 0;
+  }
+  if (sub === "status") {
+    info(JSON.stringify(runner.snapshot(), null, 2));
+    return 0;
+  }
+
+  const signalFile = stringFlag("signal");
+  if (!signalFile) err(`--signal is required\n${GRAPH_USAGE}`);
+  const signal: unknown = JSON.parse(await fs.readFile(path.resolve(cwd, signalFile), "utf8"));
+  const result = await runner.submit(signal);
+  info(JSON.stringify(result, null, 2));
+  return result.accepted ? 0 : 2;
+}
+
 // ── Improve (continuous improvement series in any project) ──
 
 const IMPROVE_SERIES_ROOT = ".dao/improvement-series";
@@ -825,6 +877,8 @@ export async function main(argv: string[], cwd: string = process.cwd()): Promise
         return 0;
       case "improve":
         return await cmdImprove(cwd, positional, flags);
+      case "graph":
+        return await cmdGraph(cwd, positional, flags);
       case "vote":
         await cmdVote(cwd, positional, flags);
         return 0;
