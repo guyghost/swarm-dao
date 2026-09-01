@@ -24,7 +24,10 @@
     "prepublishOnly": "bun run build"
   },
   "dependencies": {
-    "@guyghost/swarm-dao-core": "^0.11.0"
+    "@guyghost/swarm-dao-core": "^0.11.0",
+    "@guyghost/swarm-dao-graph": "^0.2.1",
+    "@guyghost/swarm-dao-improvement": "^0.3.1",
+    "@guyghost/swarm-dao-product": "^0.2.1"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": ">=0.1.0",

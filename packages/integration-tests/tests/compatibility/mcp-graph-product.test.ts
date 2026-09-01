@@ -59,6 +59,15 @@ describe("Compatibility: MCP graph & product run surface", () => {
     expect(textOf(result)).toContain("invalid source");
   });
 
+  it("reads an improvement series snapshot read-only", async () => {
+    const text = textOf(await client.callTool({ name: "dao_improve_status", arguments: { seriesId: "probe" } }));
+    const snapshot = JSON.parse(text) as { seriesId: string; state: string };
+    expect(snapshot.seriesId).toBe("probe");
+    expect(snapshot.state).toBe("idle");
+    // Read-only surface: the snapshot lands under the CLI default root.
+    await fs.access(path.join(workDir, ".dao/improvement-series/probe/snapshot.json"));
+  });
+
   it("reads a fresh graph run snapshot and submits an AI model draft", async () => {
     const status = JSON.parse(
       textOf(await client.callTool({ name: "dao_graph_status", arguments: { runId: "mcp-g1" } })),

@@ -119,6 +119,12 @@ const EXPECTED_TOOLS = [
   "dao_github_create_branch",
   "dao_github_open_pr",
   "dao_check_edit",
+  "dao_attention",
+  "dao_graph_status",
+  "dao_graph_submit",
+  "dao_product_status",
+  "dao_product_submit",
+  "dao_improve_status",
 ];
 
 const DAO_ROOT = path.join(process.cwd(), ".dao");
@@ -215,6 +221,97 @@ describe("swarmDaoExtension", () => {
       mod.default(pi);
 
       expect(pi.tools.length).toBe(EXPECTED_TOOLS.length);
+    });
+
+    it("dao_attention lists pending gates with their resolution suggestion", async () => {
+      const mod = await import("@guyghost/swarm-dao-pi-adapter");
+      const pi = createMockPi();
+      mod.default(pi);
+
+      await fs.mkdir(path.join(DAO_ROOT, "graph-runs", "g1"), { recursive: true });
+      await fs.writeFile(
+        path.join(DAO_ROOT, "graph-runs", "g1", "snapshot.json"),
+        JSON.stringify({
+          runId: "g1",
+          state: "awaitingApproval",
+          status: "active",
+          context: { runId: "g1", modelHash: "cafebabe" },
+        }),
+        "utf8",
+      );
+
+      const tool = pi.tools.find((t) => t.name === "dao_attention");
+      const result = await tool?.execute("test-id", {});
+      const text = (result?.content as Array<{ type: string; text: string }> | undefined)?.[0]?.text ?? "";
+      expect(text).toMatch(/pending human gates?/);
+      expect(text).toContain("graph-engineering/g1");
+      expect(text).toContain("cafebabe");
+      expect(text).toContain("swarm-dao graph submit --run-id g1");
+    });
+
+    it("dao_attention rejects an unknown source", async () => {
+      const mod = await import("@guyghost/swarm-dao-pi-adapter");
+      const pi = createMockPi();
+      mod.default(pi);
+
+      const tool = pi.tools.find((t) => t.name === "dao_attention");
+      const result = await tool?.execute("test-id", { sources: ["vibes"] });
+      const text = (result?.content as Array<{ type: string; text: string }> | undefined)?.[0]?.text ?? "";
+      expect(text).toContain("Invalid source 'vibes'");
+    });
+
+    it("dao_graph_submit submits an AI artifact with the ai channel forced", async () => {
+      const mod = await import("@guyghost/swarm-dao-pi-adapter");
+      const pi = createMockPi();
+      mod.default(pi);
+
+      const tool = pi.tools.find((t) => t.name === "dao_graph_submit");
+      const result = await tool?.execute("test-id", {
+        runId: "g2",
+        type: "MODEL_DRAFTED",
+        producer: "claude",
+        payload: JSON.stringify({ modelHash: "deadbeef" }),
+        evidence: ["evidence/g2/model.md"],
+      });
+      const text = (result?.content as Array<{ type: string; text: string }> | undefined)?.[0]?.text ?? "";
+      const parsed = JSON.parse(text) as { accepted: boolean; snapshot: { state: string } };
+      expect(parsed.accepted).toBe(true);
+      expect(parsed.snapshot.state).toBe("modelReview");
+
+      const journal = (await fs.readFile(path.join(DAO_ROOT, "graph-runs", "g2", "journal.ndjson"), "utf8"))
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line));
+      expect(journal[0].signal).toMatchObject({ type: "MODEL_DRAFTED", source: "ai", producer: "claude" });
+    });
+
+    it("dao_graph_submit reports invalid payload JSON instead of throwing", async () => {
+      const mod = await import("@guyghost/swarm-dao-pi-adapter");
+      const pi = createMockPi();
+      mod.default(pi);
+
+      const tool = pi.tools.find((t) => t.name === "dao_graph_submit");
+      const result = await tool?.execute("test-id", {
+        runId: "g3",
+        type: "MODEL_DRAFTED",
+        producer: "claude",
+        payload: "{not json",
+      });
+      const text = (result?.content as Array<{ type: string; text: string }> | undefined)?.[0]?.text ?? "";
+      expect(text).toContain("Invalid payload JSON");
+    });
+
+    it("dao_improve_status reads a fresh series as idle", async () => {
+      const mod = await import("@guyghost/swarm-dao-pi-adapter");
+      const pi = createMockPi();
+      mod.default(pi);
+
+      const tool = pi.tools.find((t) => t.name === "dao_improve_status");
+      const result = await tool?.execute("test-id", { seriesId: "probe" });
+      const text = (result?.content as Array<{ type: string; text: string }> | undefined)?.[0]?.text ?? "";
+      const snapshot = JSON.parse(text) as { seriesId: string; state: string };
+      expect(snapshot.seriesId).toBe("probe");
+      expect(snapshot.state).toBe("idle");
     });
 
     it("each tool has name, description, and execute function", async () => {

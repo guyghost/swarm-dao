@@ -1,0 +1,1 @@
+{"sequence":1,"runId":"run-3","receivedAt":"2026-09-01T17:34:31.345Z","eventType":"REVIEW_RESOLVED","producer":null,"accepted":false,"issues":["source for REVIEW_RESOLVED must be human","producer explorer is not declared to emit REVIEW_RESOLVED","payload.resolution must be scope-reduced, budget-expanded, or abandoned"],"beforeState":"exploration","afterState":"exploration"}

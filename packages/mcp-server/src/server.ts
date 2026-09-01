@@ -40,8 +40,9 @@ import {
   PROPOSAL_TYPES,
   setRepository,
 } from "@guyghost/swarm-dao-core";
-import { createGraphRunner } from "@guyghost/swarm-dao-graph";
-import { createProductRunner } from "@guyghost/swarm-dao-product";
+import { createGraphRunner, GRAPH_AI_EVENT_TYPES, submitAiGraphSignal } from "@guyghost/swarm-dao-graph";
+import { OrchestratorRunner } from "@guyghost/swarm-dao-improvement";
+import { createProductRunner, PRODUCT_AI_EVENT_TYPES, submitAiProductSignal } from "@guyghost/swarm-dao-product";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { createMcpHostAdapter, resolveDaoRoot } from "./host-adapter.js";
@@ -76,12 +77,13 @@ function createToolContext(workDir: string, repository?: DaoStateRepositoryPort)
 
 /** AI-source event types the MCP surface may submit to a graph run. Human
  * events (MODEL_APPROVED, MODEL_REJECTED, RETRY_AUTHORIZED, CANCEL) and
- * tool/system events never pass through MCP: the host hardcodes source
- * "ai", so an agent cannot forge another channel's authority. */
-const GRAPH_AI_EVENT_TYPES = ["MODEL_DRAFTED", "IMPLEMENTATION_READY", "IMPLEMENTATION_FAILED"] as const;
+ * tool/system events never pass through MCP: the AI-channel helper inside the
+ * graph package hardcodes source "ai", so an agent cannot forge another
+ * channel's authority. */
+const GRAPH_AI_EVENT_ENUM = [...GRAPH_AI_EVENT_TYPES] as const;
 
 /** AI-source event types the MCP surface may submit to a product run. */
-const PRODUCT_AI_EVENT_TYPES = ["AGENT_SIGNAL", "FEEDBACK_AGGREGATED", "PROPOSAL_DRAFTED"] as const;
+const PRODUCT_AI_EVENT_ENUM = [...PRODUCT_AI_EVENT_TYPES] as const;
 
 interface RunSubmitArgs {
   runId: string;
@@ -335,6 +337,16 @@ export function createSwarmDaoMcpServer(workDir = resolveDaoRoot(), repository?:
         },
       },
       {
+        name: "dao_improve_status",
+        description:
+          "Read an improvement series snapshot (read-only): state, scope, cooldown, pending reason. Evidence root defaults to .dao/improvement-series under the workspace.",
+        inputSchema: {
+          type: "object",
+          required: ["seriesId"],
+          properties: { seriesId: { type: "string" }, evidenceRoot: { type: "string" } },
+        },
+      },
+      {
         name: "dao_graph_status",
         description:
           "Read a Graph Engineering run snapshot (read-only). Evidence root defaults to .dao/graph-runs under the workspace.",
@@ -354,7 +366,7 @@ export function createSwarmDaoMcpServer(workDir = resolveDaoRoot(), repository?:
           required: ["runId", "type", "producer", "payload", "evidence"],
           properties: {
             runId: { type: "string" },
-            type: { type: "string", enum: [...GRAPH_AI_EVENT_TYPES] },
+            type: { type: "string", enum: [...GRAPH_AI_EVENT_ENUM] },
             producer: { type: "string" },
             payload: { type: "object" },
             evidence: { type: "array", items: { type: "string" } },
@@ -382,7 +394,7 @@ export function createSwarmDaoMcpServer(workDir = resolveDaoRoot(), repository?:
           required: ["runId", "type", "producer", "payload", "evidence"],
           properties: {
             runId: { type: "string" },
-            type: { type: "string", enum: [...PRODUCT_AI_EVENT_TYPES] },
+            type: { type: "string", enum: [...PRODUCT_AI_EVENT_ENUM] },
             producer: { type: "string" },
             payload: { type: "object" },
             evidence: { type: "array", items: { type: "string" } },
@@ -541,6 +553,18 @@ export function createSwarmDaoMcpServer(workDir = resolveDaoRoot(), repository?:
           }
           return textResult(lines.join("\n"));
         }
+        case "dao_improve_status": {
+          const seriesId = String(args.seriesId ?? "").trim();
+          if (!seriesId) throw new Error("seriesId is required");
+          const runner = await OrchestratorRunner.create({
+            seriesId,
+            evidenceRoot: path.resolve(
+              ctx.workDir,
+              typeof args.evidenceRoot === "string" ? args.evidenceRoot : ".dao/improvement-series",
+            ),
+          });
+          return textResult(JSON.stringify(runner.snapshot(), null, 2));
+        }
         case "dao_graph_status": {
           const runId = String(args.runId ?? "").trim();
           if (!runId) throw new Error("runId is required");
@@ -555,20 +579,17 @@ export function createSwarmDaoMcpServer(workDir = resolveDaoRoot(), repository?:
         }
         case "dao_graph_submit": {
           const parsed = parseRunSubmitArgs(args);
-          const runner = await createGraphRunner({
-            evidenceRoot: path.resolve(ctx.workDir, parsed.evidenceRoot ?? ".dao/graph-runs"),
-            runId: parsed.runId,
-          });
-          // The host — never the agent — owns the source: AI artifacts only.
-          const result = await runner.submit({
-            runId: parsed.runId,
-            type: String(args.type),
-            source: "ai",
-            producer: parsed.producer,
-            occurredAt: new Date().toISOString(),
-            payload: parsed.payload,
-            evidence: parsed.evidence,
-          });
+          // The package-level AI channel owns the source: AI artifacts only.
+          const result = await submitAiGraphSignal(
+            { evidenceRoot: path.resolve(ctx.workDir, parsed.evidenceRoot ?? ".dao/graph-runs") },
+            {
+              runId: parsed.runId,
+              type: args.type as (typeof GRAPH_AI_EVENT_TYPES)[number],
+              producer: parsed.producer,
+              payload: parsed.payload,
+              evidence: parsed.evidence,
+            },
+          );
           const text = JSON.stringify(result, null, 2);
           return result.accepted ? textResult(text) : errorResult(text);
         }
@@ -586,19 +607,16 @@ export function createSwarmDaoMcpServer(workDir = resolveDaoRoot(), repository?:
         }
         case "dao_product_submit": {
           const parsed = parseRunSubmitArgs(args);
-          const runner = await createProductRunner({
-            evidenceRoot: path.resolve(ctx.workDir, parsed.evidenceRoot ?? ".dao/product-loops"),
-            runId: parsed.runId,
-          });
-          const result = await runner.submit({
-            runId: parsed.runId,
-            type: String(args.type),
-            source: "ai",
-            producer: parsed.producer,
-            occurredAt: new Date().toISOString(),
-            payload: parsed.payload,
-            evidence: parsed.evidence,
-          });
+          const result = await submitAiProductSignal(
+            { evidenceRoot: path.resolve(ctx.workDir, parsed.evidenceRoot ?? ".dao/product-loops") },
+            {
+              runId: parsed.runId,
+              type: args.type as (typeof PRODUCT_AI_EVENT_TYPES)[number],
+              producer: parsed.producer,
+              payload: parsed.payload,
+              evidence: parsed.evidence,
+            },
+          );
           const text = JSON.stringify(result, null, 2);
           return result.accepted ? textResult(text) : errorResult(text);
         }
