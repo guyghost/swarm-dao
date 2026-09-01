@@ -87,6 +87,22 @@ describe("advanceSeriesOnce", () => {
     expect(result.stateAfter).toBe("sampling");
   });
 
+  it("honours a custom cycle evidence root (series living under evidence/)", async () => {
+    const root = await gitRepo("cycleroot");
+    roots.push(root);
+    await startedSeries(root, "s-cyc-1");
+
+    const result = await advanceSeriesOnce({
+      seriesId: "s-cyc-1",
+      workDir: root,
+      cycleEvidenceRoot: "evidence/improvement-cycles",
+    });
+    expect(result.executed).toBe(true);
+    const cycleDir = path.join(root, "evidence/improvement-cycles/s-cyc-1-c1");
+    const snapshot = JSON.parse(await fs.readFile(path.join(cycleDir, "snapshot.json"), "utf8"));
+    expect(snapshot.cycleId).toBe("s-cyc-1-c1");
+  });
+
   it("throws outside a git repository", async () => {
     // Outside any repo (os tmpdir): inside the swarm-dao checkout, git would
     // discover the parent repository and carve worktrees into it.

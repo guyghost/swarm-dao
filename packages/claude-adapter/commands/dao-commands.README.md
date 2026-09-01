@@ -22,7 +22,7 @@
 
 ## Execute
 - [`/dao:execute`](dao:execute.md) `proposalId` — Execute an approved / controlled proposal
-- [`/dao:improve-once`](dao:improve-once.md) `seriesId [evidenceRoot]` — Advance an improvement series by one state-authorized effect (deterministic executor; persisted worker configuration, per-series worktree)
+- [`/dao:improve-once`](dao:improve-once.md) `seriesId [evidenceRoot] [cycleRoot]` — Advance an improvement series by one state-authorized effect (deterministic executor; persisted worker configuration, per-series worktree)
 
 ## Ship
 - [`/dao:ship`](dao:ship.md) `proposalId [cascade] [force]` — Ship a controlled proposal (optionally cascade dependencies)

@@ -213,7 +213,7 @@ export const DAO_COMMANDS: readonly DaoCommand[] = [
       "Advance an improvement series by one state-authorized effect (deterministic executor; persisted worker configuration, per-series worktree)",
     tool: "dao_improve_once",
     mutating: true,
-    args: "seriesId [evidenceRoot]",
+    args: "seriesId [evidenceRoot] [cycleRoot]",
     hosts: ["mcp", "pi", "claude", "copilot", "codex", "opencode"],
   },
   {
