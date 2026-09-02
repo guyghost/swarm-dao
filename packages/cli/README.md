@@ -10,12 +10,16 @@ Works in **any project**: all state lives in a `.dao/` directory at the project 
 ## Installation
 
 ```bash
+# Homebrew (macOS / Linuxbrew)
+brew install guyghost/tap/swarm-dao
+
+# npm
 npm install -g @guyghost/swarm-dao-cli
 ```
 
-Requires [Bun](https://bun.sh) ≥ 1.3 on your `PATH` (the binary runs through it)
-and `git`. Apple `container` (macOS 26+) and/or Docker are optional, for
-sandboxed gate execution.
+Requires Node ≥ 20 (installed automatically by Homebrew) and `git`. Apple
+`container` (macOS 26+) and/or Docker are optional, for sandboxed gate
+execution.
 
 From source:
 
