@@ -1,0 +1,75 @@
+name: Homebrew tap sync
+
+# Keeps guyghost/homebrew-tap pointing at the latest npm release of
+# @guyghost/swarm-dao-cli — but only once that release is old enough to
+# clear Homebrew's 24h security cooldown (--min-release-age). Syncing
+# immediately on publish would leave `brew install` broken for a day on
+# every release, so the tap intentionally lags npm by up to ~48h.
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    name: Sync tap formula with npm
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve installable latest version
+        id: version
+        env:
+          PACKAGE: "@guyghost/swarm-dao-cli"
+        run: |
+          latest="$(npm view "$PACKAGE" version)"
+          age_hours="$(npm view "$PACKAGE" time --json | node -e 'const t=JSON.parse(require("fs").readFileSync(0,"utf8"));console.log(Math.floor((Date.now()-new Date(t[process.argv[1]]).getTime())/3600000))' "$latest")"
+          if [ "$age_hours" -lt 24 ]; then
+            echo "Skipping: $latest published ${age_hours}h ago (< Homebrew's 24h cooldown)"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Latest installable version: $latest (${age_hours}h old)"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "version=$latest" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout tap
+        if: steps.version.outputs.skip == 'false'
+        uses: actions/checkout@v6
+        with:
+          repository: guyghost/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+      - name: Update formula if changed
+        id: update
+        if: steps.version.outputs.skip == 'false'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          url="https://registry.npmjs.org/@guyghost/swarm-dao-cli/-/swarm-dao-cli-${VERSION}.tgz"
+          current_url="$(grep '^  url ' Formula/swarm-dao.rb)"
+          if [ "$current_url" = "url \"${url}\"" ]; then
+            echo "Tap already at ${VERSION}"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          sha256="$(curl -fsSL "$url" | shasum -a 256 | cut -d' ' -f1)"
+          sed -i.bak \
+            -e "s|^  url .*|  url \"${url}\"|" \
+            -e "s|^  sha256 .*|  sha256 \"${sha256}\"|" \
+            Formula/swarm-dao.rb
+          rm Formula/swarm-dao.rb.bak
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Commit and push
+        if: steps.update.outputs.changed == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/swarm-dao.rb
+          git commit -m "swarm-dao ${VERSION}"
+          git push
