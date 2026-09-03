@@ -132,7 +132,7 @@ export function createSwarmDaoMcpServer(workDir = resolveDaoRoot(), repository?:
       },
       {
         name: "dao_setup",
-        description: "Initialize the DAO with default 7 product agents",
+        description: "Initialize the DAO with default 8 product agents",
         inputSchema: { type: "object", properties: { useDefaults: { type: "boolean" } } },
       },
       {

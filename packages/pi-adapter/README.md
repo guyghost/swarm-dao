@@ -46,7 +46,7 @@ Once Pi starts, the extension automatically:
 Inside Pi, use any of the registered tools or the `/dao` command:
 
 ```
-> dao_setup                           # Initialize with 7 default agents
+> dao_setup                           # Initialize with 8 default agents
 > dao_propose title="Add dark mode"   # Create a proposal
   type="product-feature"
   description="Implement dark mode toggle"

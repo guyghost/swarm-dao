@@ -55,7 +55,7 @@ describe("CLI E2E", () => {
 
     const setup = await runCLI(["setup"], testDir);
     expect(setup.code).toBe(0);
-    expect(setup.stdout).toContain("7 agents");
+    expect(setup.stdout).toContain("8 agents");
 
     const propose = await runCLI(
       ["propose", "--title=Test Feature", "--type=product-feature", "--description=Add test"],

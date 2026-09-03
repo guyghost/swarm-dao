@@ -54,7 +54,7 @@ export const DAO_COMMANDS: readonly DaoCommand[] = [
   {
     id: "setup",
     phase: "init",
-    summary: "Initialize the DAO with the default 7 product agents",
+    summary: "Initialize the DAO with the default 8 product agents",
     tool: "dao_setup",
     mutating: true,
     args: "[useDefaults=true]",

@@ -37,7 +37,7 @@ bun packages/cli/dist/cli.js --help
 ```bash
 cd your-project
 swarm-dao init    # creates .dao/ (proposals, state, config, audit trail)
-swarm-dao setup   # seeds the 7 default agents
+swarm-dao setup   # seeds the 8 default agents
 ```
 
 ### 2. GitHub integration (optional — for branch/PR automation)

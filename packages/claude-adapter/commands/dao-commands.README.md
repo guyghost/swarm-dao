@@ -5,7 +5,7 @@
 > Claude Code derives command names from filenames (colon namespace in filename).
 
 ## Setup
-- [`/dao:setup`](dao:setup.md) `[useDefaults=true]` — Initialize the DAO with the default 7 product agents
+- [`/dao:setup`](dao:setup.md) `[useDefaults=true]` — Initialize the DAO with the default 8 product agents
 
 ## Propose
 - [`/dao:propose`](dao:propose.md) `title type description [acceptanceCriteria...] [affectedPaths...]` — Create a new proposal

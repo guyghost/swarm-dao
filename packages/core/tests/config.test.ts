@@ -56,7 +56,7 @@ describe("config", () => {
       mode: "opt-in",
       agentOverrides: { researcher: { enabled: false } },
     });
-    expect(filtered.length).toBe(6);
+    expect(filtered.length).toBe(7);
     expect(filtered.find((a) => a.id === "researcher")).toBeUndefined();
   });
 

@@ -36,7 +36,7 @@ across CI runners.
 
 ## Suites
 
-- **deliberation** — proposal creation, swarm deliberation with the 7 default
+- **deliberation** — proposal creation, swarm deliberation with the 8 default
   agents, control gates, and the pure tally/scoring path.
 - **persistence** — in-memory vs file repository, small vs 500-proposal state,
   no-op persists, and cold reload.

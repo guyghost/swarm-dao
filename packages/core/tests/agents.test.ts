@@ -16,8 +16,26 @@ describe("governance/agents.ts", () => {
 
   it("initializes agents with the default model", () => {
     const agents = initializeAgents();
-    expect(agents.length).toBe(7);
+    expect(agents.length).toBe(8);
     expect(agents.every((agent) => agent.model === DEFAULT_AGENT_MODEL)).toBe(true);
+    // The designer is part of the default swarm and declares its tooling.
+    const designer = agents.find((agent) => agent.id === "designer");
+    expect(designer?.tools).toEqual(["impeccable", "mobbin"]);
+    expect(agents.find((agent) => agent.id === "architect")?.tools).toEqual(["sequential-thinking"]);
+  });
+
+  it("parses tools from markdown frontmatter", async () => {
+    const agentsDir = path.join(tmpdir(), `swarm-agents-tools-${Date.now()}`);
+    await fs.mkdir(agentsDir, { recursive: true });
+    await fs.writeFile(
+      path.join(agentsDir, "dao-designer.md"),
+      `---\nid: designer\nname: UX/UI Designer\nweight: 2\ntools: [impeccable, mobbin]\n---\n\n# Designer body`,
+    );
+
+    const agents = await loadAgentDefinitionsFromMarkdown(agentsDir);
+    const designer = agents.find((agent) => agent.id === "designer");
+    expect(designer?.tools).toEqual(["impeccable", "mobbin"]);
+    expect(designer?.systemPrompt).toContain("# Designer body");
   });
 
   it("loads model overrides from markdown frontmatter", async () => {

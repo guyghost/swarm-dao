@@ -23,7 +23,7 @@ pi
 
 Inside Pi:
 ```
-> dao_setup          # Initialize with 7 default agents
+> dao_setup          # Initialize with 8 default agents
 > dao_propose        # Create a proposal
 > dao_deliberate     # Run swarm deliberation
 > dao_check          # Quality gates
@@ -93,7 +93,7 @@ for the pattern all non-native hosts share).
 | **L3 Delivery** | Convert decisions into execution | Plans, tasks, execution, verification, artefacts |
 | **L4 Control** | Reduce risk before publication | Quality gates, audit trail, checklists |
 
-## The 7 Default Agents
+## The 8 Default Agents
 
 | Agent | Weight | Role |
 |-------|--------|------|
@@ -104,6 +104,7 @@ for the pattern all non-native hosts share).
 | Prioritization Agent | 2 | Impact/cost/risk scoring, roadmap fit |
 | Spec Writer | 1 | PRD, user stories, acceptance criteria |
 | Delivery Agent | 1 | Implementation plan, tasks, CI/CD |
+| UX/UI Designer | 2 | UX/UI critique, design directions, accessibility |
 
 ## Proposal Lifecycle
 

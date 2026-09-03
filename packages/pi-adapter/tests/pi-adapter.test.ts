@@ -703,7 +703,7 @@ describe("swarmDaoExtension", () => {
       const result = commandCtx.rendered();
       expect(result).toContain("# 🎯 Round Table Results");
       // The slash command mutated state exactly like the dao_roundtable tool.
-      expect(getState().proposals.length).toBe(7);
+      expect(getState().proposals.length).toBe(8);
     });
 
     it("/dao propose executes the propose tool with quoted arguments", async () => {

@@ -62,7 +62,7 @@ The plugin initializes automatically when OpenCode starts. DAO state is persiste
 > dao_help
 ```
 
-Creates the DAO with 7 default product agents:
+Creates the DAO with 8 default product agents:
 
 | Agent | Weight | Role |
 |-------|--------|------|
@@ -73,6 +73,7 @@ Creates the DAO with 7 default product agents:
 | Prioritization Agent | 2 | Impact/cost/risk scoring, roadmap fit |
 | Spec Writer | 1 | PRD, user stories, acceptance criteria |
 | Delivery Agent | 1 | Implementation plan, tasks, CI/CD |
+| UX/UI Designer | 2 | UX/UI critique, design directions, accessibility |
 
 ### 2. Create a Proposal
 
@@ -238,7 +239,7 @@ Per-project configuration in `.dao/config.json`:
 
 | Tool | Description |
 |------|-------------|
-| `dao_setup` | Initialize the DAO with 7 default product agents |
+| `dao_setup` | Initialize the DAO with 8 default product agents |
 | `dao_help` | Show onboarding and recommended workflow |
 | `dao_propose` | Create a new governance proposal |
 | `dao_record_outputs` | Record sub-agent outputs and finalize deliberation |

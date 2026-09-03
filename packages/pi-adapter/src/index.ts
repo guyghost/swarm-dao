@@ -1004,7 +1004,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
   registerDaoTool({
     name: "dao_setup",
     label: "DAO Setup",
-    description: "Initialize the DAO with 7 default agents",
+    description: "Initialize the DAO with 8 default agents",
     parameters: Type.Object({
       useDefaults: Type.Optional(Type.Boolean({ description: "Use default agents (default: true)" })),
     }),

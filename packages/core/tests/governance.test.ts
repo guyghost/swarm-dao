@@ -23,7 +23,7 @@ import {
 describe("governance/agents", () => {
   it("initializes default agents", () => {
     const agents = initializeAgents();
-    expect(agents.length).toBe(7);
+    expect(agents.length).toBe(8);
     expect(agents[0].id).toBe("strategist");
     expect(agents[0].weight).toBe(3);
   });

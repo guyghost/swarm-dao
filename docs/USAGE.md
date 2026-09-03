@@ -70,7 +70,7 @@ Inside the Pi session:
 > dao_setup
 
 # DAO Initialized
-# 7 agents configured:
+# 8 agents configured:
 # | Product Strategist | 3 | Vision, objectives, hypotheses |
 # | Research Agent     | 2 | Market, competition, user signals |
 # | Solution Architect | 3 | Technical options, tradeoffs |
@@ -142,7 +142,7 @@ opencode
 > dao_setup
 
 # DAO Initialized
-# 7 agents configured
+# 8 agents configured
 # Run `dao_help` to discover the workflow, then `dao_propose` to create proposals.
 
 > dao_help
@@ -452,7 +452,7 @@ dao_setup
 
 | Command | Pi | OpenCode | Description |
 |---------|-----|----------|-------------|
-| Initialize | `dao_setup` | `dao_setup` | Create the 7 default agents |
+| Initialize | `dao_setup` | `dao_setup` | Create the 8 default agents |
 | Propose | `dao_propose` | `dao_propose` | Create a proposal |
 | Deliberate | `dao_deliberate` | `dao_deliberate` + `dao_record_outputs` | Swarm vote |
 | Control | `dao_check` | `dao_control` | Quality gates |

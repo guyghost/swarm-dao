@@ -48,7 +48,7 @@ describe("layered default agents", () => {
     expect(agents.length).toBeGreaterThan(0);
     for (const agent of agents) {
       expect(agent.systemPrompt.startsWith(AGENT_CHARTER)).toBe(true);
-      expect(agent.systemPrompt).toContain("Your mission");
+      expect(agent.systemPrompt).toContain("## Owns");
     }
     // The role layer keeps its identity: no duplicated output-format block.
     const strategist = agents.find((agent) => agent.id === "strategist");

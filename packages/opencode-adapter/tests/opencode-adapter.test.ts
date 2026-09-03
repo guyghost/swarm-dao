@@ -188,7 +188,7 @@ describe("opencode-adapter", () => {
       await fs.rm(testDir, { recursive: true, force: true });
     });
 
-    it("initializes DAO and returns agent table with 7 agents", async () => {
+    it("initializes DAO and returns agent table with 8 agents", async () => {
       const { plugin } = await setupPlugin(testDir);
       // The OpenCodeDAO constructor already initializes state but NOT agents.
       // dao_setup.execute should set state.initialized = true and add agents.
@@ -200,7 +200,7 @@ describe("opencode-adapter", () => {
       // Verify state was updated
       const state = getState();
       expect(state.initialized).toBe(true);
-      expect(state.agents.length).toBe(7);
+      expect(state.agents.length).toBe(8);
     });
 
     it("dao_help returns onboarding before setup and workflow after setup", async () => {
@@ -222,7 +222,7 @@ describe("opencode-adapter", () => {
 
       const second = await plugin.tool.dao_setup.execute({}, { directory: testDir });
       expect(second).toContain("already initialized");
-      expect(second).toContain("7 agents");
+      expect(second).toContain("8 agents");
     });
   });
 

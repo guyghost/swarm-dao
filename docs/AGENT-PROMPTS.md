@@ -29,6 +29,7 @@ constitution pattern — layers add up, the shared law is never replaceable):
 | Prioritization Agent | `agents/dao-prioritizer.md` | Impact/cost |
 | Spec Writer | `agents/dao-spec-writer.md` | Specifications |
 | Delivery Agent | `agents/dao-delivery.md` | Execution |
+| UX/UI Designer | `agents/dao-designer.md` | Design critique & directions |
 
 ## Customizing Prompts
 
@@ -43,15 +44,20 @@ prepended and cannot be replaced):
 ---
 id: strategist
 weight: 5
+tools:
+  - sequential-thinking
 ---
 
-## Mission
+## Owns
 
-Evaluate proposals with a bias toward reversible changes.
-
-## Analysis Framework
+- Strategic alignment with a bias toward reversible changes.
 ...
 ```
+
+Frontmatter `tools` declares the external tools (e.g. MCP servers:
+`sequential-thinking`, `context7`, `mobbin`, ...) the agent is expected to
+use when the host exposes them. It is metadata; the behavioural guidance
+lives in the body (a `## Tooling` section).
 
 A `charter.md` next to the agent files is appended to every agent as a
 `## Project Charter Addendum` — per-project law such as "this project values

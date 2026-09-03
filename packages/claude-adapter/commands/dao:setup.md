@@ -1,9 +1,9 @@
 ---
-description: Initialize the DAO with the default 7 product agents
+description: Initialize the DAO with the default 8 product agents
 allowed-tools: mcp__swarm-dao__dao_setup
 ---
 
-Initialize the DAO with the default 7 product agents.
+Initialize the DAO with the default 8 product agents.
 
 `/dao:setup [useDefaults=true]`
 
