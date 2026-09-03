@@ -1,7 +1,6 @@
 ---
 name: Prioritization Agent
 description: Prioritization agent — evaluates proposals through an impact/cost/risk lens, scoring impact, cost, risk, roadmap fit, and urgency. Member of the Swarm DAO product council.
-model: z.ai/GLM-5.1
 temperature: 0.4
 tools:
   - bash

@@ -3,7 +3,6 @@ id: researcher
 name: Research Agent
 weight: 2
 role: Market, competition, user signals
-model: z.ai/GLM-5.1
 temperature: 0.4
 tools: []
 risk_level: low

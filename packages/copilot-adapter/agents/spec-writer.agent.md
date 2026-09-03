@@ -1,7 +1,6 @@
 ---
 name: Spec Writer
 description: Specification agent — evaluates proposals for clarity, completeness, testability, user stories, and edge cases. Advisor to the Swarm DAO product council.
-model: z.ai/GLM-5.1
 temperature: 0.3
 tools:
   - bash

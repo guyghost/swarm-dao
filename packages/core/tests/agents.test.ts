@@ -4,7 +4,6 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import {
   __resetAgentDefinitionCache,
-  DEFAULT_AGENT_MODEL,
   initializeAgents,
   loadAgentDefinitionsFromMarkdown,
 } from "../src/governance/agents.js";
@@ -14,10 +13,12 @@ describe("governance/agents.ts", () => {
     __resetAgentDefinitionCache();
   });
 
-  it("initializes agents with the default model", () => {
+  it("initializes agents without a hardcoded model", () => {
     const agents = initializeAgents();
     expect(agents.length).toBe(8);
-    expect(agents.every((agent) => agent.model === DEFAULT_AGENT_MODEL)).toBe(true);
+    // No per-agent model: resolution happens at dispatch time (config default,
+    // then parent session / host default).
+    expect(agents.every((agent) => agent.model === undefined)).toBe(true);
     // The designer is part of the default swarm and declares its tooling.
     const designer = agents.find((agent) => agent.id === "designer");
     expect(designer?.tools).toEqual(["impeccable", "mobbin"]);

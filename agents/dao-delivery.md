@@ -3,7 +3,6 @@ id: delivery
 name: Delivery Agent
 weight: 1
 role: Implementation plan, tasks, CI/CD
-model: z.ai/GLM-5.1
 temperature: 0.3
 tools:
   - context7

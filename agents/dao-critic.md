@@ -3,7 +3,6 @@ id: critic
 name: Critic / Risk Agent
 weight: 3
 role: Risk scoring, objections, guardrails
-model: z.ai/GLM-5.1
 temperature: 0.4
 tools: []
 risk_level: high

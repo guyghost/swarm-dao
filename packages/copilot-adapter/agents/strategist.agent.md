@@ -1,7 +1,6 @@
 ---
 name: Product Strategist
 description: Product strategy agent — evaluates proposals for strategic alignment, objectives, hypotheses, and opportunity cost. Lead of the Swarm DAO product council.
-model: z.ai/GLM-5.1
 temperature: 0.3
 tools:
   - bash

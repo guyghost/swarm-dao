@@ -3,7 +3,6 @@ id: prioritizer
 name: Prioritization Agent
 weight: 2
 role: Impact/cost/risk scoring, roadmap fit
-model: z.ai/GLM-5.1
 temperature: 0.3
 tools: []
 risk_level: low

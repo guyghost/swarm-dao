@@ -3,7 +3,6 @@ id: architect
 name: Solution Architect
 weight: 3
 role: Technical options, tradeoffs
-model: z.ai/GLM-5.1
 temperature: 0.3
 tools:
   - sequential-thinking

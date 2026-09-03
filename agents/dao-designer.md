@@ -3,7 +3,6 @@ id: designer
 name: UX/UI Designer
 weight: 2
 role: UX/UI critique, design directions, accessibility
-model: z.ai/GLM-5.1
 temperature: 0.5
 tools:
   - impeccable

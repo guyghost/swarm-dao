@@ -9,8 +9,6 @@ import { filterEnabledAgents } from "../config.js";
 import type { DAOAgent } from "../types/index.js";
 import { AGENT_CHARTER, composeSystemPrompt } from "./charter.js";
 
-export const DEFAULT_AGENT_MODEL = "z.ai/GLM-5.1";
-
 export const DEFAULT_AGENTS: DAOAgent[] = [
   {
     id: "strategist",
@@ -353,7 +351,7 @@ interface AgentDefinitionCacheEntry {
 const agentDefinitionCache = new Map<string, AgentDefinitionCacheEntry>();
 
 function baseAgentsFingerprint(baseAgents: DAOAgent[]): string {
-  return JSON.stringify(baseAgents.map((agent) => ({ ...agent, model: agent.model ?? DEFAULT_AGENT_MODEL })));
+  return JSON.stringify(baseAgents);
 }
 
 /** Clear the module-level agent definition cache. Intended for use in tests. */
@@ -361,9 +359,12 @@ export function __resetAgentDefinitionCache(): void {
   agentDefinitionCache.clear();
 }
 
-function withDefaultModel(agents: DAOAgent[]): DAOAgent[] {
-  return agents.map((agent) => ({ ...agent, model: agent.model ?? DEFAULT_AGENT_MODEL }));
-}
+/**
+ * Agents carry NO hardcoded model: the model resolves at dispatch time from
+ * the agent override (frontmatter `model`), then the DAO config default
+ * (`DAOConfig.defaultModel`), then the parent session / host default
+ * (see `intelligence/model.ts`).
+ */
 
 /** Raw (uncomposed) merge result: role-level agents plus the project charter. */
 interface MarkdownLayers {
@@ -415,7 +416,7 @@ async function readAndMergeMarkdownAgents(
       ...agent,
       ...fields,
       ...(override.body ? { systemPrompt: override.body } : {}),
-      model: override.model ?? agent.model ?? DEFAULT_AGENT_MODEL,
+      model: override.model ?? agent.model,
     };
   });
 
@@ -436,7 +437,7 @@ export async function loadAgentDefinitionsFromMarkdown(
     // Directory missing/unreadable: do NOT cache, but still compose — a
     // missing directory must yield the same charter-backed prompts as an
     // existing empty one.
-    return withComposedPrompts(withDefaultModel(baseAgents), null);
+    return withComposedPrompts(baseAgents, null);
   }
 
   const daoEntries = entries.filter((entry) => entry.startsWith("dao-") && entry.endsWith(".md"));
@@ -457,7 +458,7 @@ export async function loadAgentDefinitionsFromMarkdown(
     signature = parts.sort().join("|");
   } catch {
     // Could not stat a dao-*.md entry (e.g. raced deletion). Do not cache.
-    return withDefaultModel(baseAgents);
+    return baseAgents;
   }
 
   const cached = agentDefinitionCache.get(cacheKey);
@@ -466,8 +467,8 @@ export async function loadAgentDefinitionsFromMarkdown(
     return cached.result;
   }
 
-  const layers = await readAndMergeMarkdownAgents(absDir, daoEntries, withDefaultModel(baseAgents), {
-    agents: withDefaultModel(baseAgents),
+  const layers = await readAndMergeMarkdownAgents(absDir, daoEntries, baseAgents, {
+    agents: baseAgents,
     projectCharter: null,
   });
   // Composition happens exactly once, at the exit.
@@ -487,7 +488,7 @@ export async function loadAgentDefinitions(daoRoot: string, projectConfig?: Proj
   // happens exactly once, after collection, so the shared charter is never
   // duplicated across the chain.
   let layers: MarkdownLayers = {
-    agents: withDefaultModel(DEFAULT_AGENTS),
+    agents: DEFAULT_AGENTS,
     projectCharter: null,
   };
   for (const agentsDir of candidateDirs) {
@@ -537,7 +538,6 @@ export function initializeAgents(customAgents?: DAOAgent[]): DAOAgent[] {
   return DEFAULT_AGENTS.map((a) => ({
     ...a,
     systemPrompt: composeSystemPrompt(a.systemPrompt),
-    model: a.model ?? DEFAULT_AGENT_MODEL,
   }));
 }
 

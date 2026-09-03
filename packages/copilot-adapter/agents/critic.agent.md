@@ -1,7 +1,6 @@
 ---
 name: Critic
 description: Risk and critical analysis agent — identifies risks, edge cases, guardrails, and downsides. The devil's advocate. Lead of the Swarm DAO security council.
-model: z.ai/GLM-5.1
 temperature: 0.2
 tools:
   - bash

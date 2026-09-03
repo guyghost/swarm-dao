@@ -1,7 +1,6 @@
 ---
 name: Delivery Agent
 description: Delivery and execution agent — evaluates proposals for implementation approach, task breakdown, effort estimation, CI/CD impact, and dependencies. Member of the Swarm DAO delivery council.
-model: z.ai/GLM-5.1
 temperature: 0.3
 tools:
   - bash

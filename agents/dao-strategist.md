@@ -3,7 +3,6 @@ id: strategist
 name: Product Strategist
 weight: 3
 role: Vision, objectives, hypotheses
-model: z.ai/GLM-5.1
 temperature: 0.3
 tools: []
 risk_level: medium

@@ -3,7 +3,6 @@ id: spec-writer
 name: Spec Writer
 weight: 1
 role: PRD, user stories, acceptance criteria
-model: z.ai/GLM-5.1
 temperature: 0.3
 tools: []
 risk_level: low

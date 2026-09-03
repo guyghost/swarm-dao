@@ -370,8 +370,10 @@ describe("opencode-adapter", () => {
       );
 
       expect(result).toContain("Swarm Dispatch Plan");
+      // Agents carry no per-agent model anymore: the plan resolves the DAO
+      // config default and labels it as such.
       expect(result).toContain('model="z.ai/GLM-5.1"');
-      expect(result).toContain("agent override");
+      expect(result).toContain("DAO default");
 
       const state = getState();
       expect(state.proposals[0]?.status).toBe("deliberating");
