@@ -58,6 +58,8 @@ export function buildPriorAnalysesSection(
 
 export interface SequentialDispatchOptions extends PriorAnalysesOptions {
   onUpdate?: (update: { agentId: string; agentName: string; phase: "started" | "completed" | "error" }) => void;
+  /** Shared project brief injected into every participant's prompt. */
+  projectBrief?: string;
 }
 
 /**
@@ -74,7 +76,9 @@ export async function dispatchSequentialSwarm(
   modelContext: ModelResolutionContext,
   options: SequentialDispatchOptions = {},
 ): Promise<AgentOutput[]> {
-  const instructions = buildDispatchInstructions(proposal, [...agents], modelContext);
+  const instructions = buildDispatchInstructions(proposal, [...agents], modelContext, {
+    projectBrief: options.projectBrief,
+  });
   const agentById = new Map(agents.map((agent) => [agent.id, agent]));
   const outputs: AgentOutput[] = [];
 

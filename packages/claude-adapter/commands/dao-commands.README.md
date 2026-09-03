@@ -49,8 +49,9 @@
 ## Governance
 - [`/dao:check-edit`](dao:check-edit.md) `paths` — Check whether paths may be edited under the configured mode
 - [`/dao:propose-amendment`](dao:propose-amendment.md) `title description amendmentType [agentId] [agentChanges] [configChanges] [addGates] [removeGates]` — Propose an amendment (agents, config, quorum, gates)
+- [`/dao:reject-proposal`](dao:reject-proposal.md) `proposalId --reason <text>` — Reject a proposal with an auditable human reason
 
 ## GitHub
-- [`/dao:github-config`](dao:github-config.md) `--token <t> --owner <o> --repo <r>` — Configure the GitHub integration
+- [`/dao:github-config`](dao:github-config.md) `--owner <o> --repo <r> [--issues]` — Configure the GitHub integration (auth via the gh CLI)
 - [`/dao:github-branch`](dao:github-branch.md) `proposalId` — Create a GitHub branch for a proposal
 - [`/dao:github-pr`](dao:github-pr.md) `proposalId --head-branch <b>` — Open a GitHub pull request for a proposal

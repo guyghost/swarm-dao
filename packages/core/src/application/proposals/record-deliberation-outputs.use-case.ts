@@ -1,6 +1,6 @@
 import { dispatchProposalEvent } from "../../governance/proposal.utils.js";
 import { calculateCompositeScore } from "../../governance/scoring.js";
-import { parseVoteFromOutput, tallyVotes } from "../../governance/voting.js";
+import { mergeVotes, parseVoteFromOutput, tallyVotes } from "../../governance/voting.js";
 import { synthesize } from "../../intelligence/synthesis.js";
 import type { ClockPort } from "../../ports/clock.js";
 import type { DaoStateRepositoryPort } from "../../ports/repository.js";
@@ -54,7 +54,9 @@ export class RecordDeliberationOutputsUseCase {
       outputs.push(output);
     }
 
-    proposal.votes = votes;
+    // Preserve votes cast outside this deliberation round (e.g. human votes
+    // via the CLI); agent outputs only replace votes from their own agent.
+    proposal.votes = mergeVotes(proposal.votes, votes);
     proposal.agentOutputs = outputs;
     const compositeScore = calculateCompositeScore(outputs);
     proposal.compositeScore = compositeScore;

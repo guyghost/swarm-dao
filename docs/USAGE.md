@@ -239,11 +239,18 @@ opencode
 # Step 4: Control + Execute
 > dao_control proposalId=1
 > dao_execute proposalId=1
+
+# Or reject with an auditable reason (any open/deliberating/approved proposal)
+> dao_reject proposalId=1 reason="Risk zone underestimated"
 ```
 
 ### Workflow 2: Round Table (Agents Suggest Ideas)
 
 #### In Pi:
+
+> **Note:** before dispatching, Swarm DAO assembles a deterministic project
+> brief (manifest, README excerpt, layout, changelog) and shares it with every
+> participant, so suggestions are grounded in the actual project.
 
 ```
 > dao_roundtable
@@ -326,12 +333,11 @@ opencode
 > tools on the Pi extension and the OpenCode plugin.
 
 ```
-# Configure
+# Configure (auth is delegated to the gh CLI — run `gh auth login` once)
 > dao_config_github
-  token="ghp_xxx"
   owner="myorg"
   repo="myrepo"
-  enabled=true
+  issues=true
 
 # Create branch
 > dao_github_create_branch proposalId=1

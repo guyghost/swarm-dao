@@ -114,6 +114,7 @@ const EXPECTED_TOOLS = [
   "dao_dashboard",
   "dao_dry_run",
   "dao_rollback",
+  "dao_reject",
   "dao_roundtable",
   "dao_update_proposal",
   "dao_config_github",

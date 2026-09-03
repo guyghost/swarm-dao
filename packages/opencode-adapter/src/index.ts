@@ -36,6 +36,7 @@ import {
   handleDaoPropose,
   handleDaoProposeAmendment,
   handleDaoRecordOutputs,
+  handleDaoReject,
   handleDaoRollback,
   handleDaoRoundtable,
   handleDaoSetup,
@@ -498,6 +499,30 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
         },
       }),
 
+      // ── dao_reject ────────────────────────────────────
+      dao_reject: tool({
+        description: "Reject (or discard) a proposal with an auditable human reason",
+        args: {
+          proposalId: schema.number(),
+          reason: schema.string({ description: "Auditable rejection reason" }),
+        },
+        // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
+        async execute(args: any, _context: any) {
+          const adapter = createOpenCodeHostAdapter(ctx);
+          return handleDaoReject(
+            {
+              adapter,
+              workDir: directory,
+              deliberationMode: "manual",
+              controlToolName: "dao_control",
+              repository,
+            },
+            Number(args.proposalId),
+            String(args.reason),
+          );
+        },
+      }),
+
       // ── dao_dashboard ────────────────────────────────────
       dao_dashboard: tool({
         description: "View outcome tracking dashboard",
@@ -575,11 +600,12 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
 
       // ── dao_config_github ─────────────────────────────────
       dao_config_github: tool({
-        description: "Configure the GitHub integration (token, owner, repo)",
+        description:
+          "Configure the GitHub integration (owner, repo, issue tracking). Authentication is delegated to the gh CLI (`gh auth login`).",
         args: {
-          token: schema.string({ description: "GitHub personal access token" }),
           owner: schema.string({ description: "Repository owner (user or org)" }),
           repo: schema.string({ description: "Repository name" }),
+          issues: schema.boolean({ description: "Track proposal modifications as GitHub issues" }).optional(),
         },
         // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
         async execute(args: any, _context: any) {
@@ -592,7 +618,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
               controlToolName: "dao_control",
               repository,
             },
-            { token: String(args.token), owner: String(args.owner), repo: String(args.repo) },
+            { owner: String(args.owner), repo: String(args.repo), issues: args.issues === true },
           );
         },
       }),

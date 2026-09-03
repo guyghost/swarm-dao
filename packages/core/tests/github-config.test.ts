@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -6,56 +6,49 @@ import { loadGitHubConfigFromDaoRoot, saveGitHubConfigToDaoRoot } from "../src/h
 import { configureGitHub, getGitHubConfig, isGitHubEnabled } from "../src/integrations/github.js";
 
 describe("host-tools/github-config.ts", () => {
-  it("restores the live token from DAO_GITHUB_TOKEN when the persisted one is redacted", async () => {
+  it("persists owner/repo and the issues opt-in without any token", async () => {
     const daoRoot = await fs.mkdtemp(path.join(tmpdir(), "swarm-dao-ghcfg-"));
     try {
-      await saveGitHubConfigToDaoRoot(daoRoot, { token: "ghp_live", owner: "acme", repo: "app" });
-      // The persisted copy is redacted...
+      await saveGitHubConfigToDaoRoot(daoRoot, { owner: "acme", repo: "app", issues: true });
+
       const persisted = JSON.parse(await fs.readFile(path.join(daoRoot, "config.json"), "utf8"));
-      expect(persisted.github.token).toBe("[REDACTED]");
+      expect(persisted.github).toEqual({ owner: "acme", repo: "app", enabled: true, issues: true });
+      expect(JSON.stringify(persisted)).not.toContain("token");
 
-      // Same session: dao_config_github left a live token in memory for the
-      // same owner/repo, so the integration loads without the env var.
-      delete process.env.DAO_GITHUB_TOKEN;
-      expect(await loadGitHubConfigFromDaoRoot(daoRoot)).toBe(true);
-      expect(getGitHubConfig()?.token).toBe("ghp_live");
-      expect(getGitHubConfig()?.owner).toBe("acme");
-
-      // Fresh process: no in-memory token — without DAO_GITHUB_TOKEN the
-      // integration stays disabled and the redacted literal is never sent.
-      configureGitHub({ token: undefined, owner: undefined, repo: undefined });
-      expect(await loadGitHubConfigFromDaoRoot(daoRoot)).toBe(false);
-
-      // With DAO_GITHUB_TOKEN set, the redacted literal must never be sent as
-      // a credential; the env token is used instead.
-      process.env.DAO_GITHUB_TOKEN = "ghp_env";
+      // A fresh load configures the integration without any credential.
+      configureGitHub({ enabled: false, owner: undefined, repo: undefined });
       expect(await loadGitHubConfigFromDaoRoot(daoRoot)).toBe(true);
       expect(isGitHubEnabled()).toBe(true);
-      expect(getGitHubConfig()?.token).toBe("ghp_env");
       expect(getGitHubConfig()?.owner).toBe("acme");
+      expect(getGitHubConfig()?.repo).toBe("app");
+      expect(getGitHubConfig()?.issues).toBe(true);
     } finally {
-      delete process.env.DAO_GITHUB_TOKEN;
       await fs.rm(daoRoot, { recursive: true, force: true });
     }
   });
 
-  it("uses a persisted plaintext token when present", async () => {
+  it("defaults issues to false", async () => {
     const daoRoot = await fs.mkdtemp(path.join(tmpdir(), "swarm-dao-ghcfg-"));
     try {
-      await fs.writeFile(
-        path.join(daoRoot, "config.json"),
-        JSON.stringify({ github: { token: "ghp_plain", owner: "o", repo: "r", enabled: true } }),
-      );
-      delete process.env.DAO_GITHUB_TOKEN;
-      expect(await loadGitHubConfigFromDaoRoot(daoRoot)).toBe(true);
-      expect(getGitHubConfig()?.token).toBe("ghp_plain");
+      await saveGitHubConfigToDaoRoot(daoRoot, { owner: "acme", repo: "app" });
+
+      const persisted = JSON.parse(await fs.readFile(path.join(daoRoot, "config.json"), "utf8"));
+      expect(persisted.github.issues).toBe(false);
+
+      await loadGitHubConfigFromDaoRoot(daoRoot);
+      expect(getGitHubConfig()?.issues).toBe(false);
     } finally {
-      delete process.env.DAO_GITHUB_TOKEN;
       await fs.rm(daoRoot, { recursive: true, force: true });
     }
   });
 
-  afterEach(() => {
-    delete process.env.DAO_GITHUB_TOKEN;
+  it("stays unconfigured without owner/repo", async () => {
+    const daoRoot = await fs.mkdtemp(path.join(tmpdir(), "swarm-dao-ghcfg-"));
+    try {
+      await fs.writeFile(path.join(daoRoot, "config.json"), JSON.stringify({ github: { repo: "r" } }));
+      expect(await loadGitHubConfigFromDaoRoot(daoRoot)).toBe(false);
+    } finally {
+      await fs.rm(daoRoot, { recursive: true, force: true });
+    }
   });
 });

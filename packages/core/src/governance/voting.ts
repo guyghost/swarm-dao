@@ -20,9 +20,12 @@ export function parseVoteFromOutput(
   content: string,
 ): Vote | undefined {
   const voteMatch = content.match(VOTE_PATTERN);
+  // No vote section → no fabricated vote: agents that did not vote must not
+  // dilute the tally with template abstentions (and don't count toward quorum).
+  if (!voteMatch) return undefined;
   const reasoningMatch = content.match(REASONING_PATTERN);
 
-  const position = (voteMatch?.[1]?.toLowerCase() as VotePosition) || "abstain";
+  const position = (voteMatch[1]?.toLowerCase() as VotePosition) || "abstain";
   const reasoning = reasoningMatch?.[1]?.trim() || "No reasoning provided";
 
   return {
@@ -40,6 +43,18 @@ export function parseVoteFromAgentOutput(output: AgentOutput): Vote | undefined 
 }
 
 // ── Tally ────────────────────────────────────────────────────
+
+/**
+ * Merge a fresh round of agent votes into the proposal's existing votes
+ * (human/CLI votes cast before deliberation, or votes from earlier rounds).
+ * Incoming votes replace any prior vote from the SAME agent only; every other
+ * existing vote is preserved.
+ */
+export function mergeVotes(existing: Vote[] | undefined, incoming: Vote[]): Vote[] {
+  const incomingIds = new Set(incoming.map((vote) => vote.agentId));
+  const preserved = (existing ?? []).filter((vote) => !incomingIds.has(vote.agentId));
+  return [...preserved, ...incoming];
+}
 
 export function tallyVotes(proposal: Proposal, config: DAOConfig): TallyResult {
   const votes = proposal.votes || [];

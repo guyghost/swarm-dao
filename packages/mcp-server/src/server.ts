@@ -32,6 +32,7 @@ import {
   handleDaoProposeAmendment,
   handleDaoRate,
   handleDaoRecordOutputs,
+  handleDaoReject,
   handleDaoRollback,
   handleDaoRoundtable,
   handleDaoSetup,
@@ -224,6 +225,15 @@ export function createSwarmDaoMcpServer(workDir = resolveDaoRoot(), repository?:
         inputSchema: { type: "object", required: ["proposalId"], properties: { proposalId: { type: "number" } } },
       },
       {
+        name: "dao_reject",
+        description: "Reject (or discard) a proposal with an auditable human reason",
+        inputSchema: {
+          type: "object",
+          required: ["proposalId", "reason"],
+          properties: { proposalId: { type: "number" }, reason: { type: "string" } },
+        },
+      },
+      {
         name: "dao_dashboard",
         description: "View outcome tracking dashboard",
         inputSchema: { type: "object", properties: {} },
@@ -304,11 +314,16 @@ export function createSwarmDaoMcpServer(workDir = resolveDaoRoot(), repository?:
       },
       {
         name: "dao_config_github",
-        description: "Configure GitHub integration for branch/PR tools",
+        description:
+          "Configure GitHub integration (owner, repo, issue tracking). Authentication is delegated to the gh CLI (`gh auth login`).",
         inputSchema: {
           type: "object",
-          required: ["token", "owner", "repo"],
-          properties: { token: { type: "string" }, owner: { type: "string" }, repo: { type: "string" } },
+          required: ["owner", "repo"],
+          properties: {
+            owner: { type: "string" },
+            repo: { type: "string" },
+            issues: { type: "boolean", description: "Track proposal modifications as GitHub issues" },
+          },
         },
       },
       {
@@ -481,6 +496,8 @@ export function createSwarmDaoMcpServer(workDir = resolveDaoRoot(), repository?:
           return textResult(await handleDaoDryRun(Number(args.proposalId), repository));
         case "dao_rollback":
           return textResult(await handleDaoRollback(Number(args.proposalId), repository));
+        case "dao_reject":
+          return textResult(await handleDaoReject(ctx, Number(args.proposalId), String(args.reason)));
         case "dao_dashboard":
           return textResult(await handleDaoDashboard());
         case "dao_roundtable":
@@ -541,9 +558,9 @@ export function createSwarmDaoMcpServer(workDir = resolveDaoRoot(), repository?:
         case "dao_config_github":
           return textResult(
             await handleDaoConfigGithub(ctx, {
-              token: String(args.token),
               owner: String(args.owner),
               repo: String(args.repo),
+              issues: args.issues === true,
             }),
           );
         case "dao_github_create_branch":

@@ -117,22 +117,22 @@ describe("CLI E2E", () => {
   // ── P2: GitHub CLI command tests ───────────────────────────
 
   describe("github commands", () => {
-    it("github-config stores token, owner, and repo in config.json", async () => {
+    it("github-config stores owner, repo, and issues in config.json without any token", async () => {
       await runCLI(["init"], testDir);
 
-      const result = await runCLI(["github-config", "--token=ghp_test123", "--owner=myorg", "--repo=myrepo"], testDir);
+      const result = await runCLI(["github-config", "--owner=myorg", "--repo=myrepo", "--issues"], testDir);
 
       // Should succeed (exit 0) or fail gracefully with helpful message
       // If the command exists, verify config was stored
       if (result.code === 0) {
         expect(result.stdout).toContain("GitHub");
-        // Verify config was persisted
+        // Verify config was persisted — with NO credentials (auth is
+        // delegated to the gh CLI)
         const configPath = path.join(testDir, ".dao", "config.json");
         const configData = JSON.parse(await fs.readFile(configPath, "utf-8"));
         expect(configData.github).toBeDefined();
-        expect(configData.github.token).toBe("[REDACTED]");
-        expect(configData.github.owner).toBe("myorg");
-        expect(configData.github.repo).toBe("myrepo");
+        expect(configData.github).toEqual({ owner: "myorg", repo: "myrepo", enabled: true, issues: true });
+        expect(JSON.stringify(configData)).not.toContain("token");
       } else {
         // Command might not exist yet — verify error is about unknown command
         expect(result.stderr).toMatch(/unknown command|error/i);

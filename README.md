@@ -146,8 +146,8 @@ swarm-dao ship 1
 swarm-dao ship 1 --cascade   # also ship unexecuted dependencies first
 swarm-dao ship 1 --force     # skip dependency checks
 
-# Configure GitHub integration
-swarm-dao github-config --token <github-token> --owner myorg --repo myrepo
+# Configure GitHub integration (auth via the gh CLI; --issues tracks proposals as GitHub issues)
+swarm-dao github-config --owner myorg --repo myrepo
 
 # Create a branch for a proposal
 swarm-dao github-branch 1
@@ -464,9 +464,13 @@ Available on every host surface: the CLI (`swarm-dao github-config` /
 `@guyghost/swarm-dao-mcp` and the Copilot/Claude/Codex adapters), and the
 Pi extension and OpenCode plugin (registered as native tools).
 
+Authentication is delegated to the GitHub CLI: run `gh auth login` once and
+Swarm DAO never stores or transmits tokens. Pass `issues=true` if you want
+proposal modifications tracked as GitHub issues.
+
 ```bash
 # Via an MCP host (Claude, Codex, Copilot, or a generic MCP client)
-> dao_config_github token="ghp_..." owner="myorg" repo="myrepo" enabled=true
+> dao_config_github owner="myorg" repo="myrepo" issues=true
 
 # Create branch
 > dao_github_create_branch proposalId=1

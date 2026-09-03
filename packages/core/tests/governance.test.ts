@@ -10,6 +10,7 @@ import {
   formatAgentsTable,
   getState,
   initializeAgents,
+  mergeVotes,
   parseVoteFromOutput,
   setState,
   statusLabel,
@@ -44,6 +45,28 @@ describe("governance/voting", () => {
     expect(vote).toBeDefined();
     expect(vote?.position).toBe("for");
     expect(vote?.weight).toBe(3);
+  });
+
+  it("returns no vote when the output has no vote section", () => {
+    const output = "## Analysis\nLooks reasonable, not voting yet.";
+    expect(parseVoteFromOutput("strategist", "Product Strategist", 3, output)).toBeUndefined();
+  });
+
+  it("merges votes: incoming replaces same agent only, others preserved", () => {
+    const existing = [
+      { agentId: "cli-user", agentName: "cli-user", position: "against" as const, reasoning: "Human veto", weight: 5 },
+      { agentId: "strategist", agentName: "Strategist", position: "abstain" as const, reasoning: "Round 1", weight: 3 },
+    ];
+    const incoming = [
+      { agentId: "strategist", agentName: "Strategist", position: "for" as const, reasoning: "Round 2", weight: 3 },
+      { agentId: "architect", agentName: "Architect", position: "for" as const, reasoning: "New", weight: 3 },
+    ];
+    const merged = mergeVotes(existing, incoming);
+    expect(merged.map((vote) => [vote.agentId, vote.position])).toEqual([
+      ["cli-user", "against"],
+      ["strategist", "for"],
+      ["architect", "for"],
+    ]);
   });
 
   it("tallies votes correctly", () => {

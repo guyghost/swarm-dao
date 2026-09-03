@@ -96,23 +96,16 @@ describe("security", () => {
     expect(parsed.github.token).toBe("[REDACTED]");
   });
 
-  it("integrations use environment variables when token is redacted", async () => {
-    const { configureGitHub, isGitHubEnabled } = await import("../src/integrations/github.js");
+  it("GitHub integration stores no credentials (auth is delegated to the gh CLI)", async () => {
+    const { configureGitHub, getGitHubConfig, isGitHubEnabled } = await import("../src/integrations/github.js");
 
-    // Set up with redacted token
-    configureGitHub({ enabled: true, token: "[REDACTED]", owner: "o", repo: "r" });
-
-    // Without env var, it should be disabled
-    const oldEnv = process.env.DAO_GITHUB_TOKEN;
-    delete process.env.DAO_GITHUB_TOKEN;
-    expect(isGitHubEnabled()).toBe(false);
-
-    // With env var, it should be enabled
+    // Even with a token-shaped env var present, the integration neither reads
+    // nor stores credentials; enablement depends only on owner/repo/enabled.
     process.env.DAO_GITHUB_TOKEN = "env-token";
+    configureGitHub({ enabled: true, owner: "o", repo: "r" });
     expect(isGitHubEnabled()).toBe(true);
+    expect(getGitHubConfig()).not.toHaveProperty("token");
 
-    // Clean up
-    if (oldEnv) process.env.DAO_GITHUB_TOKEN = oldEnv;
-    else delete process.env.DAO_GITHUB_TOKEN;
+    if (process.env.DAO_GITHUB_TOKEN === "env-token") delete process.env.DAO_GITHUB_TOKEN;
   });
 });

@@ -48,6 +48,7 @@ import {
   handleDaoGithubOpenPr,
   handleDaoPropose,
   handleDaoRate,
+  handleDaoReject,
   handleDaoRollback,
   handleDaoRoundtable,
   handleDaoSetup,
@@ -519,10 +520,11 @@ const DAO_ARG_USAGE: Record<string, string> = {
   dao_artefacts: "/dao artefacts <proposalId>",
   dao_dry_run: "/dao dry-run <proposalId>",
   dao_rate: '/dao rate <proposalId> <1-5> "<comment>"',
+  dao_reject: '/dao reject-proposal <proposalId> --reason "<text>"',
   dao_update_proposal:
     "/dao update-proposal <proposalId> [--problem <text>] [--criteria <a,b>] [--metrics <a,b>] [--rollback <a,b>]",
   dao_check_edit: "/dao check-edit <path> [<path…>]",
-  dao_config_github: "/dao github-config --token <token> --owner <owner> --repo <repo>",
+  dao_config_github: "/dao github-config --owner <owner> --repo <repo> [--issues]",
   dao_github_create_branch: "/dao github-branch <proposalId>",
   dao_github_open_pr: "/dao github-pr <proposalId> <headBranch>",
   dao_roundtable: "/dao roundtable",
@@ -619,6 +621,16 @@ export function parseDaoToolArgs(toolName: string, tokens: string[]): Record<str
       return { title, type, description: descriptionTokens.join(" ") };
     }
 
+    case "dao_reject": {
+      const split = splitFlags({ reason: "string" });
+      if (typeof split === "string") return split;
+      const proposalId = proposalIdFrom(split.positional[0]);
+      if (typeof proposalId === "string") return proposalId;
+      const reason = split.flags.reason;
+      if (typeof reason !== "string") return usage;
+      return { proposalId, reason };
+    }
+
     case "dao_rate": {
       const [idRaw, scoreRaw, ...commentTokens] = tokens;
       const proposalId = idRaw === undefined ? Number.NaN : Number.parseInt(idRaw, 10);
@@ -648,13 +660,12 @@ export function parseDaoToolArgs(toolName: string, tokens: string[]): Record<str
     }
 
     case "dao_config_github": {
-      const split = splitFlags({ token: "string", owner: "string", repo: "string" });
+      const split = splitFlags({ owner: "string", repo: "string", issues: "boolean" });
       if (typeof split === "string") return split;
-      const token = split.flags.token;
       const owner = split.flags.owner;
       const repo = split.flags.repo;
-      if (typeof token !== "string" || typeof owner !== "string" || typeof repo !== "string") return usage;
-      return { token, owner, repo };
+      if (typeof owner !== "string" || typeof repo !== "string") return usage;
+      return { owner, repo, issues: split.flags.issues === true };
     }
 
     case "dao_github_open_pr": {
@@ -793,6 +804,11 @@ interface DaoRollbackParams {
   proposalId: number;
 }
 
+interface DaoRejectParams {
+  proposalId: number;
+  reason: string;
+}
+
 type DaoRoundtableParams = Record<string, never>;
 
 interface DaoUpdateProposalParams {
@@ -804,9 +820,9 @@ interface DaoUpdateProposalParams {
 }
 
 interface DaoConfigGithubParams {
-  token: string;
   owner: string;
   repo: string;
+  issues?: boolean;
 }
 
 interface DaoGithubBranchParams {
@@ -979,7 +995,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
       }
     }
     daoContext += `\n- Config: quorum=${state.config.quorumPercent}%, approval=${state.config.approvalThreshold}%, risk=${state.config.riskThreshold}/10`;
-    daoContext += `\n\nAvailable tools: dao_setup, dao_propose, dao_deliberate, dao_check, dao_plan, dao_execute, dao_ship, dao_audit, dao_artefacts, dao_rate, dao_dashboard, dao_dry_run, dao_rollback, dao_roundtable, dao_update_proposal, dao_check_edit, dao_config_github, dao_github_create_branch, dao_github_open_pr, dao_attention, dao_graph_status, dao_graph_submit, dao_product_status, dao_product_submit, dao_improve_status, dao_improve_once`;
+    daoContext += `\n\nAvailable tools: dao_setup, dao_propose, dao_deliberate, dao_check, dao_plan, dao_execute, dao_ship, dao_audit, dao_artefacts, dao_rate, dao_dashboard, dao_dry_run, dao_rollback, dao_reject, dao_roundtable, dao_update_proposal, dao_check_edit, dao_config_github, dao_github_create_branch, dao_github_open_pr, dao_attention, dao_graph_status, dao_graph_submit, dao_product_status, dao_product_submit, dao_improve_status, dao_improve_once`;
 
     return { systemPrompt: event.systemPrompt + daoContext };
   });
@@ -1271,6 +1287,32 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
     },
   });
 
+  // ── Tool: dao_reject ───────────────────────────────────
+  registerDaoTool({
+    name: "dao_reject",
+    label: "DAO Reject",
+    description: "Reject (or discard) a proposal with an auditable human reason",
+    parameters: Type.Object({
+      proposalId: Type.Number(),
+      reason: Type.String({ description: "Auditable rejection reason" }),
+    }),
+    async execute(_id, params: DaoRejectParams) {
+      return toolResult(
+        await handleDaoReject(
+          {
+            adapter: createPiHostAdapter(pi),
+            workDir: process.cwd(),
+            deliberationMode: "auto",
+            controlToolName: "dao_check",
+            repository,
+          },
+          params.proposalId,
+          params.reason,
+        ),
+      );
+    },
+  });
+
   // ── Tool: dao_roundtable ─────────────────────────────────
   registerDaoTool({
     name: "dao_roundtable",
@@ -1348,11 +1390,12 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
   registerDaoTool({
     name: "dao_config_github",
     label: "DAO GitHub Config",
-    description: "Configure the GitHub integration (token, owner, repo)",
+    description:
+      "Configure the GitHub integration (owner, repo, issue tracking). Authentication is delegated to the gh CLI (`gh auth login`).",
     parameters: Type.Object({
-      token: Type.String({ description: "GitHub personal access token" }),
       owner: Type.String({ description: "Repository owner (user or org)" }),
       repo: Type.String({ description: "Repository name" }),
+      issues: Type.Optional(Type.Boolean({ description: "Track proposal modifications as GitHub issues" })),
     }),
     async execute(_id, params: DaoConfigGithubParams) {
       return toolResult(

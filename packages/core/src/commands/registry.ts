@@ -304,14 +304,23 @@ export const DAO_COMMANDS: readonly DaoCommand[] = [
     args: "title description amendmentType [agentId] [agentChanges] [configChanges] [addGates] [removeGates]",
     hosts: ["mcp", "claude", "copilot", "codex", "opencode"],
   },
+  {
+    id: "reject-proposal",
+    phase: "governance",
+    summary: "Reject a proposal with an auditable human reason",
+    tool: "dao_reject",
+    mutating: true,
+    args: "proposalId --reason <text>",
+    hosts: ["mcp", "claude", "copilot", "codex", "pi", "opencode"],
+  },
 
   // ── GitHub integration ────────────────────────────────────────
   {
     id: "github-config",
     phase: "github",
-    summary: "Configure the GitHub integration",
+    summary: "Configure the GitHub integration (auth via the gh CLI)",
     tool: "dao_config_github",
-    args: "--token <t> --owner <o> --repo <r>",
+    args: "--owner <o> --repo <r> [--issues]",
     hosts: ["mcp", "claude", "copilot", "codex", "pi", "opencode"],
   },
   {

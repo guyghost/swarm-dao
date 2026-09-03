@@ -1,6 +1,6 @@
 import { dispatchProposalEvent } from "../../governance/proposal.utils.js";
 import { calculateCompositeScore } from "../../governance/scoring.js";
-import { parseVoteFromOutput, tallyVotes } from "../../governance/voting.js";
+import { mergeVotes, parseVoteFromOutput, tallyVotes } from "../../governance/voting.js";
 import { dispatchSequentialSwarm } from "../../intelligence/sequential.js";
 import type { SwarmProgressUpdate } from "../../intelligence/swarm.js";
 import { createDispatchModelContext, dispatchSwarm } from "../../intelligence/swarm.js";
@@ -33,6 +33,8 @@ export class DeliberateProposalUseCase {
     strategy?: "parallel" | "sequential";
     /** Sequential only: analysis characters forwarded per prior agent. */
     charsPerAgent?: number;
+    /** Shared project brief injected into every participant's prompt. */
+    projectBrief?: string;
   }): Promise<DeliberateProposalResult> {
     const state = this.dependencies.repository.get();
     if (!state.initialized) return { ok: false, error: "DAO not initialized. Run dao_setup first." };
@@ -53,6 +55,7 @@ export class DeliberateProposalUseCase {
         ? await dispatchSequentialSwarm(proposal, agents, this.dependencies.worker, modelContext, {
             onUpdate: command.onUpdate,
             charsPerAgent: command.charsPerAgent,
+            projectBrief: command.projectBrief,
           })
         : await dispatchSwarm(
             proposal,
@@ -61,20 +64,27 @@ export class DeliberateProposalUseCase {
             state.config.maxConcurrent,
             modelContext,
             command.onUpdate,
+            undefined,
+            { projectBrief: command.projectBrief },
           );
     const agentById = new Map(agents.map((agent) => [agent.id, agent]));
-    const votes = outputs
-      .filter((output) => output.content)
-      .map((output) =>
-        parseVoteFromOutput(
-          output.agentId,
-          output.agentName,
-          agentById.get(output.agentId)?.weight ?? 1,
-          output.content,
-        ),
-      )
-      .filter((vote): vote is Vote => vote !== undefined);
-    proposal.votes = votes;
+    const votes: Vote[] = [];
+    for (const output of outputs) {
+      if (!output.content) continue;
+      const vote = parseVoteFromOutput(
+        output.agentId,
+        output.agentName,
+        agentById.get(output.agentId)?.weight ?? 1,
+        output.content,
+      );
+      if (vote) {
+        output.vote = vote;
+        votes.push(vote);
+      }
+    }
+    // Preserve votes cast outside this deliberation round (e.g. human votes
+    // via the CLI); agent outputs only replace votes from their own agent.
+    proposal.votes = mergeVotes(proposal.votes, votes);
     proposal.agentOutputs = outputs;
     const compositeScore = calculateCompositeScore(outputs);
     proposal.compositeScore = compositeScore;

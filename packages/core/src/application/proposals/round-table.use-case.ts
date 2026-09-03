@@ -24,6 +24,8 @@ export class RoundTableUseCase {
     agents?: DAOAgent[];
     parentSessionModel?: string;
     hostDefaultModel?: string;
+    /** Shared project brief injected into every participant's prompt. */
+    projectBrief?: string;
   }): Promise<RoundTableResult> {
     const state = this.dependencies.repository.get();
     if (!state.initialized) return { ok: false, error: "DAO not initialized. Run dao_setup first." };
@@ -38,6 +40,7 @@ export class RoundTableUseCase {
       state.config.maxConcurrent,
       modelContext,
       this.dependencies.clock,
+      { projectBrief: command.projectBrief },
     );
     const proposalIds = new Map<string, number>();
     const stagedRepository: DaoStateRepositoryPort = {

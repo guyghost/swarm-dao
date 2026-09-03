@@ -36,6 +36,7 @@ import {
   listProposals,
   loadConfig,
   PROPOSAL_TYPES,
+  RejectProposalUseCase,
   recordAudit,
   ShipProposalUseCase,
   saveState,
@@ -171,6 +172,7 @@ const CLI_IMPLEMENTED = [
   "list",
   "show",
   "vote",
+  "reject-proposal",
   "ship",
   "github-config",
   "github-branch",
@@ -199,8 +201,9 @@ const CLI_USAGE_DETAILS: Record<string, string> = {
   list: "  list [--status <s>] [--type <T>]",
   show: "  show <id>",
   vote: "  vote <id> --position <for|against|abstain> --reasoning <text>\n        [--weight <n>] [--agent <name>]",
+  "reject-proposal": "  reject-proposal <id> --reason <text>",
   ship: "  ship <id> [--cascade] [--force]",
-  "github-config": "  github-config --token <t> --owner <o> --repo <r>",
+  "github-config": "  github-config --owner <o> --repo <r> [--issues]",
   "github-branch": "  github-branch <proposal-id>",
   "github-pr": "  github-pr <proposal-id> --head-branch <b>",
   config: "  config",
@@ -496,6 +499,30 @@ async function cmdVote(cwd: string, positional: string[], flags: Record<string, 
   info(c.dim(`  → next: swarm-dao show ${id} · ship when votes settle: swarm-dao ship ${id}`));
 }
 
+async function cmdRejectProposal(
+  cwd: string,
+  positional: string[],
+  flags: Record<string, string | true>,
+): Promise<void> {
+  const idStr = positional[0];
+  if (!idStr) err("usage: swarm-dao reject-proposal <id> --reason <text>");
+  const id = Number(idStr);
+  if (!Number.isInteger(id)) err(`invalid proposal id '${idStr}'`);
+
+  const reason = typeof flags.reason === "string" ? flags.reason : "";
+  if (!reason.trim()) err("--reason is required (it is recorded in the audit trail)");
+
+  const repository = await ensureLoaded(cwd);
+  const result = await new RejectProposalUseCase({ repository, clock: systemClock }).execute({
+    proposalId: id,
+    actor: "cli-user",
+    reason,
+  });
+  if (!result.ok) err(result.error);
+  info(`✓ Proposal #${id} rejected (${result.via}) — status: rejected`);
+  info(c.dim(`  → audit trail: swarm-dao audit --proposal ${id}`));
+}
+
 async function cmdShip(cwd: string, positional: string[], flags: Record<string, string | true>): Promise<void> {
   const idStr = positional[0];
   if (!idStr) err("usage: swarm-dao ship <id> [--cascade] [--force]");
@@ -554,17 +581,16 @@ async function cmdShip(cwd: string, positional: string[], flags: Record<string, 
 }
 
 async function cmdGithubConfig(cwd: string, flags: Record<string, string | true>): Promise<void> {
-  const token = typeof flags.token === "string" ? flags.token : "";
   const owner = typeof flags.owner === "string" ? flags.owner : "";
   const repo = typeof flags.repo === "string" ? flags.repo : "";
 
-  if (!token) err("--token is required");
   if (!owner) err("--owner is required");
   if (!repo) err("--repo is required");
 
-  const githubConfig = { token, owner, repo, enabled: true };
+  const githubConfig = { owner, repo, issues: flags.issues === true, enabled: true };
 
-  // Persist to .dao/config.json with token redacted
+  // Persist to .dao/config.json — no credentials are stored: authentication
+  // is delegated to the GitHub CLI (`gh auth login`).
   const daoRoot = getDaoRoot(cwd);
   await fs.mkdir(daoRoot, { recursive: true });
   const configPath = path.join(daoRoot, "config.json");
@@ -574,14 +600,18 @@ async function cmdGithubConfig(cwd: string, flags: Record<string, string | true>
   } catch {
     /* no existing config */
   }
-  configData.github = { ...githubConfig, token: "[REDACTED]" };
+  configData.github = { owner, repo, enabled: true, issues: flags.issues === true };
   await fs.writeFile(configPath, JSON.stringify(configData, null, 2), "utf-8");
 
   // Also configure in-memory for current process
   configureGitHub(githubConfig);
   info(`✓ GitHub config set: ${owner}/${repo}`);
-  info("⚠️  Note: The token has been redacted in .dao/config.json for security.");
-  info("   To avoid re-entering it, set the DAO_GITHUB_TOKEN environment variable.");
+  info("   Authentication is delegated to the GitHub CLI — run `gh auth login` once if you have not already.");
+  info(
+    githubConfig.issues
+      ? "   Proposal tracking via GitHub issues is enabled."
+      : "   Issue tracking is disabled (pass --issues to enable).",
+  );
 }
 
 /**
@@ -594,8 +624,8 @@ async function loadGitHubConfigFromStorage(cwd: string): Promise<boolean> {
   try {
     const configData = JSON.parse(await fs.readFile(configPath, "utf-8"));
     const github = configData.github;
-    if (github?.token && github?.owner && github?.repo) {
-      configureGitHub({ ...github, enabled: true });
+    if (github?.owner && github?.repo) {
+      configureGitHub({ owner: github.owner, repo: github.repo, issues: github.issues === true, enabled: true });
       return true;
     }
   } catch {
@@ -616,7 +646,7 @@ async function cmdGithubBranch(cwd: string, positional: string[]): Promise<void>
 
   const configured = await loadGitHubConfigFromStorage(cwd);
   if (!configured || !isGitHubEnabled()) {
-    err("GitHub not configured. Run: swarm-dao github-config --token <t> --owner <o> --repo <r>");
+    err("GitHub not configured. Run: swarm-dao github-config --owner <o> --repo <r> [--issues]");
   }
 
   const branchName = ghBranchNameFor(p);
@@ -641,7 +671,7 @@ async function cmdGithubPr(cwd: string, positional: string[], flags: Record<stri
 
   const configured = await loadGitHubConfigFromStorage(cwd);
   if (!configured || !isGitHubEnabled()) {
-    err("GitHub not configured. Run: swarm-dao github-config --token <t> --owner <o> --repo <r>");
+    err("GitHub not configured. Run: swarm-dao github-config --owner <o> --repo <r> [--issues]");
   }
 
   const result = await ghCreatePullRequest(p, { headBranch });
@@ -1217,6 +1247,9 @@ export async function main(argv: string[], cwd: string = process.cwd()): Promise
         return await cmdProduct(cwd, positional, flags);
       case "vote":
         await cmdVote(cwd, positional, flags);
+        return 0;
+      case "reject-proposal":
+        await cmdRejectProposal(cwd, positional, flags);
         return 0;
       case "ship":
         await cmdShip(cwd, positional, flags);

@@ -38,7 +38,10 @@ export function buildDispatchInstructions(
   proposal: Proposal,
   agents: DAOAgent[],
   modelContext: ModelResolutionContext,
+  options: { projectBrief?: string } = {},
 ): DispatchInstruction[] {
+  const brief = options.projectBrief?.trim();
+  const briefSection = brief ? `${brief}\n\n` : "";
   const basePrompt = `You are participating in DAO governance deliberation for the following proposal.
 
 ## Proposal #${proposal.id}: ${proposal.title}
@@ -54,8 +57,7 @@ ${
     : ""
 }
 ${proposal.successMetrics?.length ? `**Success Metrics:**\n${proposal.successMetrics.map((m) => `- ${m}`).join("\n")}\n\n` : ""}
-
-Evaluate this proposal carefully. Provide your analysis, vote, and scoring.`;
+${briefSection}Evaluate this proposal carefully. Provide your analysis, vote, and scoring.`;
 
   return agents.map((agent) => {
     const model = resolveAgentModel(agent, modelContext);
@@ -137,8 +139,9 @@ export async function dispatchSwarm(
   modelContext: ModelResolutionContext,
   onUpdate?: (update: SwarmProgressUpdate) => void,
   delegation?: { config: DAOConfig },
+  options?: { projectBrief?: string },
 ): Promise<AgentOutput[]> {
-  const instructions = buildDispatchInstructions(proposal, agents, modelContext);
+  const instructions = buildDispatchInstructions(proposal, agents, modelContext, options);
   const outputs: AgentOutput[] = [];
   const agentById = new Map(agents.map((a) => [a.id, a]));
   const delegationEnabled = delegation?.config?.delegation?.enabled === true;

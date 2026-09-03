@@ -43,11 +43,12 @@ swarm-dao setup   # seeds the 7 default agents
 ### 2. GitHub integration (optional — for branch/PR automation)
 
 ```bash
-swarm-dao github-config --token <github-token> --owner myorg --repo myrepo
+swarm-dao github-config --owner myorg --repo myrepo [--issues]
 ```
 
-The token is redacted in `.dao/config.json`; to avoid re-entering it, export
-`DAO_GITHUB_TOKEN`.
+Authentication is delegated to the GitHub CLI — run `gh auth login` once.
+Swarm DAO stores no tokens in `.dao/config.json`. Pass `--issues` to track
+proposal modifications as GitHub issues.
 
 ### 3. Improvement loop (optional)
 
@@ -106,6 +107,7 @@ missing runtime is an honest error, never a silent host fallback.
 | `list` | List proposals (`--status`, `--type`) |
 | `show <id>` | Show full proposal details |
 | `vote <id>` | Cast an agent vote |
+| `reject-proposal <id>` | Reject a proposal with an auditable reason (`--reason <text>`) |
 | `ship <id>` | Execute an approved proposal |
 | `github-config` | Configure the GitHub integration |
 | `github-branch <id>` | Create the proposal's GitHub branch |
@@ -125,6 +127,8 @@ swarm-dao vote 1 --position for --reasoning "Low risk, high impact" --weight 3 [
 
 swarm-dao ship 1 [--cascade]      # --cascade ships unexecuted dependencies first
 swarm-dao ship 1 --force          # skip dependency checks (recorded bypass)
+
+swarm-dao reject-proposal 1 --reason "Risk zone underestimated"
 ```
 
 Proposal types: `product-feature`, `security-change`, `technical-change`,

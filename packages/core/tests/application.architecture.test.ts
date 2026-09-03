@@ -17,6 +17,7 @@ import {
   presentProposalCreated,
   RateProposalUseCase,
   RecordDeliberationOutputsUseCase,
+  RejectProposalUseCase,
   RollbackProposalUseCase,
   RoundTableUseCase,
   ShipProposalUseCase,
@@ -217,6 +218,68 @@ describe("application architecture", () => {
       "deliberation_started",
       "deliberation_approved",
     ]);
+  });
+
+  it("deliberation preserves votes cast before it ran (e.g. human CLI votes)", async () => {
+    const state = createInitialState("/project/.dao");
+    const agent: DAOAgent = {
+      id: "architect",
+      name: "Architect",
+      role: "Architecture",
+      description: "Reviews architecture",
+      systemPrompt: "Review the proposal",
+      weight: 3,
+    };
+    state.initialized = true;
+    state.agents = [agent];
+    state.proposals.push({
+      id: 1,
+      title: "Human vote survives",
+      type: "technical-change",
+      description: "Merge votes instead of replacing them",
+      proposedBy: "user",
+      status: "open",
+      votes: [
+        {
+          agentId: "cli-user",
+          agentName: "cli-user",
+          position: "against",
+          reasoning: "Human veto",
+          weight: 5,
+        },
+      ],
+      agentOutputs: [],
+      createdAt: "2031-01-01T00:00:00.000Z",
+    });
+    const worker = {
+      spawnAgent: async (): Promise<AgentOutput> => ({
+        agentId: agent.id,
+        agentName: agent.name,
+        role: agent.role,
+        content: "## Vote\nfor\n\n## Reasoning\nLooks good.",
+        durationMs: 1,
+      }),
+      spawnAgents: async (): Promise<AgentOutput[]> => [],
+    };
+    const repository = new InMemoryDaoStateRepository(state);
+    const useCase = new DeliberateProposalUseCase({
+      repository,
+      worker,
+      clock: { now: () => "2031-01-01T00:01:00.000Z" },
+    });
+
+    const result = await useCase.execute({ proposalId: 1 });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const votes = repository.get().proposals[0]?.votes ?? [];
+    expect(votes.map((vote) => [vote.agentId, vote.position])).toEqual([
+      ["cli-user", "against"],
+      ["architect", "for"],
+    ]);
+    // Human against (w=5) outweighs the agent for (w=3): the human vote counts.
+    expect(result.tally.weightedAgainst).toBe(5);
+    expect(result.tally.approved).toBe(false);
   });
 
   it("records manually collected AI signals through the same model boundary", async () => {
@@ -535,5 +598,96 @@ describe("application architecture", () => {
 
     expect(result).toMatchObject({ ok: true, snapshot: { commitSha: "abc123def456" } });
     expect(repository.get().proposals[0]?.status).toBe("executed");
+  });
+
+  it("rejects an approved proposal with an auditable human reason (human veto)", async () => {
+    const state = createInitialState("/project/.dao");
+    state.initialized = true;
+    state.proposals.push({
+      id: 1,
+      title: "Agents approved it",
+      type: "technical-change",
+      description: "Human disagrees",
+      proposedBy: "user",
+      status: "approved",
+      votes: [],
+      agentOutputs: [],
+      createdAt: "2031-01-01T00:00:00.000Z",
+    });
+    const repository = new InMemoryDaoStateRepository(state);
+    const clock = { now: () => "2031-01-01T00:01:00.000Z" };
+
+    const result = await new RejectProposalUseCase({ repository, clock }).execute({
+      proposalId: 1,
+      actor: "cli-user",
+      reason: "Risk zone underestimated",
+    });
+
+    expect(result).toMatchObject({ ok: true, status: "rejected", via: "REJECT" });
+    expect(repository.get().proposals[0]?.status).toBe("rejected");
+    const audit = repository.get().auditLog.at(-1);
+    expect(audit).toMatchObject({
+      action: "proposal_rejected",
+      actor: "cli-user",
+      proposalId: 1,
+    });
+    expect(audit?.details).toContain("Risk zone underestimated");
+  });
+
+  it("discards an open proposal via DISCARD and refuses an empty reason", async () => {
+    const state = createInitialState("/project/.dao");
+    state.initialized = true;
+    state.proposals.push({
+      id: 7,
+      title: "Still open",
+      type: "product-feature",
+      description: "Not yet deliberated",
+      proposedBy: "user",
+      status: "open",
+      votes: [],
+      agentOutputs: [],
+      createdAt: "2031-01-01T00:00:00.000Z",
+    });
+    const repository = new InMemoryDaoStateRepository(state);
+    const clock = { now: () => "2031-01-01T00:01:00.000Z" };
+    const useCase = new RejectProposalUseCase({ repository, clock });
+
+    expect(await useCase.execute({ proposalId: 7, actor: "cli-user", reason: "   " })).toMatchObject({
+      ok: false,
+    });
+
+    const result = await useCase.execute({ proposalId: 7, actor: "cli-user", reason: "Duplicate of #3" });
+    expect(result).toMatchObject({ ok: true, via: "DISCARD", status: "rejected" });
+    expect(repository.get().proposals[0]?.status).toBe("rejected");
+  });
+
+  it("refuses to reject a terminal proposal", async () => {
+    const state = createInitialState("/project/.dao");
+    state.initialized = true;
+    state.proposals.push({
+      id: 2,
+      title: "Already executed",
+      type: "technical-change",
+      description: "Terminal",
+      proposedBy: "user",
+      status: "executed",
+      votes: [],
+      agentOutputs: [],
+      createdAt: "2031-01-01T00:00:00.000Z",
+      resolvedAt: "2031-01-01T00:01:00.000Z",
+    });
+    const repository = new InMemoryDaoStateRepository(state);
+
+    const result = await new RejectProposalUseCase({
+      repository,
+      clock: { now: () => "2031-01-01T00:02:00.000Z" },
+    }).execute({
+      proposalId: 2,
+      actor: "cli-user",
+      reason: "Too late",
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain("terminal");
   });
 });

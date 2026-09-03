@@ -2,6 +2,7 @@ import type { InitializeDaoResult } from "../application/initialize-dao.use-case
 import type { CreateAmendmentProposalResult } from "../application/proposals/create-amendment-proposal.use-case.js";
 import type { DeliberateProposalResult } from "../application/proposals/deliberate-proposal.use-case.js";
 import type { ExecuteProposalResult } from "../application/proposals/execute-proposal.use-case.js";
+import type { RejectProposalResult } from "../application/proposals/reject-proposal.use-case.js";
 import type { RollbackProposalResult } from "../application/proposals/rollback-proposal.use-case.js";
 import type { ShipProposalResult } from "../application/proposals/ship-proposal.use-case.js";
 import { formatControlResult } from "../control/gates.js";
@@ -64,4 +65,8 @@ export function presentProposalUpdated(proposal: Proposal): string {
 
 export function presentRollback(result: RollbackProposalResult): string {
   return result.ok ? `# ⏪ Rollback Successful\n\n${result.message}` : `# ❌ Rollback Failed\n\n${result.error}`;
+}
+
+export function presentRejection(result: Extract<RejectProposalResult, { ok: true }>): string {
+  return `# 🚫 Proposal Rejected — #${result.proposalId}\n\n**Via:** ${result.via}\n**Status:** rejected (terminal)\n\nThe rejection and its reason are recorded in the audit trail.`;
 }

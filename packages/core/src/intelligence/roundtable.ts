@@ -23,9 +23,9 @@ export interface RoundTableSuggestion {
 
 const SUGGESTION_PROMPT = `You are participating in a DAO Round Table.
 
-Your task: suggest ONE concrete proposal that would improve the project.
+Your task: suggest ONE concrete proposal that would improve the project described above (see the Project Brief when provided).
 
-Analyze the current codebase and suggest something specific, actionable, and valuable.
+Analyze what you know about the project and suggest something specific, actionable, and valuable.
 
 Output format:
 ## Suggested Proposal
@@ -41,8 +41,10 @@ export async function runRoundTable(
   maxConcurrent: number,
   modelContext: ModelResolutionContext,
   clock: ClockPort = { now: () => new Date().toISOString() },
+  options: { projectBrief?: string } = {},
 ): Promise<RoundTableSuggestion[]> {
   const suggestions: RoundTableSuggestion[] = [];
+  const brief = options.projectBrief?.trim();
 
   // Process in batches
   for (let i = 0; i < agents.length; i += maxConcurrent) {
@@ -63,7 +65,7 @@ export async function runRoundTable(
             agentOutputs: [],
             createdAt: clock.now(),
           },
-          systemPrompt: `${agent.systemPrompt}\n\n${SUGGESTION_PROMPT}`,
+          systemPrompt: `${agent.systemPrompt}\n\n${brief ? `${brief}\n\n` : ""}${SUGGESTION_PROMPT}`,
           model: resolveAgentModel(agent, modelContext),
           timeoutMs: 60_000,
         });

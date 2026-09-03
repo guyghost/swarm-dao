@@ -110,11 +110,12 @@ For example, `vote` is CLI-only (deterministic), and the GitHub commands are MCP
 |---|---|---|---|
 | `/dao check-edit` | `paths` | `dao_check_edit` | Check whether paths may be edited under the configured mode |
 | `/dao propose-amendment` | `title description amendmentType [agentId] [agentChanges] [configChanges] [addGates] [removeGates]` | `dao_propose_amendment` | Propose an amendment (agents, config, quorum, gates) |
+| `/dao reject-proposal` | `proposalId --reason <text>` | `dao_reject` | Reject a proposal with an auditable human reason |
 
 ### GitHub
 | Command | Args | Tool | Summary |
 |---|---|---|---|
-| `/dao github-config` | `--token <t> --owner <o> --repo <r>` | `dao_config_github` | Configure the GitHub integration |
+| `/dao github-config` | `--owner <o> --repo <r> [--issues]` | `dao_config_github` | Configure the GitHub integration (auth via the gh CLI) |
 | `/dao github-branch` | `proposalId` | `dao_github_create_branch` | Create a GitHub branch for a proposal |
 | `/dao github-pr` | `proposalId --head-branch <b>` | `dao_github_open_pr` | Open a GitHub pull request for a proposal |
 

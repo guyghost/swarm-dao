@@ -1,18 +1,23 @@
 // ============================================================
-// Swarm DAO Core — GitHub Integration
+// Swarm DAO Core — GitHub Integration (via the `gh` CLI)
 // ============================================================
+//
+// Authentication is delegated to the GitHub CLI: the user runs
+// `gh auth login` once and Swarm DAO never stores or transmits
+// tokens. Every API call is a `gh api` subprocess, so credentials
+// are managed entirely by `gh`.
 
+import { spawn } from "node:child_process";
 import { logger } from "../observability/logging.js";
 import type { Proposal } from "../types/index.js";
-import { HttpRequestError, requestJson } from "./http.js";
 import { slugify } from "./utils.js";
 
 interface GitHubConfig {
-  token: string;
   owner: string;
   repo: string;
   enabled: boolean;
-  apiBase?: string;
+  /** Opt-in: track proposal modifications as GitHub issues. */
+  issues?: boolean;
   defaultBranch?: string;
 }
 
@@ -26,28 +31,82 @@ export function getGitHubConfig(): GitHubConfig | null {
   return config;
 }
 
-function getAuthToken(): string | undefined {
-  const token = config?.token;
-  if (token && token !== "[REDACTED]") {
-    return token;
-  }
-  return process.env.DAO_GITHUB_TOKEN;
-}
-
 export function isGitHubEnabled(): boolean {
-  return config?.enabled === true && !!getAuthToken() && !!config.owner && !!config.repo;
+  return config?.enabled === true && !!config.owner && !!config.repo;
 }
 
-function getApiBase(): string {
-  return config?.apiBase || "https://api.github.com";
+/** Whether proposal modifications should be mirrored to GitHub issues. */
+export function isIssueSyncEnabled(): boolean {
+  return isGitHubEnabled() && config?.issues === true;
 }
 
-function getAuthHeaders(): Record<string, string> {
-  return {
-    Authorization: `Bearer ${getAuthToken()}`,
-    Accept: "application/vnd.github+json",
-    "X-GitHub-Api-Version": "2022-11-28",
-  };
+const GH_TIMEOUT_MS = 30_000;
+
+function runGh(args: string[], input?: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = spawn("gh", args, { stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"] });
+    const stdoutStream = child.stdout;
+    const stderrStream = child.stderr;
+    const stdinStream = child.stdin;
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    const timer = setTimeout(() => {
+      child.kill("SIGTERM");
+      if (!settled) {
+        settled = true;
+        reject(new Error(`gh ${args.join(" ")} timed out after ${GH_TIMEOUT_MS}ms`));
+      }
+    }, GH_TIMEOUT_MS);
+    stdoutStream?.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    stderrStream?.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.on("error", (error) => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timer);
+        reject(error);
+      }
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      if (settled) return;
+      settled = true;
+      if (code === 0) resolve(stdout);
+      else reject(new Error(stderr.trim() || `gh exited with code ${code}`));
+    });
+    if (input !== undefined) {
+      stdinStream?.on("error", () => {});
+      stdinStream?.write(input);
+      stdinStream?.end();
+    }
+  });
+}
+
+/** Call `gh api <route>` and parse the JSON response (null for empty bodies). */
+async function ghApi<T>(route: string, options?: { method?: string; body?: unknown }): Promise<T> {
+  const args = ["api", route];
+  if (options?.method) args.push("-X", options.method);
+  if (options?.body !== undefined) args.push("--input", "-");
+  let stdout: string;
+  try {
+    stdout = await runGh(args, options?.body === undefined ? undefined : JSON.stringify(options.body));
+  } catch (error) {
+    throw new Error(
+      `gh api ${route} failed: ${error instanceof Error ? error.message : String(error)}. ` +
+        "Ensure the GitHub CLI is installed and authenticated (`gh auth login`).",
+    );
+  }
+  const text = stdout.trim();
+  if (!text) return null as T;
+  try {
+    return JSON.parse(text) as T;
+  } catch (error) {
+    throw new Error(`Invalid JSON from gh api ${route}: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 export function ghBranchNameFor(proposal: Proposal): string {
@@ -63,30 +122,23 @@ export async function ghCreateBranch(
   const base = baseBranch || config?.defaultBranch || "main";
 
   // Get base branch SHA
-  let refData: { object?: { sha: string } } | null;
-  try {
-    ({ data: refData } = await requestJson<{ object?: { sha: string } }>(
-      `${getApiBase()}/repos/${config?.owner}/${config?.repo}/git/ref/heads/${base}`,
-      {
-        headers: getAuthHeaders(),
-      },
-    ));
-  } catch (error) {
-    if (error instanceof HttpRequestError) {
-      throw new Error(`Failed to get ref for ${base}: ${error.status}`);
-    }
-    throw error;
-  }
+  const refData = await ghApi<{ object?: { sha: string } }>(
+    `repos/${config?.owner}/${config?.repo}/git/ref/heads/${base}`,
+  );
   const sha = refData?.object?.sha;
   if (!sha) return null;
 
-  // Create branch
-  await requestJson<unknown>(`${getApiBase()}/repos/${config?.owner}/${config?.repo}/git/refs`, {
-    method: "POST",
-    headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
-    body: JSON.stringify({ ref: `refs/heads/${branchName}`, sha }),
-    allowStatuses: [422],
-  });
+  // Create branch. A 422 "already exists" is tolerated so re-runs are
+  // idempotent (matching the previous REST integration behaviour).
+  try {
+    await ghApi<unknown>(`repos/${config?.owner}/${config?.repo}/git/refs`, {
+      method: "POST",
+      body: { ref: `refs/heads/${branchName}`, sha },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!message.includes("already exists")) throw error;
+  }
 
   return { ref: `refs/heads/${branchName}`, sha };
 }
@@ -102,30 +154,16 @@ export async function ghCreatePullRequest(
 ): Promise<{ number: number; url: string } | null> {
   if (!isGitHubEnabled()) return null;
 
-  const body = buildPRBody(proposal, options.linkedIssue);
-
-  let data: { number: number; html_url: string } | null;
-  try {
-    ({ data } = await requestJson<{ number: number; html_url: string }>(
-      `${getApiBase()}/repos/${config?.owner}/${config?.repo}/pulls`,
-      {
-        method: "POST",
-        headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: proposal.title,
-          body,
-          head: options.headBranch,
-          base: options.baseBranch || config?.defaultBranch || "main",
-          draft: options.draft ?? false,
-        }),
-      },
-    ));
-  } catch (error) {
-    if (error instanceof HttpRequestError) {
-      throw new Error(`Failed to create PR: ${error.status}`);
-    }
-    throw error;
-  }
+  const data = await ghApi<{ number: number; html_url: string }>(`repos/${config?.owner}/${config?.repo}/pulls`, {
+    method: "POST",
+    body: {
+      title: proposal.title,
+      body: buildPRBody(proposal, options.linkedIssue),
+      head: options.headBranch,
+      base: options.baseBranch || config?.defaultBranch || "main",
+      draft: options.draft ?? false,
+    },
+  });
   if (!data) return null;
   return { number: data.number, url: data.html_url };
 }
@@ -135,17 +173,13 @@ export async function ghCreateIssue(
   body: string,
   labels?: string[],
 ): Promise<{ number: number; url: string } | null> {
-  if (!isGitHubEnabled()) return null;
+  if (!isIssueSyncEnabled()) return null;
 
   try {
-    const { data } = await requestJson<{ number: number; html_url: string }>(
-      `${getApiBase()}/repos/${config?.owner}/${config?.repo}/issues`,
-      {
-        method: "POST",
-        headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
-        body: JSON.stringify({ title, body, labels: labels ?? ["dao-proposal"] }),
-      },
-    );
+    const data = await ghApi<{ number: number; html_url: string }>(`repos/${config?.owner}/${config?.repo}/issues`, {
+      method: "POST",
+      body: { title, body, labels: labels ?? ["dao-proposal"] },
+    });
     if (!data) return null;
     return { number: data.number, url: data.html_url };
   } catch (error) {
@@ -158,13 +192,12 @@ export async function ghUpdateIssue(
   issueNumber: number,
   updates: { title?: string; body?: string; state?: "open" | "closed"; labels?: string[] },
 ): Promise<boolean> {
-  if (!isGitHubEnabled()) return false;
+  if (!isIssueSyncEnabled()) return false;
 
   try {
-    await requestJson<unknown>(`${getApiBase()}/repos/${config?.owner}/${config?.repo}/issues/${issueNumber}`, {
+    await ghApi<unknown>(`repos/${config?.owner}/${config?.repo}/issues/${issueNumber}`, {
       method: "PATCH",
-      headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
-      body: JSON.stringify(updates),
+      body: updates,
     });
     return true;
   } catch (error) {
@@ -198,7 +231,7 @@ function buildPRBody(proposal: Proposal, linkedIssue?: number): string {
 // ── Proposal Sync ────────────────────────────────────────────
 
 export async function ghSyncProposal(proposal: Proposal, issueNumber?: number): Promise<number | null> {
-  if (!isGitHubEnabled()) return null;
+  if (!isIssueSyncEnabled()) return null;
 
   const body = `## DAO Proposal #${proposal.id}\n\n**Type:** ${proposal.type}\n**Risk Zone:** ${proposal.riskZone ?? "unknown"}\n**Status:** ${proposal.status}\n\n${proposal.description}\n\n${proposal.problemStatement ? `### Problem Statement\n${proposal.problemStatement}\n` : ""}`;
 

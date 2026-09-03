@@ -10,6 +10,7 @@ import { DryRunProposalUseCase } from "../application/proposals/dry-run-proposal
 import { ExecuteProposalUseCase } from "../application/proposals/execute-proposal.use-case.js";
 import { RateProposalUseCase } from "../application/proposals/rate-proposal.use-case.js";
 import { RecordDeliberationOutputsUseCase } from "../application/proposals/record-deliberation-outputs.use-case.js";
+import { RejectProposalUseCase } from "../application/proposals/reject-proposal.use-case.js";
 import { RollbackProposalUseCase } from "../application/proposals/rollback-proposal.use-case.js";
 import { RoundTableUseCase } from "../application/proposals/round-table.use-case.js";
 import { ShipProposalUseCase } from "../application/proposals/ship-proposal.use-case.js";
@@ -40,6 +41,7 @@ import {
   presentProposalCreated,
   presentProposalUpdated,
   presentRating,
+  presentRejection,
   presentRollback,
   presentShip,
 } from "../presenters/proposal.presenter.js";
@@ -47,6 +49,7 @@ import type { AmendmentPayload, HostAdapter, ProposalType } from "../types/index
 import { PROPOSAL_TYPES } from "../types/index.js";
 import { loadGitHubConfigFromDaoRoot, saveGitHubConfigToDaoRoot } from "./github-config.js";
 import { DAO_ONBOARDING_MESSAGE } from "./messages.js";
+import { buildProjectBrief } from "./project-brief.js";
 import { parseSafeJson } from "./utils.js";
 
 export type DeliberationMode = "auto" | "manual";
@@ -129,7 +132,8 @@ export async function handleDaoDeliberate(ctx: DaoToolContext, proposalId: numbe
       parentSessionModel: ctx.getSessionModel?.(),
       hostDefaultModel: ctx.hostDefaultModel,
     });
-    const instructions = buildDispatchInstructions(proposal, agents, modelContext);
+    const projectBrief = await buildProjectBrief(ctx.workDir);
+    const instructions = buildDispatchInstructions(proposal, agents, modelContext, { projectBrief });
     const plan = formatDispatchPlan(proposal, instructions, {
       strategy: projectConfig.deliberation?.strategy,
       charsPerAgent: projectConfig.deliberation?.charsPerAgent,
@@ -144,6 +148,7 @@ export async function handleDaoDeliberate(ctx: DaoToolContext, proposalId: numbe
     worker: ctx.adapter,
     clock: systemClock,
   });
+  const projectBrief = await buildProjectBrief(ctx.workDir);
   const result = await useCase.execute({
     proposalId,
     agents,
@@ -151,6 +156,7 @@ export async function handleDaoDeliberate(ctx: DaoToolContext, proposalId: numbe
     charsPerAgent: projectConfig.deliberation?.charsPerAgent,
     parentSessionModel: ctx.getSessionModel?.(),
     hostDefaultModel: ctx.hostDefaultModel,
+    projectBrief,
     onUpdate: (update) => ctx.onDeliberationProgress?.(update),
   });
   if (!result.ok) return `Cannot deliberate: ${result.error}`;
@@ -354,6 +360,17 @@ export async function handleDaoRollback(proposalId: number, repository?: DaoStat
   return presentRollback(result);
 }
 
+export async function handleDaoReject(ctx: DaoToolContext, proposalId: number, reason: string): Promise<string> {
+  const notReady = requireInitialized(ctx.repository);
+  if (notReady) return notReady;
+  const result = await new RejectProposalUseCase({
+    repository: repositoryOrLegacy(ctx.repository),
+    clock: systemClock,
+  }).execute({ proposalId, actor: ctx.adapter.hostId, reason });
+  if (!result.ok) return result.error;
+  return presentRejection(result);
+}
+
 export async function handleDaoDashboard(repository?: DaoStateRepositoryPort): Promise<string> {
   const notReady = requireInitialized(repository);
   if (notReady) return notReady;
@@ -383,6 +400,7 @@ export async function handleDaoRoundtable(ctx: DaoToolContext): Promise<string> 
     agents,
     parentSessionModel: ctx.getSessionModel?.(),
     hostDefaultModel: ctx.hostDefaultModel,
+    projectBrief: await buildProjectBrief(ctx.workDir),
   });
   return result.ok ? formatRoundTableResults(result.suggestions, result.proposalIds) : result.error;
 }
@@ -501,7 +519,7 @@ export async function handleDaoProposeAmendment(
 
 export async function handleDaoConfigGithub(
   ctx: DaoToolContext,
-  args: { token: string; owner: string; repo: string },
+  args: { owner: string; repo: string; issues?: boolean },
 ): Promise<string> {
   const state = repositoryOrLegacy(ctx.repository).get();
   await saveGitHubConfigToDaoRoot(state.daoRoot, args);
@@ -509,8 +527,9 @@ export async function handleDaoConfigGithub(
     `# GitHub Configured`,
     "",
     `**Repository:** ${args.owner}/${args.repo}`,
+    `**Issue tracking:** ${args.issues === true ? "enabled — proposal modifications are mirrored to GitHub issues" : "disabled"}`,
     "",
-    "Token redacted in `.dao/config.json`. Set `DAO_GITHUB_TOKEN` env var to avoid re-entering it.",
+    "Authentication is delegated to the GitHub CLI. Run `gh auth login` once; Swarm DAO never stores tokens.",
     "",
     "Available: `dao_github_create_branch`, `dao_github_open_pr`",
   ].join("\n");
@@ -524,7 +543,7 @@ export async function handleDaoGithubCreateBranch(ctx: DaoToolContext, proposalI
   if (!proposal) return `Proposal #${proposalId} not found.`;
   const configured = await loadGitHubConfigFromDaoRoot(repository.get().daoRoot);
   if (!configured || !isGitHubEnabled()) {
-    return "GitHub not configured. Run `dao_config_github` with token, owner, and repo.";
+    return "GitHub not configured. Run `dao_config_github` with owner and repo (authentication is handled by the `gh` CLI).";
   }
   const branchName = ghBranchNameFor(proposal);
   const result = await ghCreateBranch(branchName);
@@ -545,7 +564,7 @@ export async function handleDaoGithubOpenPr(
   if (!headBranch) return "headBranch is required";
   const configured = await loadGitHubConfigFromDaoRoot(repository.get().daoRoot);
   if (!configured || !isGitHubEnabled()) {
-    return "GitHub not configured. Run `dao_config_github` with token, owner, and repo.";
+    return "GitHub not configured. Run `dao_config_github` with owner and repo (authentication is handled by the `gh` CLI).";
   }
   const result = await ghCreatePullRequest(proposal, { headBranch });
   if (!result) return "Failed to create PR (GitHub API returned null)";

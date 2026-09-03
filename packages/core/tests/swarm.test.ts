@@ -11,6 +11,40 @@ import { buildModelResolutionContext } from "../src/intelligence/model.js";
 import { buildDispatchInstructions, dispatchSwarm, formatDispatchPlan } from "../src/intelligence/swarm.js";
 import type { AgentOutput, DAOAgent, HostAdapter, Proposal } from "../src/types/index.js";
 
+const briefProposal: Proposal = {
+  id: 9,
+  title: "Brief test",
+  type: "product-feature",
+  description: "desc",
+  proposedBy: "user",
+  status: "deliberating",
+  votes: [],
+  agentOutputs: [],
+  createdAt: new Date().toISOString(),
+};
+
+const briefAgent: DAOAgent = {
+  id: "architect",
+  name: "Architect",
+  role: "Architecture",
+  description: "d",
+  systemPrompt: "sp",
+  weight: 3,
+};
+
+describe("intelligence/swarm.ts project brief injection", () => {
+  it("injects the shared project brief into every participant's prompt", () => {
+    const modelContext = buildModelResolutionContext("dao-default", {});
+    const withBrief = buildDispatchInstructions(briefProposal, [briefAgent], modelContext, {
+      projectBrief: "SCOUT-BRIEF-MARKER",
+    });
+    const withoutBrief = buildDispatchInstructions(briefProposal, [briefAgent], modelContext);
+
+    expect(withBrief[0]?.prompt).toContain("SCOUT-BRIEF-MARKER");
+    expect(withoutBrief[0]?.prompt).not.toContain("SCOUT-BRIEF-MARKER");
+  });
+});
+
 describe("intelligence/swarm.ts", () => {
   it("builds and formats dispatch instructions with resolved models", () => {
     const proposal: Proposal = {

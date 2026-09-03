@@ -7,6 +7,7 @@ export * from "./proposals/dry-run-proposal.use-case.js";
 export * from "./proposals/execute-proposal.use-case.js";
 export * from "./proposals/rate-proposal.use-case.js";
 export * from "./proposals/record-deliberation-outputs.use-case.js";
+export * from "./proposals/reject-proposal.use-case.js";
 export * from "./proposals/rollback-proposal.use-case.js";
 export * from "./proposals/round-table.use-case.js";
 export * from "./proposals/ship-proposal.use-case.js";
