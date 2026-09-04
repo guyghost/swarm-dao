@@ -1,5 +1,22 @@
 # @guyghost/swarm-dao-copilot-adapter
 
+## 0.4.0
+
+### Minor Changes
+
+- fd458db: Agents no longer hardcode a model.
+
+  - Removed `model: z.ai/GLM-5.1` from every agent description (`agents/dao-*.md`, `packages/copilot-adapter/agents/*.agent.md`) and dropped the `DEFAULT_AGENT_MODEL` stamp.
+  - The model now resolves at dispatch time: agent override (frontmatter `model`) → DAO config default (`DAOConfig.defaultModel`, overridable in `.dao/config.json`) → parent session / host default. Agents without an explicit model inherit the session's model on hosts that support it.
+
+### Patch Changes
+
+- Updated dependencies [5ee6b0c]
+- Updated dependencies [fd458db]
+- Updated dependencies [b08481c]
+  - @guyghost/swarm-dao-core@0.13.0
+  - @guyghost/swarm-dao-mcp@0.8.0
+
 ## 0.3.13
 
 ### Patch Changes
