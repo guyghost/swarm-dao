@@ -33,6 +33,7 @@
     "improvement:series:status": "bun tools/improvement-loop/orchestrator.ts status",
     "improvement:series:submit": "bun tools/improvement-loop/orchestrator.ts submit",
     "improvement:series:once": "bun tools/improvement-loop/orchestrator.ts once",
+    "improvement:drive": "bun scripts/improvement-drive.ts",
     "shipaudit:validate": "bun tools/ship-audit/validate.ts",
     "shipaudit:demo": "bun tools/ship-audit/demo.ts",
     "shipaudit:regression": "bun test packages/core/tests/ship-audit.machine.test.ts packages/core/tests/ship-audit.wiring.test.ts tools/ship-audit/tests",
