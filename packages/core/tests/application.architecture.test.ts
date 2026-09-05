@@ -611,7 +611,11 @@ describe("application architecture", () => {
       spawnAgents: async (): Promise<AgentOutput[]> => [],
     };
 
-    const result = await new RoundTableUseCase({ repository, worker, clock: { now: () => "2031-01-01T00:07:00.000Z" } }).execute({
+    const result = await new RoundTableUseCase({
+      repository,
+      worker,
+      clock: { now: () => "2031-01-01T00:07:00.000Z" },
+    }).execute({
       agents: state.agents,
       projectBrief: "SCOUT-BRIEF-MARKER",
     });

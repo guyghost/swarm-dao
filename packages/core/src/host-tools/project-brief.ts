@@ -124,11 +124,11 @@ async function changelogSection(root: string): Promise<string | null> {
 
 async function commitsSection(root: string): Promise<string | null> {
   try {
-    const { stdout } = await execFileAsync(
-      "git",
-      ["log", "--no-color", "--oneline", `-${COMMIT_ENTRIES}`],
-      { cwd: root, timeout: 5_000, maxBuffer: 64 * 1024 },
-    );
+    const { stdout } = await execFileAsync("git", ["log", "--no-color", "--oneline", `-${COMMIT_ENTRIES}`], {
+      cwd: root,
+      timeout: 5_000,
+      maxBuffer: 64 * 1024,
+    });
     const lines = stdout
       .split("\n")
       .map((line) => line.trim())
