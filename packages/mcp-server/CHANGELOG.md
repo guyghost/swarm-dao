@@ -1,5 +1,15 @@
 # @guyghost/swarm-dao-mcp
 
+## 0.8.2
+
+### Patch Changes
+
+- Updated dependencies [e536a70]
+  - @guyghost/swarm-dao-core@0.15.0
+  - @guyghost/swarm-dao-improvement@0.6.0
+  - @guyghost/swarm-dao-graph@0.3.4
+  - @guyghost/swarm-dao-product@0.3.4
+
 ## 0.8.1
 
 ### Patch Changes
