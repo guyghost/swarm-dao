@@ -3,19 +3,26 @@
 // ============================================================
 //
 // Assembles a compact, deterministic project summary (manifest,
-// README excerpt, layout, changelog) that is built ONCE per
-// deliberation / round table and shared with every participant,
-// so agents reason about the actual project instead of inventing
-// one. No LLM call involved. Best-effort: any failure yields "".
+// README excerpt, layout, changelog, recent commits, docs listing)
+// that is built ONCE per deliberation / round table and shared with
+// every participant, so agents reason about the actual project
+// instead of inventing one. No LLM call involved. Best-effort: any
+// failure yields "".
 
+import { execFile } from "node:child_process";
 import { type Dirent, promises as fs } from "node:fs";
 import path from "node:path";
+import { promisify } from "node:util";
 import { logger } from "../observability/logging.js";
 
-const MAX_TOTAL_CHARS = 3000;
-const README_CHARS = 1200;
+const execFileAsync = promisify(execFile);
+
+const MAX_TOTAL_CHARS = 6000;
+const README_CHARS = 2400;
 const CHANGELOG_CHARS = 600;
 const LAYOUT_ENTRIES = 24;
+const COMMIT_ENTRIES = 12;
+const DOCS_ENTRIES = 15;
 const SUBDIRS_TO_PEEK = ["src", "packages", "lib", "app"] as const;
 const IGNORED_ENTRIES = new Set(["node_modules", "dist", "build", "coverage", "vendor", ".next", ".dao"]);
 
@@ -115,6 +122,38 @@ async function changelogSection(root: string): Promise<string | null> {
   }
 }
 
+async function commitsSection(root: string): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync(
+      "git",
+      ["log", "--no-color", "--oneline", `-${COMMIT_ENTRIES}`],
+      { cwd: root, timeout: 5_000, maxBuffer: 64 * 1024 },
+    );
+    const lines = stdout
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+    return lines.length > 0 ? `## Recent commits\n${lines.map((line) => `- ${line}`).join("\n")}` : null;
+  } catch {
+    return null; // not a git repo, no commits, or git unavailable
+  }
+}
+
+async function docsSection(root: string): Promise<string | null> {
+  let entries: Dirent[];
+  try {
+    entries = await fs.readdir(path.join(root, "docs"), { withFileTypes: true });
+  } catch {
+    return null;
+  }
+  const docs = entries
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".md"))
+    .map((entry) => entry.name)
+    .sort()
+    .slice(0, DOCS_ENTRIES);
+  return docs.length > 0 ? `## Docs\n${docs.map((name) => `- docs/${name}`).join("\n")}` : null;
+}
+
 /**
  * Build the shared project brief passed to every DAO participant.
  * Returns "" when nothing can be read (the caller skips injection).
@@ -122,7 +161,14 @@ async function changelogSection(root: string): Promise<string | null> {
 export async function buildProjectBrief(root: string): Promise<string> {
   try {
     const sections = (
-      await Promise.all([manifestSection(root), readmeSection(root), layoutSection(root), changelogSection(root)])
+      await Promise.all([
+        manifestSection(root),
+        readmeSection(root),
+        layoutSection(root),
+        changelogSection(root),
+        commitsSection(root),
+        docsSection(root),
+      ])
     ).filter((section): section is string => typeof section === "string" && section.length > 0);
     if (sections.length === 0) return "";
 

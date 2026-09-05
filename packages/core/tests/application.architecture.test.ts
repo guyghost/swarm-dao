@@ -570,6 +570,59 @@ describe("application architecture", () => {
     expect(repository.get().proposals[0]).toMatchObject({ title: "Enforce ports", status: "open" });
   });
 
+  it("shares recent proposals with round-table agents so they do not re-propose them", async () => {
+    const state = createInitialState("/project/.dao");
+    state.initialized = true;
+    state.proposals.push({
+      id: 1,
+      title: "Already-tracked idea",
+      type: "technical-change",
+      description: "Existing work",
+      proposedBy: "user",
+      status: "open",
+      votes: [],
+      agentOutputs: [],
+      createdAt: "2031-01-01T00:00:00.000Z",
+    });
+    state.agents = [
+      {
+        id: "architect",
+        name: "Architect",
+        role: "Architecture",
+        description: "Reviews architecture",
+        systemPrompt: "Suggest an improvement",
+        weight: 3,
+      },
+    ];
+    const repository = new InMemoryDaoStateRepository(state);
+    const prompts: string[] = [];
+    const worker = {
+      spawnAgent: async (input: { systemPrompt: string }): Promise<AgentOutput> => {
+        prompts.push(input.systemPrompt);
+        return {
+          agentId: "architect",
+          agentName: "Architect",
+          role: "Architecture",
+          content:
+            "## Suggested Proposal\n**Title:** New grounded idea\n**Type:** technical-change\n**Description:** d",
+          durationMs: 1,
+        };
+      },
+      spawnAgents: async (): Promise<AgentOutput[]> => [],
+    };
+
+    const result = await new RoundTableUseCase({ repository, worker, clock: { now: () => "2031-01-01T00:07:00.000Z" } }).execute({
+      agents: state.agents,
+      projectBrief: "SCOUT-BRIEF-MARKER",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(prompts.length).toBe(1);
+    expect(prompts[0]).toContain("SCOUT-BRIEF-MARKER");
+    expect(prompts[0]).toContain("Recent proposals");
+    expect(prompts[0]).toContain("Already-tracked idea");
+  });
+
   it("rolls back from a snapshot without reopening a terminal proposal", async () => {
     const state = createInitialState("/project/.dao");
     state.proposals.push({
