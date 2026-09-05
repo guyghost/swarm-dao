@@ -11,8 +11,8 @@ import { redactSensitiveFields } from "./utils/security.js";
 export type ActivationMode = "opt-in" | "suggest" | "enforce";
 
 export interface ExecutionConfig {
-  /** "none" (default) or "worktree": execute each proposal in an isolated git worktree. */
-  isolation?: "none" | "worktree";
+  /** "none" (default), "worktree", or "sandbox": isolation for proposal execution. */
+  isolation?: "none" | "worktree" | "sandbox";
   /** Directory (relative to the repository root) holding execution worktrees. */
   worktreeRoot?: string;
   /** Base branch for execution branches; omit to let git use HEAD. */
@@ -33,6 +33,16 @@ export interface ShipConfig {
   auditChallenge?: boolean;
 }
 
+export interface HerdrConfig {
+  /** herdr agent kind running each child session (pi, claude, codex, … —
+   *  any kind herdr supports whose executable is installed). */
+  kind?: string;
+  /** Keep child workspaces alive after harvest (default false: closed). */
+  keepPanes?: boolean;
+  /** Per-child prompt timeout in ms (herdr ceiling: 300000). */
+  timeoutMs?: number;
+}
+
 export interface ProjectConfig {
   mode: ActivationMode;
   agentOverrides?: Record<string, Partial<DAOAgent>>;
@@ -43,6 +53,9 @@ export interface ProjectConfig {
   execution?: ExecutionConfig;
   deliberation?: DeliberationConfig;
   ship?: ShipConfig;
+  /** herdr child-session defaults for multi-agent CLI flows
+   *  (deliberate, roundtable, implement). */
+  herdr?: HerdrConfig;
 }
 
 export const DEFAULT_PROJECT_CONFIG: ProjectConfig = {

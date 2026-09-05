@@ -11,6 +11,41 @@ describe("cli.ts", () => {
     const code = await main(["help"], process.cwd());
     expect(code).toBe(0);
   });
+
+  it("fails fast when herdr child-session commands are misused", async () => {
+    const tmp = await fs.mkdtemp(path.join(tmpdir(), "swarm-cli-herdr-"));
+    try {
+      // Missing arguments surface usage before any herdr effect.
+      expect(await main(["deliberate"], tmp)).toBe(1);
+      expect(await main(["implement"], tmp)).toBe(1);
+      // Invalid herdr kind fails fast — before DAO init or workspace create.
+      expect(await main(["deliberate", "1", "--kind", "Codex; rm-rf"], tmp)).toBe(1);
+      expect(await main(["roundtable", "--kind"], tmp)).toBe(1);
+      expect(await main(["implement", "1", "--timeout-ms"], tmp)).toBe(1);
+      expect(await main(["implement", "1", "--timeout-ms", "abc"], tmp)).toBe(1);
+      // Unknown proposal: DAO initializes fine, but no child sessions spawn.
+      await main(["init"], tmp);
+      await main(["setup"], tmp);
+      expect(await main(["deliberate", "99"], tmp)).toBe(1);
+      expect(await main(["implement", "99"], tmp)).toBe(1);
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses parallel implement without execution isolation", async () => {
+    const tmp = await fs.mkdtemp(path.join(tmpdir(), "swarm-cli-impl-"));
+    try {
+      await main(["init"], tmp);
+      await main(["setup"], tmp);
+      await main(["propose", "--title", "a", "--type", "feature", "--description", "d"], tmp);
+      await main(["propose", "--title", "b", "--type", "feature", "--description", "d"], tmp);
+      // Two ids without execution.isolation would share one checkout.
+      expect(await main(["implement", "1", "2"], tmp)).toBe(1);
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("cli.ts — improve sandbox flags", () => {
