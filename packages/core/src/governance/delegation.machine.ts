@@ -161,8 +161,8 @@ export function extractDelegationSignals(content: string | undefined): Delegatio
     if (/^##/.test(line)) break;
     const pipeAt = line.indexOf("|");
     if (pipeAt < 0) continue;
-    const facetMatch = line.slice(0, pipeAt).match(/^[ \t]*[-*][ \t]*facet:[ \t]*(.*)$/i);
-    const archetypeMatch = line.slice(pipeAt + 1).match(/^[ \t]*archetype:[ \t]*(.*)$/i);
+    const facetMatch = line.slice(0, pipeAt).match(/^[ \t]*[-*][ \t]*facet:(.*)$/i);
+    const archetypeMatch = line.slice(pipeAt + 1).match(/^[ \t]*archetype:(.*)$/i);
     if (!facetMatch || !archetypeMatch) continue;
     const facet = (facetMatch[1] ?? "").trim();
     const archetype = (archetypeMatch[1] ?? "").trim();
