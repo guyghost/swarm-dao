@@ -6,8 +6,39 @@ import type { AgentOutput, DAOConfig, Proposal, TallyResult, Vote, VotePosition 
 
 // ── Vote Parsing ─────────────────────────────────────────────
 
-const VOTE_PATTERN = /##\s*Vote\s*\n\s*(for|against|abstain)/i;
-const REASONING_PATTERN = /##\s*Reasoning\s*\n\s*([\s\S]*?)(?=\n##|$)/i;
+// Line-oriented extraction (ReDoS-safe): sections are located by scanning
+// lines — heading patterns only use [ \t] classes so no quantifier can cross
+// a newline, and bodies are collected line by line instead of
+// [\s\S]*? + lookahead alternations.
+const VOTE_HEADING = /^##[ \t]*vote[ \t]*$/i;
+const VOTE_WORD = /^(for|against|abstain)\b/i;
+const REASONING_HEADING = /^##[ \t]*reasoning[ \t]*$/i;
+
+/** Body lines after the `heading` line, up to the next line-anchored "##". */
+function sectionLines(content: string, heading: RegExp): string[] | null {
+  const lines = content.split("\n");
+  const start = lines.findIndex((line) => heading.test(line));
+  if (start < 0) return null;
+  const end = lines.findIndex((line, i) => i > start && /^##/.test(line));
+  return lines.slice(start + 1, end < 0 ? lines.length : end);
+}
+
+/** Position from the first "## Vote" section that actually carries a vote
+ *  word — echoed template sections (stripped of their vote line) must not
+ *  shadow the agent's real answer further down the transcript. */
+function extractVotePosition(content: string): VotePosition | undefined {
+  const lines = content.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    if (!VOTE_HEADING.test(lines[i] ?? "")) continue;
+    for (let j = i + 1; j < lines.length; j++) {
+      const body = lines[j] ?? "";
+      if (/^##/.test(body)) break;
+      const match = body.trim().match(VOTE_WORD);
+      if (match?.[1]) return match[1].toLowerCase() as VotePosition;
+    }
+  }
+  return undefined;
+}
 
 function normalizeVoteWeight(weight: number): number {
   return Number.isFinite(weight) && weight > 0 ? weight : 0;
@@ -19,14 +50,12 @@ export function parseVoteFromOutput(
   weight: number,
   content: string,
 ): Vote | undefined {
-  const voteMatch = content.match(VOTE_PATTERN);
+  const position = extractVotePosition(content);
   // No vote section → no fabricated vote: agents that did not vote must not
   // dilute the tally with template abstentions (and don't count toward quorum).
-  if (!voteMatch) return undefined;
-  const reasoningMatch = content.match(REASONING_PATTERN);
+  if (!position) return undefined;
 
-  const position = (voteMatch[1]?.toLowerCase() as VotePosition) || "abstain";
-  const reasoning = reasoningMatch?.[1]?.trim() || "No reasoning provided";
+  const reasoning = sectionLines(content, REASONING_HEADING)?.join("\n").trim() || "No reasoning provided";
 
   return {
     agentId,

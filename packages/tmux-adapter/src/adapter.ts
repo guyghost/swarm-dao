@@ -19,26 +19,44 @@
 // checkout for context; execution-side isolation stays with the delivery
 // layer's GitWorkspace.
 
-import { exec as execCallback } from "node:child_process";
+import { exec as execCallback, execFile } from "node:child_process";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import type { AgentOutput, DAOAgent, HostAdapter, Proposal } from "@guyghost/swarm-dao-core";
 
 /** Minimal command surface the adapter needs (node:child_process-backed by default). */
+/** Minimal command surface the adapter needs. Commands are ARGV — never
+ * shell strings — the default runner spawns them via execFile (no shell), so
+ * session names and pane programs are never interpreted by a host shell.
+ * (The pane program itself is deliberately a shell program: tmux runs it
+ * through /bin/sh inside the pane.) */
 export interface TmuxRunner {
   exec(
-    command: string,
+    argv: readonly string[],
     options?: { cwd?: string; timeout?: number },
   ): Promise<{ stdout: string; stderr: string; exitCode: number }>;
 }
 
 const execAsync = promisify(execCallback);
 
+/** execFile with utf8 strings, promise-shaped. */
+const execFileAsync = (
+  file: string,
+  args: readonly string[],
+  options: { cwd?: string; timeout?: number },
+): Promise<{ stdout: string; stderr: string }> =>
+  new Promise((resolve, reject) => {
+    execFile(file, args, { ...options, encoding: "utf8" }, (error, stdout, stderr) => {
+      if (error) reject(Object.assign(error, { stdout, stderr }));
+      else resolve({ stdout: String(stdout), stderr: String(stderr) });
+    });
+  });
+
 const defaultRunner = (): TmuxRunner => ({
-  exec: async (command, options) => {
+  exec: async (argv, options) => {
     try {
-      const { stdout, stderr } = await execAsync(command, {
+      const { stdout, stderr } = await execFileAsync(argv[0] ?? "", argv.slice(1), {
         cwd: options?.cwd,
         timeout: options?.timeout,
       });
@@ -56,7 +74,14 @@ const defaultRunner = (): TmuxRunner => ({
 
 /** tmux session names and run-directory segments accept [a-zA-Z0-9_-] only. */
 export function sanitizeSessionName(raw: string): string {
-  const cleaned = raw.replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
+  const collapsed = raw.replace(/[^a-zA-Z0-9_-]+/g, "-");
+  // Trim leading/trailing dashes with a linear scan — /-+$/ style trailing
+  // runs make every start position backtrack (polynomial ReDoS).
+  let start = 0;
+  let end = collapsed.length;
+  while (start < end && collapsed.charCodeAt(start) === 45) start++;
+  while (end > start && collapsed.charCodeAt(end - 1) === 45) end--;
+  const cleaned = collapsed.slice(start, end);
   return cleaned.length > 0 ? cleaned : "agent";
 }
 
@@ -131,10 +156,22 @@ export function createTmuxHostAdapter(options: TmuxAdapterOptions): HostAdapter 
     const sessionProgram = `sh -c ${quote(inner)}`;
     // Clear any stale session with the same name (e.g. a keepSessions
     // leftover) so reruns are deterministic.
-    await runner.exec(`tmux kill-session -t ${run.session}`);
-    const created = await runner.exec(
-      `tmux new-session -d -s ${run.session} -c ${quote(options.workDir)} ${quote(sessionProgram)}`,
-    );
+    await runner.exec(["tmux", "kill-session", "-t", run.session]);
+    // The pane program is a shell program BY DESIGN (it streams the agent's
+    // output into the pane); tmux itself runs it via /bin/sh inside the pane.
+    // It rides as a single argv element — no host-side shell ever sees it.
+    const created = await runner.exec([
+      "tmux",
+      "new-session",
+      "-d",
+      "-s",
+      run.session,
+      "-c",
+      options.workDir,
+      "sh",
+      "-c",
+      sessionProgram,
+    ]);
     if (created.exitCode !== 0) {
       throw new Error(`tmux new-session failed: ${created.stderr.trim().slice(0, 300)}`);
     }
@@ -159,10 +196,13 @@ export function createTmuxHostAdapter(options: TmuxAdapterOptions): HostAdapter 
   };
 
   const harvestPane = async (session: string): Promise<string> => {
-    const captured = await runner.exec(`tmux capture-pane -p -S -${CAPTURE_LINES} -t ${session}`);
+    const captured = await runner.exec(["tmux", "capture-pane", "-p", "-S", `-${CAPTURE_LINES}`, "-t", session]);
     // The last line can be the idle marker loop's shell prompt — trim
     // trailing blank noise but keep the agent's own output verbatim.
-    return captured.stdout.replace(/\n+$/, "\n");
+    // Collapse trailing blank noise to one newline (linear, ReDoS-safe).
+    let end = captured.stdout.length;
+    while (end > 0 && captured.stdout.charCodeAt(end - 1) === 10) end--;
+    return end === captured.stdout.length ? captured.stdout : `${captured.stdout.slice(0, end)}\n`;
   };
 
   const harvest = async (
@@ -206,7 +246,7 @@ export function createTmuxHostAdapter(options: TmuxAdapterOptions): HostAdapter 
       return { ...base, error: error instanceof Error ? error.message : String(error) };
     } finally {
       if (!keepSessions) {
-        await runner.exec(`tmux kill-session -t ${run.session}`).catch(() => undefined);
+        await runner.exec(["tmux", "kill-session", "-t", run.session]).catch(() => undefined);
       }
     }
   };
@@ -234,7 +274,17 @@ export function createTmuxHostAdapter(options: TmuxAdapterOptions): HostAdapter 
     getWorkingDirectory: () => options.workDir,
     readFile: async (file) => fs.readFile(containedPath(file), "utf8"),
     writeFile: async (file, content) => fs.writeFile(containedPath(file), content, "utf8"),
-    exec: (command, execOptions) => runner.exec(command, execOptions),
+    exec: (command, execOptions) =>
+      execAsync(command, { cwd: execOptions?.cwd, timeout: execOptions?.timeout })
+        .then(({ stdout, stderr }) => ({ stdout: String(stdout), stderr: String(stderr), exitCode: 0 }))
+        .catch((error: unknown) => {
+          const failure = error as { stdout?: string; stderr?: string; message?: string; code?: number };
+          return {
+            stdout: failure.stdout ?? "",
+            stderr: failure.stderr ?? failure.message ?? "command failed",
+            exitCode: failure.code ?? 1,
+          };
+        }),
     hasCapability: (capability) => capability === "parallel-spawn",
   };
 }

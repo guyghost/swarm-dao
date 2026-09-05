@@ -135,17 +135,42 @@ export function calculateRICEScore(reach: number, impact: number, confidence: nu
 }
 
 export function parseRICEFromOutput(content: string): Partial<RICEScore> {
-  const reachMatch = content?.match(/RICE[\s\S]*?reach[:\s]+(\d+)/i);
-  const impactMatch = content?.match(/RICE[\s\S]*?impact[:\s]+(\d+)/i);
-  const confidenceMatch = content?.match(/RICE[\s\S]*?confidence[:\s]+(\d+)/i);
-  const effortMatch = content?.match(/RICE[\s\S]*?effort[:\s]+(\d+(?:\.\d+)?)/i);
-
-  return {
-    reach: reachMatch ? parseInt(reachMatch[1] ?? "0", 10) : undefined,
-    impact: impactMatch ? parseInt(impactMatch[1] ?? "0", 10) : undefined,
-    confidence: confidenceMatch ? parseInt(confidenceMatch[1] ?? "0", 10) : undefined,
-    effort: effortMatch ? parseFloat(effortMatch[1] ?? "0") : undefined,
-  };
+  const parsed: Partial<RICEScore> = {};
+  if (!content) return parsed;
+  // Line-oriented scan (ReDoS-safe): jump to the first line mentioning RICE,
+  // then read metric lines — no [\s\S]*? backtracking over unbounded input.
+  const lines = content.split("\n");
+  let inSection = false;
+  for (const line of lines) {
+    if (!inSection && /rice/i.test(line)) inSection = true;
+    if (!inSection) continue;
+    // The activating line can itself carry the metrics ("RICE reach: 200 …").
+    if (parsed.reach === undefined) {
+      const reach = line.match(/reach[ \t]*:[ \t]*(\d+)|reach[ \t]+(\d+)/i);
+      if (reach) parsed.reach = parseInt(reach[1] ?? reach[2] ?? "0", 10);
+    }
+    if (parsed.impact === undefined) {
+      const impact = line.match(/impact[ \t]*:[ \t]*(\d+)|impact[ \t]+(\d+)/i);
+      if (impact) parsed.impact = parseInt(impact[1] ?? impact[2] ?? "0", 10);
+    }
+    if (parsed.confidence === undefined) {
+      const confidence = line.match(/confidence[ \t]*:[ \t]*(\d+)|confidence[ \t]+(\d+)/i);
+      if (confidence) parsed.confidence = parseInt(confidence[1] ?? confidence[2] ?? "0", 10);
+    }
+    if (parsed.effort === undefined) {
+      const effort = line.match(/effort[ \t]*:[ \t]*(\d+(?:\.\d+)?)|effort[ \t]+(\d+(?:\.\d+)?)/i);
+      if (effort) parsed.effort = parseFloat(effort[1] ?? effort[2] ?? "0");
+    }
+    if (
+      parsed.reach !== undefined &&
+      parsed.impact !== undefined &&
+      parsed.confidence !== undefined &&
+      parsed.effort !== undefined
+    ) {
+      break;
+    }
+  }
+  return parsed;
 }
 
 export function rankByRICE(

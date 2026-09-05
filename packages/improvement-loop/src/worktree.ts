@@ -16,18 +16,32 @@
 // Boundary: this module only prepares a directory; it never judges commands
 // or emits signals. Verdicts stay with the improvement machine.
 
-import { exec as execCallback } from "node:child_process";
+import { execFile } from "node:child_process";
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { promisify } from "node:util";
 import type { HerdrRunner } from "@guyghost/swarm-dao-herdr-adapter";
 
-const execAsync = promisify(execCallback);
+/** execFile with utf8 strings, promise-shaped (commands are ARGV — never
+ * shell strings — so series ids and paths are never shell-interpreted). */
+const execFileAsync = (
+  file: string,
+  args: readonly string[],
+  options: { cwd?: string; timeout?: number },
+): Promise<{ stdout: string; stderr: string }> =>
+  new Promise((resolve, reject) => {
+    execFile(file, args, { ...options, encoding: "utf8" }, (error, stdout, stderr) => {
+      if (error) reject(Object.assign(error, { stdout, stderr }));
+      else resolve({ stdout: String(stdout), stderr: String(stderr) });
+    });
+  });
 
 const defaultRunner = (): HerdrRunner => ({
-  exec: async (command, options) => {
+  exec: async (argv, options) => {
     try {
-      const { stdout, stderr } = await execAsync(command, { cwd: options?.cwd, timeout: options?.timeout });
+      const { stdout, stderr } = await execFileAsync(argv[0] ?? "", argv.slice(1), {
+        cwd: options?.cwd,
+        timeout: options?.timeout,
+      });
       return { stdout, stderr, exitCode: 0 };
     } catch (error) {
       const failure = error as { stdout?: string; stderr?: string; message?: string; code?: number | string };
@@ -58,8 +72,6 @@ export const seriesBranchName = (seriesId: string): string => `dao/loop/${series
 /** Worktree path for a series: <repo>/.dao/worktrees/<seriesId> (gitignored). */
 export const seriesWorktreePath = (repoDir: string, seriesId: string): string =>
   path.join(repoDir, ".dao", "worktrees", seriesId);
-
-const quote = (value: string): string => `'${value.replace(/'/g, `'\\''`)}'`;
 
 /**
  * Ensure the series worktree exists (idempotent). Commands run through the
@@ -100,9 +112,9 @@ export async function ensureSeriesWorktree(options: {
   // worktree remove`, e.g. an operator wiping `.dao/`) must not brick the
   // series: prune them before creating, so `add` never collides with a
   // registration whose directory no longer exists.
-  await runner.exec("git worktree prune", { cwd: path.resolve(options.repoDir) });
+  await runner.exec(["git", "worktree", "prune"], { cwd: path.resolve(options.repoDir) });
 
-  const branchExists = await runner.exec(`git rev-parse --verify --quiet refs/heads/${branch}`, {
+  const branchExists = await runner.exec(["git", "rev-parse", "--verify", "--quiet", `refs/heads/${branch}`], {
     cwd: options.repoDir,
   });
   if (branchExists.exitCode !== 0 && branchExists.exitCode !== 1) {
@@ -111,8 +123,8 @@ export async function ensureSeriesWorktree(options: {
 
   const command =
     branchExists.exitCode === 0
-      ? `git worktree add ${quote(worktreePath)} ${branch}`
-      : `git worktree add -b ${branch} ${quote(worktreePath)}`;
+      ? ["git", "worktree", "add", worktreePath, branch]
+      : ["git", "worktree", "add", "-b", branch, worktreePath];
   const created = await runner.exec(command, { cwd: options.repoDir });
   if (created.exitCode !== 0) {
     throw new Error(`git worktree add failed: ${(created.stderr || created.stdout).trim().slice(0, 300)}`);
@@ -131,7 +143,9 @@ export async function ensureSeriesWorktree(options: {
 async function installWorktreeDependencies(runner: HerdrRunner, worktreePath: string): Promise<void> {
   const manifest = await fs.stat(path.join(worktreePath, "package.json")).catch(() => null);
   if (manifest === null) return;
-  await runner.exec("bun install --frozen-lockfile", { cwd: worktreePath, timeout: 300_000 }).catch(() => undefined);
+  await runner
+    .exec(["bun", "install", "--frozen-lockfile"], { cwd: worktreePath, timeout: 300_000 })
+    .catch(() => undefined);
 }
 
 /** `.dao/` is gitignored, so a fresh worktree lacks the project's improvement

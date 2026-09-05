@@ -6,17 +6,20 @@ import type { HerdrRunner } from "@guyghost/swarm-dao-herdr-adapter";
 import { ensureSeriesWorktree, seriesBranchName, seriesWorktreePath } from "../src/worktree.js";
 
 /** Fake git runner: fails rev-parse (branch missing) and succeeds worktree add. */
+/** Joined form for assertions only — the real runner receives ARGV. */
+const line = (argv: readonly string[]): string => argv.join(" ");
+
 const fakeGit = (
-  commands: string[],
+  commands: string[][],
   overrides: Record<string, { stdout: string; stderr: string; exitCode: number }> = {},
 ) =>
   ({
-    exec: async (command: string) => {
-      commands.push(command);
+    exec: async (argv: readonly string[]) => {
+      commands.push([...argv]);
       for (const [prefix, result] of Object.entries(overrides)) {
-        if (command.startsWith(prefix)) return result;
+        if (line(argv).startsWith(prefix)) return result;
       }
-      if (command.startsWith("git rev-parse")) return { stdout: "", stderr: "", exitCode: 1 };
+      if (argv[1] === "rev-parse") return { stdout: "", stderr: "", exitCode: 1 };
       return { stdout: "Preparing worktree", stderr: "", exitCode: 0 };
     },
   }) satisfies HerdrRunner;
@@ -26,16 +29,16 @@ describe("ensureSeriesWorktree", () => {
 
   it("creates a new branch and worktree when neither exists", async () => {
     const repo = await tmpRepo();
-    const commands: string[] = [];
+    const commands: string[][] = [];
     try {
       const handle = await ensureSeriesWorktree({ repoDir: repo, seriesId: "s-1", runner: fakeGit(commands) });
       expect(handle.created).toBe(true);
       expect(handle.branch).toBe("dao/loop/s-1");
       expect(handle.path).toBe(seriesWorktreePath(repo, "s-1"));
       // Stale registrations are pruned before the branch check.
-      expect(commands[0]).toBe("git worktree prune");
-      expect(commands[1]).toBe("git rev-parse --verify --quiet refs/heads/dao/loop/s-1");
-      expect(commands[2]).toBe(`git worktree add -b dao/loop/s-1 '${join(repo, ".dao/worktrees/s-1")}'`);
+      expect(line(commands[0] ?? [])).toBe("git worktree prune");
+      expect(line(commands[1] ?? [])).toBe("git rev-parse --verify --quiet refs/heads/dao/loop/s-1");
+      expect(commands[2]).toEqual(["git", "worktree", "add", "-b", "dao/loop/s-1", join(repo, ".dao/worktrees/s-1")]);
     } finally {
       await rm(repo, { recursive: true, force: true });
     }
@@ -43,7 +46,7 @@ describe("ensureSeriesWorktree", () => {
 
   it("reuses an existing branch when the worktree was removed", async () => {
     const repo = await tmpRepo();
-    const commands: string[] = [];
+    const commands: string[][] = [];
     try {
       const handle = await ensureSeriesWorktree({
         repoDir: repo,
@@ -57,8 +60,8 @@ describe("ensureSeriesWorktree", () => {
       // the flag as a token, not a substring: the random mkdtemp suffix can
       // legally contain "-b" inside the worktree path (e.g. swarm-worktree-b…),
       // which flaked main-branch CI twice (runs 33548782801, 33551744921).
-      expect(commands[2]).not.toMatch(/(?:^|\s)-b(?:\s|$)/);
-      expect(commands[2]).toContain(`git worktree add '${join(repo, ".dao/worktrees/s-1")}' dao/loop/s-1`);
+      expect(commands[2]).not.toContain("-b");
+      expect(commands[2]).toEqual(["git", "worktree", "add", join(repo, ".dao/worktrees/s-1"), "dao/loop/s-1"]);
     } finally {
       await rm(repo, { recursive: true, force: true });
     }
@@ -66,7 +69,7 @@ describe("ensureSeriesWorktree", () => {
 
   it("reuses an already checked-out worktree without any git call", async () => {
     const repo = await tmpRepo();
-    const commands: string[] = [];
+    const commands: string[][] = [];
     try {
       const worktree = seriesWorktreePath(repo, "s-1");
       await mkdir(worktree, { recursive: true });
@@ -123,8 +126,8 @@ describe("ensureSeriesWorktree", () => {
       // way `git worktree add` would (checkout with a .git file marker).
       const worktree = seriesWorktreePath(repo, "s-1");
       const runner: HerdrRunner = {
-        exec: async (command: string) => {
-          if (command.startsWith("git rev-parse")) return { stdout: "", stderr: "", exitCode: 1 };
+        exec: async (argv: readonly string[]) => {
+          if (argv[1] === "rev-parse") return { stdout: "", stderr: "", exitCode: 1 };
           await mkdir(worktree, { recursive: true });
           await writeFile(join(worktree, ".git"), "gitdir: /repo/.git/worktrees/s-1\n", "utf8");
           return { stdout: "", stderr: "", exitCode: 0 };
@@ -148,7 +151,7 @@ describe("ensureSeriesWorktree", () => {
 describe("ensureSeriesWorktree — dependency installation (dogfood-003 c7 finding)", () => {
   it("installs the frozen lockfile when the worktree is a bun project (create path)", async () => {
     const repo = await mkdtemp(join(tmpdir(), "swarm-worktree-install-"));
-    const commands: string[] = [];
+    const commands: string[][] = [];
     try {
       const worktreePath = seriesWorktreePath(repo, "s-1");
       // Simulate a carved worktree containing a bun manifest (reuse path).
@@ -158,7 +161,7 @@ describe("ensureSeriesWorktree — dependency installation (dogfood-003 c7 findi
 
       const handle = await ensureSeriesWorktree({ repoDir: repo, seriesId: "s-1", runner: fakeGit(commands) });
       expect(handle.created).toBe(false);
-      expect(commands).toContain("bun install --frozen-lockfile");
+      expect(commands).toContainEqual(["bun", "install", "--frozen-lockfile"]);
     } finally {
       await rm(repo, { recursive: true, force: true });
     }
@@ -166,7 +169,7 @@ describe("ensureSeriesWorktree — dependency installation (dogfood-003 c7 findi
 
   it("skips installation for non-bun worktrees", async () => {
     const repo = await mkdtemp(join(tmpdir(), "swarm-worktree-nobun-"));
-    const commands: string[] = [];
+    const commands: string[][] = [];
     try {
       const worktreePath = seriesWorktreePath(repo, "s-1");
       await mkdir(worktreePath, { recursive: true });

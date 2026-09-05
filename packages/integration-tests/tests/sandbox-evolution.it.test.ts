@@ -11,16 +11,21 @@
 // container boundary line up.
 
 import { describe, expect, test } from "bun:test";
-import { exec } from "node:child_process";
+import { exec, execFile } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { buildSandboxCommand } from "@guyghost/swarm-dao-core";
+import { buildSandboxArgv } from "@guyghost/swarm-dao-core";
 import { GitWorkspace } from "@guyghost/swarm-dao-core/adapters";
 import type { CommandRunnerPort } from "@guyghost/swarm-dao-core/ports";
 
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile) as (
+  file: string,
+  args: readonly string[],
+  options?: { encoding?: string },
+) => Promise<{ stdout: string; stderr: string }>;
 const EVOLUTION_IT = process.env.EVOLUTION_IT === "1";
 const IMAGE = process.env.EVOLUTION_IMAGE ?? "alpine:latest";
 const RUNTIME = process.env.EVOLUTION_RUNTIME === "docker" ? "docker" : "container";
@@ -70,13 +75,13 @@ describe.skipIf(!EVOLUTION_IT)("sandboxed evolution (EVOLUTION_IT=1)", () => {
       if (!prepared.ok) return;
       expect(prepared.path).toContain(".dao/worktrees/1-sandboxed-evolution");
 
-      const command = buildSandboxCommand(
+      const argv = buildSandboxArgv(
         { runtime: RUNTIME, image: IMAGE, workDir: prepared.path ?? "" },
         "echo evolved > /workspace/evolved.txt",
       );
-      // Promisified exec rejects on a non-zero exit: reaching this line is
+      // Promisified execFile rejects on a non-zero exit: reaching this line is
       // itself the container outcome. The evidence is the evolved file below.
-      await execAsync(command);
+      await execFileAsync(argv[0] ?? "docker", argv.slice(1), { encoding: "utf8" });
 
       const evolved = await readFile(`${prepared.path}/evolved.txt`, "utf8");
       expect(evolved.trim()).toBe("evolved");

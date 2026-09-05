@@ -14,6 +14,9 @@
 //   herdr agent read <name> --source recent-unwrapped --lines N     (ANSI-stripped output)
 //   herdr workspace close <id>                                      (unless keepPanes)
 //
+// Every command is spawned as ARGV via execFile — the JS side never builds
+// a shell command line, so prompts and labels are never shell-interpreted.
+//
 // Boundary: deliberation is read-only analysis; outputs feed the same
 // deterministic tally as every other host. A BLOCKED agent (approval or
 // question UI) surfaces as an error output, never as a vote.
@@ -21,27 +24,46 @@
 // Prerequisites: the herdr server must be running (`herdr` once) and the
 // chosen kind's executable installed and authenticated.
 
-import { exec as execCallback } from "node:child_process";
+import { exec as execCallback, execFile } from "node:child_process";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import type { AgentOutput, DAOAgent, HostAdapter, Proposal } from "@guyghost/swarm-dao-core";
-/** Minimal command surface the adapter needs (node:child_process-backed by default). */
+/** Minimal command surface the adapter needs (node:child_process-backed by default).
+ *
+ * Commands are passed as ARGV — never as shell strings. The default runner
+ * spawns them with execFile (no shell), so agent prompts, workspace labels
+ * and agent args can never be interpreted by a shell. */
 export interface HerdrRunner {
   exec(
-    command: string,
+    argv: readonly string[],
     options?: { cwd?: string; timeout?: number },
   ): Promise<{ stdout: string; stderr: string; exitCode: number }>;
 }
 
 const execAsync = promisify(execCallback);
 
+/** execFile with utf8 strings, promise-shaped. Failures reject with the child
+ * error carrying .code/.stdout/.stderr (same shape the exec-based runner had). */
+const execFileAsync = (
+  file: string,
+  args: readonly string[],
+  options: { cwd?: string; timeout?: number; maxBuffer?: number },
+): Promise<{ stdout: string; stderr: string }> =>
+  new Promise((resolve, reject) => {
+    execFile(file, args, { ...options, encoding: "utf8" }, (error, stdout, stderr) => {
+      if (error) reject(Object.assign(error, { stdout, stderr }));
+      else resolve({ stdout: String(stdout), stderr: String(stderr) });
+    });
+  });
+
 const defaultRunner = (): HerdrRunner => ({
-  exec: async (command, options) => {
+  exec: async (argv, options) => {
     try {
-      const { stdout, stderr } = await execAsync(command, {
+      const { stdout, stderr } = await execFileAsync(argv[0] ?? "", argv.slice(1), {
         cwd: options?.cwd,
         timeout: options?.timeout,
+        maxBuffer: 32 * 1024 * 1024,
       });
       return { stdout, stderr, exitCode: 0 };
     } catch (error) {
@@ -55,6 +77,14 @@ const defaultRunner = (): HerdrRunner => ({
   },
 });
 
+/** Collapse any trailing newline run to a single '\n' — linear scan, no
+ * trailing-run regex (\n+$ rescans every start position: polynomial). */
+export function trimTrailingNewlines(text: string): string {
+  let end = text.length;
+  while (end > 0 && text.charCodeAt(end - 1) === 10) end--;
+  return end === text.length ? text : `${text.slice(0, end)}\n`;
+}
+
 /**
  * herdr agent names must match [a-z][a-z0-9_-]{0,31} and be unique among
  * live agents. Sanitize deterministically: lowercase, collapse invalid runs,
@@ -64,11 +94,16 @@ export function sanitizeHerdrName(raw: string): string {
   const cleaned = raw
     .toLowerCase()
     .replace(/[^a-z0-9_-]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 32)
-    .replace(/-+$/g, "");
-  if (cleaned.length === 0) return "agent";
-  return /^[a-z]/.test(cleaned) ? cleaned : `a-${cleaned}`.slice(0, 32);
+    .slice(0, 32);
+  // Trim leading/trailing dashes with a linear scan — /-+$/ style trailing
+  // runs make every start position backtrack (polynomial ReDoS).
+  let start = 0;
+  let end = cleaned.length;
+  while (start < end && cleaned.charCodeAt(start) === 45) start++;
+  while (end > start && cleaned.charCodeAt(end - 1) === 45) end--;
+  const trimmed = cleaned.slice(start, end);
+  if (trimmed.length === 0) return "agent";
+  return /^[a-z]/.test(trimmed) ? trimmed : `a-${trimmed}`.slice(0, 32);
 }
 
 /** herdr kinds are identifiers — anything else is refused, never interpolated. */
@@ -104,10 +139,11 @@ export function herdrAgentName(prefix: string, proposalId: number, agentId: stri
  * the charter's output-format template — including the literal line
  * `for | against | abstain`, which the tally's vote parser would read as a
  * vote for "for". Strip those template lines: a real vote line never
- * contains pipes.
+ * contains pipes. Character classes are [ \t]-only so no quantifier can
+ * cross a newline (polynomial ReDoS under the /m anchors).
  */
 export function stripEchoedVoteTemplates(content: string): string {
-  return content.replace(/^\s*for\s*\|\s*against\s*\|\s*abstain\s*$/gim, "");
+  return content.replace(/^[ \t]*for[ \t]*\|[ \t]*against[ \t]*\|[ \t]*abstain[ \t]*$/gim, "");
 }
 
 export interface HerdrAdapterOptions {
@@ -175,7 +211,7 @@ export function createHerdrHostAdapter(options: HerdrAdapterOptions): HostAdapte
   const readLines = options.readLines ?? DEFAULT_READ_LINES;
   const prefix = sanitizeHerdrName(options.prefix ?? "swarm-dao");
   const keepPanes = options.keepPanes === true;
-  const extraArgs = (options.agentArgs ?? []).map((arg) => quote(arg)).join(" ");
+  const agentArgs = options.agentArgs ?? [];
 
   /** Resolve the deepest EXISTING ancestor's realpath, then rejoin the rest —
    * containment must hold even for files that do not exist yet. */
@@ -242,9 +278,16 @@ export function createHerdrHostAdapter(options: HerdrAdapterOptions): HostAdapte
 
     try {
       // 1. Isolated workspace with one root pane (never touches the user's layout).
-      const created = await runner.exec(
-        `herdr workspace create --cwd ${quote(options.workDir)} --label ${quote(name)} --no-focus`,
-      );
+      const created = await runner.exec([
+        "herdr",
+        "workspace",
+        "create",
+        "--cwd",
+        options.workDir,
+        "--label",
+        name,
+        "--no-focus",
+      ]);
       if (created.exitCode !== 0) {
         return finish({
           error: `herdr workspace create failed: ${herdrErrorDetail(created.stderr, created.stdout)} (is the herdr server running? start it with \`herdr\`)`,
@@ -259,9 +302,19 @@ export function createHerdrHostAdapter(options: HerdrAdapterOptions): HostAdapte
       }
 
       // 2. Start the agent (blocks until herdr detects it ready for input).
-      const started = await runner.exec(
-        `herdr agent start ${name} --kind ${options.kind} --pane ${paneId} --timeout ${startTimeoutMs}${extraArgs ? ` -- ${extraArgs}` : ""}`,
-      );
+      const started = await runner.exec([
+        "herdr",
+        "agent",
+        "start",
+        name,
+        "--kind",
+        options.kind,
+        "--pane",
+        paneId,
+        "--timeout",
+        String(startTimeoutMs),
+        ...(agentArgs.length > 0 ? ["--", ...agentArgs] : []),
+      ]);
       if (started.exitCode !== 0) {
         return finish({
           error: `herdr agent start (${options.kind}) failed: ${herdrErrorDetail(started.stderr, started.stdout)}`,
@@ -269,7 +322,16 @@ export function createHerdrHostAdapter(options: HerdrAdapterOptions): HostAdapte
       }
 
       // 3. Prompt and wait for a settled state (idle | done | blocked).
-      const prompted = await runner.exec(`herdr agent prompt ${name} ${quote(prompt)} --wait --timeout ${timeoutMs}`);
+      const prompted = await runner.exec([
+        "herdr",
+        "agent",
+        "prompt",
+        name,
+        prompt,
+        "--wait",
+        "--timeout",
+        String(timeoutMs),
+      ]);
       if (prompted.exitCode !== 0) {
         const detail = herdrErrorDetail(prompted.stderr, prompted.stdout);
         return finish({ error: `herdr agent prompt failed (likely timeout): ${detail}` });
@@ -282,19 +344,28 @@ export function createHerdrHostAdapter(options: HerdrAdapterOptions): HostAdapte
       }
 
       // 4. Harvest the ANSI-stripped terminal output.
-      const read = await runner.exec(`herdr agent read ${name} --source recent-unwrapped --lines ${readLines}`);
+      const read = await runner.exec([
+        "herdr",
+        "agent",
+        "read",
+        name,
+        "--source",
+        "recent-unwrapped",
+        "--lines",
+        String(readLines),
+      ]);
       if (read.exitCode !== 0) {
         return finish({ error: `herdr agent read failed: ${herdrErrorDetail(read.stderr, read.stdout)}` });
       }
       // The terminal echoes the submitted prompt: strip the charter's literal
       // vote template so the tally can never parse the echo as a vote.
-      return finish({ content: stripEchoedVoteTemplates(read.stdout.replace(/\n+$/, "\n")) });
+      return finish({ content: stripEchoedVoteTemplates(trimTrailingNewlines(read.stdout)) });
     } catch (error) {
       return finish({ error: error instanceof Error ? error.message : String(error) });
     } finally {
       // 5. Cleanup — unless the operator wants to inspect the workspace.
       if (!keepPanes && workspaceId) {
-        await runner.exec(`herdr workspace close ${workspaceId}`).catch(() => undefined);
+        await runner.exec(["herdr", "workspace", "close", workspaceId]).catch(() => undefined);
       }
     }
   };
@@ -322,9 +393,17 @@ export function createHerdrHostAdapter(options: HerdrAdapterOptions): HostAdapte
     getWorkingDirectory: () => options.workDir,
     readFile: async (file) => fs.readFile(await containedPath(file), "utf8"),
     writeFile: async (file, content) => fs.writeFile(await containedPath(file), content, "utf8"),
-    exec: (command, execOptions) => runner.exec(command, execOptions),
+    exec: (command, execOptions) =>
+      execAsync(command, { cwd: execOptions?.cwd, timeout: execOptions?.timeout })
+        .then(({ stdout, stderr }) => ({ stdout: String(stdout), stderr: String(stderr), exitCode: 0 }))
+        .catch((error: unknown) => {
+          const failure = error as { stdout?: string; stderr?: string; message?: string; code?: number };
+          return {
+            stdout: failure.stdout ?? "",
+            stderr: failure.stderr ?? failure.message ?? "command failed",
+            exitCode: failure.code ?? 1,
+          };
+        }),
     hasCapability: (capability) => capability === "parallel-spawn",
   };
 }
-
-const quote = (value: string): string => `'${value.replace(/'/g, `'\\''`)}'`;

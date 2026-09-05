@@ -10,9 +10,8 @@
 // Boundary: this module executes commands, it never judges them. Verdicts
 // stay with the improvement machine; a sandbox is a boundary, not an authority.
 
-import { exec as execCallback } from "node:child_process";
-import { promisify } from "node:util";
-import { buildSandboxCommand, SANDBOX_WORKDIR_MOUNT, validateSandboxImage } from "@guyghost/swarm-dao-core/delivery";
+import { execFile } from "node:child_process";
+import { buildSandboxArgv, SANDBOX_WORKDIR_MOUNT, validateSandboxImage } from "@guyghost/swarm-dao-core/delivery";
 
 export type SandboxMode = "none" | "docker" | "container" | "auto";
 
@@ -35,20 +34,34 @@ export interface SandboxOptions {
 
 type AnchorCommandOutcome = import("./orchestrator.js").AnchorCommandOutcome;
 export type SandboxExecRunner = (
-  command: string,
+  argv: readonly string[],
   timeoutMs: number,
 ) => Promise<{ stdout: string; stderr: string; exitCode: number }>;
 
 export type AnchorCommandRunner = (command: string) => Promise<AnchorCommandOutcome>;
 
 export type { SandboxCommandOptions } from "@guyghost/swarm-dao-core/delivery";
-export { buildSandboxCommand, SANDBOX_WORKDIR_MOUNT, validateSandboxImage };
+export { buildSandboxArgv, SANDBOX_WORKDIR_MOUNT, validateSandboxImage };
 
-const execAsync = promisify(execCallback);
+/** execFile with utf8 strings, promise-shaped (argv — never a shell line). */
+const execFileAsync = (
+  file: string,
+  args: readonly string[],
+  options: { timeout?: number; maxBuffer?: number },
+): Promise<{ stdout: string; stderr: string }> =>
+  new Promise((resolve, reject) => {
+    execFile(file, args, { ...options, encoding: "utf8" }, (error, stdout, stderr) => {
+      if (error) reject(Object.assign(error, { stdout, stderr }));
+      else resolve({ stdout: String(stdout), stderr: String(stderr) });
+    });
+  });
 
-const defaultExecRunner: SandboxExecRunner = async (command, timeoutMs) => {
+const defaultExecRunner: SandboxExecRunner = async (argv, timeoutMs) => {
   try {
-    const { stdout, stderr } = await execAsync(command, { timeout: timeoutMs });
+    const { stdout, stderr } = await execFileAsync(argv[0] ?? "", argv.slice(1), {
+      timeout: timeoutMs,
+      maxBuffer: 32 * 1024 * 1024,
+    });
     return { stdout, stderr, exitCode: 0 };
   } catch (error) {
     const failure = error as { stdout?: string; stderr?: string; message?: string; code?: number };
@@ -72,8 +85,8 @@ export function createSandboxRunCommand(
   runner: SandboxExecRunner = defaultExecRunner,
 ): AnchorCommandRunner {
   return async (command: string): Promise<AnchorCommandOutcome> => {
-    const line = buildSandboxCommand({ ...options, runtime: options.mode }, command);
-    const result = await runner(line, options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+    const argv = buildSandboxArgv({ ...options, runtime: options.mode }, command);
+    const result = await runner(argv, options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
     if (result.exitCode !== 0) {
       const detail = [result.stderr, result.stdout].filter((part) => part && part.length > 0).join(" ");
       return { ok: false, detail: tail(detail.trim(), 300) || `exit ${result.exitCode}` };
@@ -84,7 +97,7 @@ export function createSandboxRunCommand(
 
 /** Probe a runtime binary by executing its version command. */
 async function hasRuntime(binary: "docker" | "container", runner: SandboxExecRunner): Promise<boolean> {
-  const probe = await runner(`${binary} --version`, 10_000);
+  const probe = await runner([binary, "--version"], 10_000);
   return probe.exitCode === 0;
 }
 

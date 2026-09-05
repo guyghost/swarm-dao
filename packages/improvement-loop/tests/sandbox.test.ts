@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import {
-  buildSandboxCommand,
+  buildSandboxArgv,
   createSandboxRunCommand,
   resolveSandboxMode,
   resolveSandboxRunCommand,
@@ -8,11 +8,14 @@ import {
 } from "../src/sandbox.js";
 
 const fakeRunner =
-  (log: string[], exitCode = 0) =>
-  async (command: string) => {
-    log.push(command);
+  (log: string[][], exitCode = 0) =>
+  async (argv: readonly string[]) => {
+    log.push([...argv]);
     return { stdout: "", stderr: "", exitCode };
   };
+
+/** Joined argv form for readable assertions — the runner receives ARGV. */
+const line = (argv: readonly string[] | undefined): string => (argv ?? []).join(" ");
 
 describe("improvement-loop — bounded sandbox execution", () => {
   it("validates image references fail-closed", () => {
@@ -24,38 +27,45 @@ describe("improvement-loop — bounded sandbox execution", () => {
     expect(validateSandboxImage("")).not.toBeNull();
   });
 
-  it("builds docker/container commands with network off, mount, limits and quoting", () => {
+  it("builds docker/container ARGV with network off, mount, limits — no shell quoting needed", () => {
     const base = { runtime: "docker" as const, image: "node:22", workDir: "/repo root" };
-    const docker = buildSandboxCommand(base, "npm test");
-    expect(docker).toContain("docker run --rm --network none");
-    expect(docker).toContain("--cpus 2");
-    expect(docker).toContain("--memory 2048M");
-    expect(docker).toContain("-v '/repo root:/workspace'"); // quoted pair, spaces safe
-    expect(docker).toContain("-w /workspace");
-    expect(docker).toContain("node:22 sh -c");
+    const docker = buildSandboxArgv(base, "npm test");
+    expect(line(docker).startsWith("docker run --rm --network none")).toBe(true);
+    expect(docker).toContain("--cpus");
+    expect(docker).toContain("2");
+    expect(docker).toContain("--memory");
+    expect(docker).toContain("2048M");
+    expect(docker).toContain("-v");
+    expect(docker).toContain("/repo root:/workspace"); // raw argv element, spaces safe
+    expect(docker).toContain("-w");
+    expect(docker).toContain("/workspace");
+    expect(line(docker)).toContain("node:22 sh -c");
 
-    const apple = buildSandboxCommand({ ...base, runtime: "container", cpus: 4, memoryMb: 8192 }, "bun test");
-    expect(apple.startsWith("container run --rm --network none")).toBe(true);
-    expect(apple).toContain("--cpus 4");
-    expect(apple).toContain("--memory 8192M");
-    expect(apple).toContain("sh -c 'bun test'");
+    const apple = buildSandboxArgv({ ...base, runtime: "container", cpus: 4, memoryMb: 8192 }, "bun test");
+    expect(apple[0]).toBe("container");
+    expect(apple).toContain("--cpus");
+    expect(apple).toContain("4");
+    expect(apple).toContain("--memory");
+    expect(apple).toContain("8192M");
+    expect(apple.slice(-3)).toEqual(["sh", "-c", "bun test"]);
   });
 
   it("rejects relative workDir and hostile images before any shell sees them", () => {
-    expect(() => buildSandboxCommand({ mode: "docker", image: "ok", workDir: "relative/path" }, "x")).toThrow(
+    expect(() => buildSandboxArgv({ mode: "docker", image: "ok", workDir: "relative/path" }, "x")).toThrow(
       /absolute host path/,
     );
-    expect(() => buildSandboxCommand({ mode: "docker", image: "a$(b)", workDir: "/r" }, "x")).toThrow(
+    expect(() => buildSandboxArgv({ mode: "docker", image: "a$(b)", workDir: "/r" }, "x")).toThrow(
       /not a plain OCI reference/,
     );
   });
 
   it("executes through the injected runner and reports failures as outcomes", async () => {
-    const log: string[] = [];
+    const log: string[][] = [];
     const okRunner = createSandboxRunCommand({ mode: "docker", image: "node:22", workDir: "/repo" }, fakeRunner(log));
     const outcome = await okRunner("bun test");
     expect(outcome.ok).toBe(true);
-    expect(log[0]).toContain("docker run");
+    expect(line(log[0]).startsWith("docker run --rm --network none")).toBe(true);
+    expect(log[0]?.slice(-3)).toEqual(["sh", "-c", "bun test"]);
 
     const failing = createSandboxRunCommand({ mode: "docker", image: "node:22", workDir: "/repo" }, async () => ({
       stdout: "42 tests failed",

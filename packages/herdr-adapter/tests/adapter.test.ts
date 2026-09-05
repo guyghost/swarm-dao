@@ -9,7 +9,11 @@ import type { DAOAgent, Proposal } from "@guyghost/swarm-dao-core";
 import { createInitialState } from "@guyghost/swarm-dao-core";
 import { createHerdrHostAdapter, herdrAgentName, sanitizeHerdrName, stripEchoedVoteTemplates } from "../src/adapter.js";
 
-type Call = { command: string; options?: { cwd?: string } };
+type Call = { argv: string[]; options?: { cwd?: string } };
+
+/** Shell-free assertions helper: the joined form is for `toContain` checks only —
+ * the adapter never builds a shell line (argv elements stay verbatim). */
+const line = (call: Call): string => call.argv.join(" ");
 type Response = { stdout?: string; stderr?: string; exitCode: number };
 
 const WORKSPACE_CREATED = JSON.stringify({
@@ -34,9 +38,9 @@ function fakeHerdr(responses: Response[]) {
       readOutput = content;
     },
     runner: {
-      exec: async (command: string, options?: { cwd?: string }) => {
-        calls.push({ command, options });
-        if (command.includes("agent read")) {
+      exec: async (argv: readonly string[], options?: { cwd?: string }) => {
+        calls.push({ argv: [...argv], options });
+        if (argv[2] === "read") {
           return { stdout: readOutput, stderr: "", exitCode: 0 };
         }
         const response = responses[Math.min(index++, responses.length - 1)];
@@ -92,7 +96,7 @@ describe("herdr host adapter", () => {
       systemPrompt: "PROMPT-critic",
     });
 
-    const commands = fake.calls.map((call) => call.command);
+    const commands = fake.calls.map((call) => line(call));
     expect(commands[0]).toContain("herdr workspace create");
     expect(commands[0]).toContain("--cwd");
     expect(commands[0]).toContain("--no-focus");
@@ -109,7 +113,7 @@ describe("herdr host adapter", () => {
     expect(output.agentId).toBe("critic");
   });
 
-  test("multi-line prompts are passed as a single POSIX-quoted argument", async () => {
+  test("multi-line prompts are passed as a single verbatim argv element (never shell-interpreted)", async () => {
     const fake = fakeHerdr([
       { stdout: WORKSPACE_CREATED, exitCode: 0 },
       { stdout: AGENT_SETTLED("idle"), exitCode: 0 },
@@ -124,12 +128,10 @@ describe("herdr host adapter", () => {
       systemPrompt: "line one\nline 'quoted' \"text\"\nline three",
     });
 
-    const promptCommand = fake.calls.find((call) => call.command.includes("agent prompt"));
-    // The whole prompt is one single-quoted argument with embedded quotes escaped.
-    const quoted = promptCommand?.command.match(/agent prompt \S+ '([\s\S]*)' --wait/)?.[1];
-    expect(quoted).toContain("line one");
-    expect(quoted).toContain("'\\''quoted'\\''");
-    expect(quoted).toContain("line three");
+    // The whole prompt is ONE argv element, verbatim — no shell sees it, so
+    // quotes/newlines need no escaping at all.
+    const promptCommand = fake.calls.find((call) => call.argv[2] === "prompt");
+    expect(promptCommand?.argv[4]).toBe("line one\nline 'quoted' \"text\"\nline three");
   });
 
   test("a blocked agent surfaces as an error, never as a vote", async () => {
@@ -148,7 +150,7 @@ describe("herdr host adapter", () => {
     });
     expect(output.error).toContain("blocked");
     // Cleanup still runs.
-    expect(fake.calls.some((call) => call.command.includes("workspace close"))).toBe(true);
+    expect(fake.calls.some((call) => line(call).includes("workspace close"))).toBe(true);
   });
 
   test("a server error fails fast with the herdr error code", async () => {
@@ -183,7 +185,7 @@ describe("herdr host adapter", () => {
       systemPrompt: "P",
     });
     expect(output.error).toContain("timed out");
-    expect(fake.calls.some((call) => call.command.includes("workspace close"))).toBe(true);
+    expect(fake.calls.some((call) => line(call).includes("workspace close"))).toBe(true);
   });
 
   test("the per-call timeoutMs overrides the adapter default", async () => {
@@ -200,8 +202,8 @@ describe("herdr host adapter", () => {
       systemPrompt: "P",
       timeoutMs: 120_000,
     });
-    const promptCommand = fake.calls.find((call) => call.command.includes("agent prompt"));
-    expect(promptCommand?.command).toContain("--timeout 120000");
+    const promptCommand = fake.calls.find((call) => line(call).includes("agent prompt"));
+    expect(line(promptCommand ?? { argv: [] })).toContain("--timeout 120000");
   });
 
   test("missing kind fails with a copy-pasteable setup message", async () => {
@@ -220,7 +222,7 @@ describe("herdr host adapter", () => {
     ]);
     const adapter = createHerdrHostAdapter({ workDir, runner: fake.runner, kind: "pi", keepPanes: true });
     await adapter.spawnAgent({ agent: agent("critic"), proposal: proposal(8), systemPrompt: "P" });
-    expect(fake.calls.some((call) => call.command.includes("workspace close"))).toBe(false);
+    expect(fake.calls.some((call) => line(call).includes("workspace close"))).toBe(false);
   });
 
   test("hostile agent ids are sanitized into valid herdr names", async () => {
@@ -236,9 +238,9 @@ describe("herdr host adapter", () => {
       proposal: proposal(9),
       systemPrompt: "P",
     });
-    const start = fake.calls.find((call) => call.command.includes("agent start"));
-    expect(start?.command).toContain("--kind pi --pane");
-    expect(start?.command).toMatch(/agent start swarm-dao-p9-weird-id-99-\w{4} /);
+    const start = fake.calls.find((call) => call.argv[2] === "start");
+    expect(line(start ?? { argv: [] })).toContain("--kind pi --pane");
+    expect(start?.argv[3]).toMatch(/^swarm-dao-p9-weird-id-99-\w{4}$/);
   });
 
   test("readFile/writeFile are contained under workDir and reject asynchronously", async () => {
@@ -267,7 +269,7 @@ describe("herdr host adapter", () => {
       maxConcurrent: 3,
     });
     expect(outputs).toHaveLength(3);
-    expect(fake.calls.filter((call) => call.command.includes("workspace create")).length).toBe(3);
+    expect(fake.calls.filter((call) => line(call).includes("workspace create")).length).toBe(3);
   });
 
   test("herdr names satisfy the [a-z][a-z0-9_-]{0,31} contract", () => {
@@ -342,9 +344,9 @@ describe("herdr host adapter", () => {
     const adapter = createHerdrHostAdapter({ workDir, runner: fake.runner, kind: "pi" });
     // Simulate the agent taking ~40ms across the herdr commands.
     const originalExec = fake.runner.exec;
-    fake.runner.exec = async (command: string, options?: { cwd?: string }) => {
+    fake.runner.exec = async (argv: readonly string[], options?: { cwd?: string }) => {
       await new Promise((resolve) => setTimeout(resolve, 10));
-      return originalExec(command, options);
+      return originalExec(argv, options);
     };
     const output = await adapter.spawnAgent({ agent: agent("slow"), proposal: proposal(12), systemPrompt: "P" });
     // Duration covers the herdr command runtime (4 simulated delays ≥ 10ms each).
@@ -356,10 +358,10 @@ describe("herdr host adapter", () => {
     const adapter = createHerdrHostAdapter({ workDir, runner: fake.runner, kind: "pi; rm -rf /" });
     const output = await adapter.spawnAgent({ agent: agent("x"), proposal: proposal(13), systemPrompt: "P" });
     expect(output.error).toContain("not a valid agent kind");
-    expect(fake.calls.every((call) => !call.command.includes("rm -rf"))).toBe(true);
+    expect(fake.calls.every((call) => !line(call).includes("rm -rf"))).toBe(true);
   });
 
-  test("agentArgs are quoted as single argv elements", async () => {
+  test("agentArgs ride behind the separator as raw argv elements", async () => {
     const fake = fakeHerdr([
       { stdout: WORKSPACE_CREATED, exitCode: 0 },
       { stdout: AGENT_SETTLED("working"), exitCode: 0 },
@@ -373,8 +375,9 @@ describe("herdr host adapter", () => {
       agentArgs: ["-m", "o3; touch /tmp/pwned"],
     });
     await adapter.spawnAgent({ agent: agent("x"), proposal: proposal(14), systemPrompt: "P" });
-    const start = fake.calls.find((call) => call.command.includes("agent start"));
-    expect(start?.command).toContain("-- '-m' 'o3; touch /tmp/pwned'");
+    const start = fake.calls.find((call) => call.argv[2] === "start");
+    // agent args ride behind herdr's `--` separator as raw argv elements.
+    expect(start?.argv.slice(-3)).toEqual(["--", "-m", "o3; touch /tmp/pwned"]);
   });
 
   test("symlinks cannot bypass workspace containment", async () => {

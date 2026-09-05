@@ -189,7 +189,11 @@ export function foldChildIntoParent(parentContent: string, signal: DelegationSig
     childOutput.content?.trim() ?? "_(no output)_",
     "",
   ].join("\n");
-  return `${parentContent.replace(/\n*$/, "")}\n${childBlock}`;
+  // Drop trailing newlines without /\n*$/ (ReDoS-safe: a trailing-run regex
+  // rescans every start position on long newline runs).
+  let end = parentContent.length;
+  while (end > 0 && parentContent.charCodeAt(end - 1) === 10) end--;
+  return `${parentContent.slice(0, end)}\n${childBlock}`;
 }
 
 /**

@@ -49,14 +49,17 @@ const boundedInt = (value: number | undefined, fallback: number, min: number, ma
   return Math.min(Math.max(parsed, min), max);
 };
 
-const shellQuote = (value: string): string => `'${value.replace(/'/g, `'\\''`)}'`;
-
 /**
- * Build the bounded container command line for one command. Both runtimes
+ * Build the bounded container command as ARGV for one command. Both runtimes
  * accept the same option shapes: --rm --network none --cpus N --memory <n>M
  * -v <host>:<target> -w <target> <image> sh -c <command>.
+ *
+ * ARGV, not a shell line: the caller spawns argv[0] with the remaining
+ * elements via execFile, so no value is ever shell-interpreted by the host.
+ * (The anchored command still runs through `sh -c` INSIDE the container —
+ * that shell belongs to the image, not to this process.)
  */
-export function buildSandboxCommand(options: SandboxCommandOptions, command: string): string {
+export function buildSandboxArgv(options: SandboxCommandOptions, command: string): string[] {
   const imageError = validateSandboxImage(options.image);
   if (imageError) throw new Error(imageError);
   if (typeof options.workDir !== "string" || !options.workDir.startsWith("/")) {
@@ -65,7 +68,7 @@ export function buildSandboxCommand(options: SandboxCommandOptions, command: str
 
   const cpus = boundedInt(options.cpus, DEFAULT_CPUS, 1, 64);
   const memoryMb = boundedInt(options.memoryMb, DEFAULT_MEMORY_MB, 256, 1_048_576);
-  const args = [
+  return [
     options.runtime,
     "run",
     "--rm",
@@ -76,13 +79,12 @@ export function buildSandboxCommand(options: SandboxCommandOptions, command: str
     "--memory",
     `${memoryMb}M`,
     "-v",
-    shellQuote(`${options.workDir}:${SANDBOX_WORKDIR_MOUNT}`),
+    `${options.workDir}:${SANDBOX_WORKDIR_MOUNT}`,
     "-w",
     SANDBOX_WORKDIR_MOUNT,
     options.image,
     "sh",
     "-c",
-    shellQuote(command),
+    command,
   ];
-  return args.join(" ");
 }
