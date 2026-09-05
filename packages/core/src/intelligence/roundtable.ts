@@ -25,15 +25,16 @@ const SUGGESTION_PROMPT = `You are participating in a DAO Round Table.
 
 Your task: suggest ONE concrete proposal that would improve the project described above (see the Project Brief when provided).
 
-Analyze what you know about the project and suggest something specific, actionable, and valuable.
+Grounding rules (mandatory):
+- Cite actual files, modules, commands, docs, or recent commits from the Project Brief.
+- Never propose generic improvements (e.g. "add tests", "improve docs", "add CI", "refactor code") unless the brief shows a concrete, named gap.
+- Never re-propose anything already listed under "Recent proposals" or visible in "Recent commits" — propose what is MISSING or BROKEN, not what exists.
 
 Output format:
 ## Suggested Proposal
 **Title:** [short title]
 **Type:** [product-feature | security-change | technical-change | release-change | governance-change]
-**Description:** [2-3 sentences describing what and why]
-
-Be specific. Reference actual files, patterns, or problems if you can.`;
+**Description:** [2-3 sentences describing what and why, grounded in specific files/commits/docs]`;
 
 export async function runRoundTable(
   adapter: AgentWorkerPort,

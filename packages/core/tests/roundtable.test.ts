@@ -66,6 +66,7 @@ describe("intelligence/roundtable", () => {
     for (const prompt of prompts) {
       expect(prompt).toContain("SCOUT-BRIEF-MARKER");
       expect(prompt).toContain("DAO Round Table");
+      expect(prompt).toContain("Grounding rules");
     }
     expect(suggestions.length).toBe(2);
   });

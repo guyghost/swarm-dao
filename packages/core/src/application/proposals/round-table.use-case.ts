@@ -30,6 +30,17 @@ export class RoundTableUseCase {
     const state = this.dependencies.repository.get();
     if (!state.initialized) return { ok: false, error: "DAO not initialized. Run dao_setup first." };
     const agents = command.agents ?? state.agents;
+    // Dedup context: agents that cannot see existing proposals re-propose
+    // them. Share the most recent ones so the round table proposes what is
+    // missing instead of what is already tracked.
+    const recentProposals = state.proposals.slice(-10);
+    const dedupSection =
+      recentProposals.length > 0
+        ? `## Recent proposals (already tracked — do not re-propose)\n${recentProposals
+            .map((p) => `- #${p.id} [${p.status}] ${p.title}`)
+            .join("\n")}`
+        : "";
+    const brief = [command.projectBrief?.trim(), dedupSection].filter((part) => part && part.length > 0).join("\n\n");
     const modelContext = createDispatchModelContext(state.config.defaultModel, this.dependencies.worker, {
       parentSessionModel: command.parentSessionModel,
       hostDefaultModel: command.hostDefaultModel,
@@ -40,7 +51,7 @@ export class RoundTableUseCase {
       state.config.maxConcurrent,
       modelContext,
       this.dependencies.clock,
-      { projectBrief: command.projectBrief },
+      { projectBrief: brief.length > 0 ? brief : undefined },
     );
     const proposalIds = new Map<string, number>();
     const stagedRepository: DaoStateRepositoryPort = {
