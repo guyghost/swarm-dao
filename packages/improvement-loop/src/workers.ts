@@ -13,18 +13,34 @@
 // effect-level, bounded, and idempotent (fresh workspace per attempt); they
 // never change series or cycle state.
 
-import { exec as execCallback } from "node:child_process";
-import { promisify } from "node:util";
+import { execFile } from "node:child_process";
 import { ORCHESTRATOR_MAX_WORKER_RETRIES } from "@guyghost/swarm-dao-core/models/improvement";
 import type { HerdrRunner } from "@guyghost/swarm-dao-herdr-adapter";
-import { sanitizeHerdrName } from "@guyghost/swarm-dao-herdr-adapter";
+import { sanitizeHerdrName, trimTrailingNewlines } from "@guyghost/swarm-dao-herdr-adapter";
 
-const execAsync = promisify(execCallback);
+/** execFile with utf8 strings, promise-shaped. Failures reject with the child
+ * error carrying .code/.stdout/.stderr. Commands are ARGV — never shell
+ * strings — so worker prompts and labels are never shell-interpreted. */
+const execFileAsync = (
+  file: string,
+  args: readonly string[],
+  options: { cwd?: string; timeout?: number; maxBuffer?: number },
+): Promise<{ stdout: string; stderr: string }> =>
+  new Promise((resolve, reject) => {
+    execFile(file, args, { ...options, encoding: "utf8" }, (error, stdout, stderr) => {
+      if (error) reject(Object.assign(error, { stdout, stderr }));
+      else resolve({ stdout: String(stdout), stderr: String(stderr) });
+    });
+  });
 
 const defaultRunner = (): HerdrRunner => ({
-  exec: async (command, options) => {
+  exec: async (argv, options) => {
     try {
-      const { stdout, stderr } = await execAsync(command, { cwd: options?.cwd, timeout: options?.timeout });
+      const { stdout, stderr } = await execFileAsync(argv[0] ?? "", argv.slice(1), {
+        cwd: options?.cwd,
+        timeout: options?.timeout,
+        maxBuffer: 32 * 1024 * 1024,
+      });
       return { stdout, stderr, exitCode: 0 };
     } catch (error) {
       const failure = error as { stdout?: string; stderr?: string; message?: string; code?: number | string };
@@ -110,7 +126,7 @@ const escapeInStringControls = (candidate: string): string => {
   return repaired;
 };
 
-// Numeric options are interpolated into herdr shell commands, so they must be
+// Numeric options reach herdr command lines as argv elements, so they must be
 // finite integers within bounds even when callers bypass the TypeScript types
 // (e.g. JSON config); anything else falls back to the default.
 export const toBoundedInt = (value: unknown, fallback: number, min: number, max: number): number => {
@@ -118,8 +134,6 @@ export const toBoundedInt = (value: unknown, fallback: number, min: number, max:
   if (!Number.isFinite(parsed)) return fallback;
   return Math.min(Math.max(Math.trunc(parsed), min), max);
 };
-
-const quote = (value: string): string => `'${value.replace(/'/g, `'\\''`)}'`;
 
 function herdrErrorDetail(stderr: string, stdout: string): string {
   try {
@@ -164,7 +178,7 @@ function agentState(result: HerdrJson["result"]): string | null {
 async function closeLingeringWorkspaces(runner: HerdrRunner, baseName: string): Promise<void> {
   let listed: Awaited<ReturnType<HerdrRunner["exec"]>>;
   try {
-    listed = await runner.exec("herdr workspace list");
+    listed = await runner.exec(["herdr", "workspace", "list"]);
   } catch {
     return; // listing is best-effort; creation will surface real errors
   }
@@ -173,7 +187,7 @@ async function closeLingeringWorkspaces(runner: HerdrRunner, baseName: string): 
   for (const workspace of workspaces) {
     const label = typeof workspace.label === "string" ? workspace.label : "";
     if (!workspace.workspace_id || (label !== baseName && !label.startsWith(`${baseName}-r`))) continue;
-    await runner.exec(`herdr workspace close ${workspace.workspace_id}`).catch(() => undefined);
+    await runner.exec(["herdr", "workspace", "close", workspace.workspace_id]).catch(() => undefined);
   }
 }
 
@@ -194,7 +208,6 @@ export async function runHerdrWorker(
   const timeoutMs = toBoundedInt(options.timeoutMs, 300_000, 1_000, 300_000);
   const startTimeoutMs = toBoundedInt(options.startTimeoutMs, 120_000, 1_000, 300_000);
   const readLines = toBoundedInt(options.readLines, 200, 1, 10_000);
-  const extraArgs = agentArgs.map((arg) => quote(arg)).join(" ");
 
   if (!SAFE_HERDR_KIND.test(kind))
     return { ok: false, error: `herdr kind '${kind}' is not a valid agent kind identifier.` };
@@ -211,9 +224,16 @@ export async function runHerdrWorker(
     const agentName = attempt === 1 ? baseName : `${baseName}-r${attempt}`.slice(0, 32);
     let workspaceId: string | null = null;
     try {
-      const created = await runner.exec(
-        `herdr workspace create --cwd ${quote(options.workDir)} --label ${quote(agentName)} --no-focus`,
-      );
+      const created = await runner.exec([
+        "herdr",
+        "workspace",
+        "create",
+        "--cwd",
+        options.workDir,
+        "--label",
+        agentName,
+        "--no-focus",
+      ]);
       if (created.exitCode !== 0) {
         lastError = `herdr workspace create failed: ${herdrErrorDetail(created.stderr, created.stdout)}`;
         continue;
@@ -225,17 +245,34 @@ export async function runHerdrWorker(
         continue;
       }
 
-      const started = await runner.exec(
-        `herdr agent start ${agentName} --kind ${kind} --pane ${paneId} --timeout ${startTimeoutMs}${extraArgs ? ` -- ${extraArgs}` : ""}`,
-      );
+      const started = await runner.exec([
+        "herdr",
+        "agent",
+        "start",
+        agentName,
+        "--kind",
+        kind,
+        "--pane",
+        paneId,
+        "--timeout",
+        String(startTimeoutMs),
+        ...(agentArgs.length > 0 ? ["--", ...agentArgs] : []),
+      ]);
       if (started.exitCode !== 0) {
         lastError = `herdr agent start (${kind}) failed: ${herdrErrorDetail(started.stderr, started.stdout)}`;
         continue;
       }
 
-      const prompted = await runner.exec(
-        `herdr agent prompt ${agentName} ${quote(prompt)} --wait --timeout ${timeoutMs}`,
-      );
+      const prompted = await runner.exec([
+        "herdr",
+        "agent",
+        "prompt",
+        agentName,
+        prompt,
+        "--wait",
+        "--timeout",
+        String(timeoutMs),
+      ]);
       if (prompted.exitCode !== 0) {
         lastError = `herdr agent prompt failed (likely timeout): ${herdrErrorDetail(prompted.stderr, prompted.stdout)}`;
         continue;
@@ -245,17 +282,26 @@ export async function runHerdrWorker(
         continue;
       }
 
-      const read = await runner.exec(`herdr agent read ${agentName} --source recent-unwrapped --lines ${readLines}`);
+      const read = await runner.exec([
+        "herdr",
+        "agent",
+        "read",
+        agentName,
+        "--source",
+        "recent-unwrapped",
+        "--lines",
+        String(readLines),
+      ]);
       if (read.exitCode !== 0) {
         lastError = `herdr agent read failed: ${herdrErrorDetail(read.stderr, read.stdout)}`;
         continue;
       }
-      return { ok: true, content: read.stdout.replace(/\n+$/, "\n") };
+      return { ok: true, content: trimTrailingNewlines(read.stdout) };
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error);
     } finally {
       if (!options.keepPanes && workspaceId) {
-        await runner.exec(`herdr workspace close ${workspaceId}`).catch(() => undefined);
+        await runner.exec(["herdr", "workspace", "close", workspaceId]).catch(() => undefined);
       }
     }
   }

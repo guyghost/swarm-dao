@@ -140,38 +140,60 @@ export function generateDeliveryPlan(proposal: Proposal, options: { now?: string
 }
 
 export function parseDeliveryPlan(markdown: string): Partial<DeliveryPlan> {
-  // Simple parser for markdown plan format
+  // Line-oriented parser for the markdown plan format (ReDoS-safe): phases
+  // are delimited by scanning heading lines, never by [\s\S]*? lookahead
+  // alternations. Mirrors the original delimiters: a phase body runs until
+  // the next "## Phase" heading, a "## Rollback" heading, or EOF.
   const plan: Partial<DeliveryPlan> = { phases: [] };
 
-  const phaseMatches = [
-    ...markdown.matchAll(/##\s*Phase\s*(\d+):\s*(.+?)\n([\s\S]*?)(?=##\s*Phase|\n##\s*Rollback|$)/gi),
-  ];
-  for (const match of phaseMatches) {
-    const phaseNum = parseInt(match[1] ?? "0", 10);
-    const phaseName = match[2]?.trim();
-    const phaseContent = match[3] ?? "";
-
+  interface OpenPhase {
+    number: number;
+    name: string;
+    body: string[];
+  }
+  let open: OpenPhase | null = null;
+  const flush = (): void => {
+    if (!open) return;
     const tasks: DeliveryTask[] = [];
-    const taskMatches = [...phaseContent.matchAll(/-\s*\[(.)\]\s*\*\*(.+?)\*\*\s*-\s*(.+?)(?:\n|$)/gi)];
-    for (const tm of taskMatches) {
+    const TASK_PATTERN = /^[ \t]*-[ \t]*\[(.)\][ \t]*\*\*(.+?)\*\*[ \t]*-[ \t]*(.+)$/;
+    for (const line of open.body) {
+      const tm = line.match(TASK_PATTERN);
+      if (!tm) continue;
       tasks.push({
         id: `T${tasks.length + 1}`,
         title: tm[2]?.trim() ?? "",
         description: tm[3]?.trim() ?? "",
         effort: "m",
-        phase: phaseNum,
+        phase: open.number,
         dependencies: [],
         status: tm[1] === "x" ? "done" : "pending",
       });
     }
-
     plan.phases?.push({
-      number: phaseNum,
-      name: phaseName ?? "",
+      number: open.number,
+      name: open.name,
       tasks,
       duration: "TBD",
     });
+    open = null;
+  };
+
+  for (const line of markdown.split("\n")) {
+    // "### Phase" headings also open phases: the format emits h3, and the
+    // original unanchored pattern matched them from offset 1.
+    const phaseHeading = line.match(/^#{2,}[ \t]*phase[ \t]*(\d+)[ \t]*:[ \t]*(.*)$/i);
+    if (phaseHeading) {
+      flush();
+      open = { number: parseInt(phaseHeading[1] ?? "0", 10), name: (phaseHeading[2] ?? "").trim(), body: [] };
+      continue;
+    }
+    if (open && /^#{2,}[ \t]*rollback/i.test(line)) {
+      flush();
+      continue;
+    }
+    if (open) open.body.push(line);
   }
+  flush();
 
   return plan;
 }

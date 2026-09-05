@@ -163,9 +163,11 @@ export function planExecutionIsolation(
   }
 
   // slugify() output is strictly [a-z0-9-], so the derived branch and path
-  // inherit the validated charset of the root.
+  // inherit the validated charset of the root. Trailing slashes are trimmed
+  // with a linear scan — /\/+$/ rescan long slash runs (ReDoS-safe).
   const slug = slugify(proposal.title) || "proposal";
-  const trimmedRoot = root.replace(/\/+$/, "");
+  let trimmedRoot = root;
+  while (trimmedRoot.endsWith("/")) trimmedRoot = trimmedRoot.slice(0, -1);
   const branch = `dao/${proposal.id}-${slug}`;
   const worktreePath = `${trimmedRoot}/${proposal.id}-${slug}`;
   if (!sandboxed) {

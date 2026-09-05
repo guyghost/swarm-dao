@@ -150,13 +150,22 @@ export interface DelegationSignal {
 export function extractDelegationSignals(content: string | undefined): DelegationSignal[] {
   if (!content) return [];
   const signals: DelegationSignal[] = [];
-  const section = content.match(/##\s*Delegation Requests\s*\n([\s\S]*?)(?=\n##\s|$)/i);
-  if (!section?.[1]) return [];
-  for (const line of section[1].split("\n")) {
-    const m = line.match(/^\s*[-*]\s*facet:\s*([^|]+?)\s*\|\s*archetype:\s*(.+?)\s*$/i);
-    if (!m?.[1] || !m[2]) continue;
-    const facet = m[1].trim();
-    const archetype = m[2].trim();
+  // Line-oriented scan (ReDoS-safe): body of the "## Delegation Requests"
+  // section = the lines after its heading up to the next "##" heading. No
+  // [\s\S]*? lookahead alternations over unbounded input.
+  const lines = content.split("\n");
+  const headingAt = lines.findIndex((line) => /^##[ \t]*delegation requests[ \t]*$/i.test(line));
+  if (headingAt < 0) return [];
+  for (let i = headingAt + 1; i < lines.length; i++) {
+    const line = lines[i] ?? "";
+    if (/^##/.test(line)) break;
+    const pipeAt = line.indexOf("|");
+    if (pipeAt < 0) continue;
+    const facetMatch = line.slice(0, pipeAt).match(/^[ \t]*[-*][ \t]*facet:[ \t]*(.*)$/i);
+    const archetypeMatch = line.slice(pipeAt + 1).match(/^[ \t]*archetype:[ \t]*(.*)$/i);
+    if (!facetMatch || !archetypeMatch) continue;
+    const facet = (facetMatch[1] ?? "").trim();
+    const archetype = (archetypeMatch[1] ?? "").trim();
     if (facet.length > 0 && archetype.length > 0) {
       signals.push({ facet: normalizeFacet(facet), archetype: normalizeFacet(archetype) });
     }

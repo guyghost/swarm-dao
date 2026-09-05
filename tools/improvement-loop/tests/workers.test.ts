@@ -48,12 +48,12 @@ describe("herdr worker executor — numeric option sanitization", () => {
   });
 
   it("never interpolates unsanitized numeric options into herdr commands", async () => {
-    const commands: string[] = [];
+    const commands: string[][] = [];
     const ok = (stdout: unknown) => ({ stdout: JSON.stringify(stdout), stderr: "", exitCode: 0 });
     const runner = {
-      exec: async (command: string) => {
-        commands.push(command);
-        if (command.startsWith("herdr workspace create")) {
+      exec: async (argv: readonly string[]) => {
+        commands.push([...argv]);
+        if (argv[1] === "workspace" && argv[2] === "create") {
           return ok({ result: { root_pane: { pane_id: "p1" }, workspace: { workspace_id: "w1" } } });
         }
         return ok({});
@@ -63,7 +63,7 @@ describe("herdr worker executor — numeric option sanitization", () => {
       workDir: "/repo",
       runner,
       // All three would be dangerous if interpolated raw: a non-numeric string
-      // (shell injection) and out-of-range/non-finite numbers.
+      // (command injection) and out-of-range/non-finite numbers.
       timeoutMs: "5000; rm -rf /" as unknown as number,
       startTimeoutMs: Number.NaN,
       readLines: "999999" as unknown as number,
@@ -71,22 +71,33 @@ describe("herdr worker executor — numeric option sanitization", () => {
     const harvest = await runHerdrWorker(options, "worker-sanitize", "prompt");
     expect(harvest.ok).toBe(true);
 
-    const promptCommand = commands.find((command) => command.startsWith("herdr agent prompt"));
-    expect(promptCommand).toContain("--timeout 300000"); // non-finite string -> default, capped
-    expect(promptCommand).not.toContain("rm -rf");
-    const startCommand = commands.find((command) => command.startsWith("herdr agent start"));
-    expect(startCommand).toContain("--timeout 120000"); // NaN -> default
-    const readCommand = commands.find((command) => command.startsWith("herdr agent read"));
-    expect(readCommand).toBe("herdr agent read worker-sanitize --source recent-unwrapped --lines 10000"); // numeric string -> capped at ceiling
+    const start = commands.find((argv) => argv[2] === "start");
+    const prompt = commands.find((argv) => argv[2] === "prompt");
+    const read = commands.find((argv) => argv[2] === "read");
+    // Non-finite string -> default, capped; NaN -> default; numeric string -> capped.
+    expect(start?.includes("--timeout")).toBe(true);
+    expect(start?.[start.indexOf("--timeout") + 1]).toBe("120000");
+    expect(prompt?.includes("rm -rf")).toBe(false);
+    expect(prompt?.[prompt.indexOf("--timeout") + 1]).toBe("300000");
+    expect(read).toEqual([
+      "herdr",
+      "agent",
+      "read",
+      "worker-sanitize",
+      "--source",
+      "recent-unwrapped",
+      "--lines",
+      "10000",
+    ]);
   });
 });
 
 describe("herdr worker executor — agent kind defaults", () => {
-  const okRunner = (commands: string[]) =>
+  const okRunner = (commands: string[][]) =>
     ({
-      exec: async (command: string) => {
-        commands.push(command);
-        if (command.startsWith("herdr workspace create")) {
+      exec: async (argv: readonly string[]) => {
+        commands.push([...argv]);
+        if (argv[1] === "workspace" && argv[2] === "create") {
           return {
             stdout: JSON.stringify({ result: { root_pane: { pane_id: "p1" }, workspace: { workspace_id: "w1" } } }),
             stderr: "",
@@ -97,27 +108,32 @@ describe("herdr worker executor — agent kind defaults", () => {
       },
     }) satisfies import("@guyghost/swarm-dao-herdr-adapter").HerdrRunner;
 
-  it("defaults to '-ne' only for the pi kind", async () => {
-    const piCommands: string[] = [];
+  const startOf = (commands: string[][]): string[] =>
+    commands.find((argv) => argv[2] === "start") ?? [];
+
+  it("defaults to '-ne' only for the pi kind (raw argv behind the separator)", async () => {
+    const piCommands: string[][] = [];
     const pi = await runHerdrWorker({ workDir: "/repo", runner: okRunner(piCommands) }, "worker-pi", "prompt");
     expect(pi.ok).toBe(true);
-    expect(piCommands.find((c) => c.startsWith("herdr agent start"))).toContain("-- '-ne'");
+    expect(startOf(piCommands).slice(-2)).toEqual(["--", "-ne"]);
 
-    const codexCommands: string[] = [];
+    const codexCommands: string[][] = [];
     const codex = await runHerdrWorker({ workDir: "/repo", kind: "codex", runner: okRunner(codexCommands) }, "w", "p");
     expect(codex.ok).toBe(true);
-    expect(codexCommands.find((c) => c.startsWith("herdr agent start"))).not.toContain("-ne");
+    expect(startOf(codexCommands)).not.toContain("-ne");
   });
 
   it("explicit agentArgs override the kind default", async () => {
-    const commands: string[] = [];
+    const commands: string[][] = [];
     const harvest = await runHerdrWorker(
       { workDir: "/repo", kind: "claude", agentArgs: ["--permission-mode", "read-only"], runner: okRunner(commands) },
       "worker-claude",
       "prompt",
     );
     expect(harvest.ok).toBe(true);
-    expect(commands.find((c) => c.startsWith("herdr agent start"))).toContain("-- '--permission-mode' 'read-only'");
+    const start = startOf(commands);
+    const sep = start.indexOf("--");
+    expect(start.slice(sep + 1)).toEqual(["--permission-mode", "read-only"]);
   });
 });
 
@@ -125,11 +141,11 @@ describe("herdr worker executor — orphaned workspace cleanup (dogfood-003 c6 f
   const ok = (stdout: unknown) => ({ stdout: JSON.stringify(stdout), stderr: "", exitCode: 0 });
 
   it("closes a lingering same-label workspace before creating a fresh one", async () => {
-    const commands: string[] = [];
+    const commands: string[][] = [];
     const runner = {
-      exec: async (command: string) => {
-        commands.push(command);
-        if (command === "herdr workspace list") {
+      exec: async (argv: readonly string[]) => {
+        commands.push([...argv]);
+        if (argv[1] === "workspace" && argv[2] === "list") {
           return ok({
             result: {
               workspaces: [
@@ -141,7 +157,7 @@ describe("herdr worker executor — orphaned workspace cleanup (dogfood-003 c6 f
             },
           });
         }
-        if (command.startsWith("herdr workspace create")) {
+        if (argv[1] === "workspace" && argv[2] === "create") {
           return ok({ result: { root_pane: { pane_id: "p1" }, workspace: { workspace_id: "w1" } } });
         }
         return ok({});
@@ -151,25 +167,25 @@ describe("herdr worker executor — orphaned workspace cleanup (dogfood-003 c6 f
     const harvest = await runHerdrWorker({ workDir: "/repo", runner }, "orchestrator-sensor", "prompt");
     expect(harvest.ok).toBe(true);
 
-    const closeIndex = commands.indexOf("herdr workspace close wOrphan");
-    const closeRetryIndex = commands.indexOf("herdr workspace close wOrphanRetry");
-    const createIndex = commands.findIndex((c) => c.startsWith("herdr workspace create"));
+    const closeIndex = commands.findIndex((argv) => argv[2] === "close" && argv[3] === "wOrphan");
+    const closeRetryIndex = commands.findIndex((argv) => argv[2] === "close" && argv[3] === "wOrphanRetry");
+    const createIndex = commands.findIndex((argv) => argv[2] === "create");
     expect(closeIndex).toBeGreaterThan(-1);
     expect(closeRetryIndex).toBeGreaterThan(-1);
     expect(closeIndex).toBeLessThan(createIndex);
     expect(closeRetryIndex).toBeLessThan(createIndex);
     // Unrelated workspaces (the operator's own, other labels) stay untouched.
-    expect(commands).not.toContain("herdr workspace close wHome");
-    expect(commands).not.toContain("herdr workspace close wOther");
+    expect(commands.some((argv) => argv[2] === "close" && argv[3] === "wHome")).toBe(false);
+    expect(commands.some((argv) => argv[2] === "close" && argv[3] === "wOther")).toBe(false);
   });
 
   it("tolerates a failing workspace list without breaking the run", async () => {
-    const commands: string[] = [];
+    const commands: string[][] = [];
     const runner = {
-      exec: async (command: string) => {
-        commands.push(command);
-        if (command === "herdr workspace list") return { stdout: "", stderr: "boom", exitCode: 1 };
-        if (command.startsWith("herdr workspace create")) {
+      exec: async (argv: readonly string[]) => {
+        commands.push([...argv]);
+        if (argv[1] === "workspace" && argv[2] === "list") return { stdout: "", stderr: "boom", exitCode: 1 };
+        if (argv[1] === "workspace" && argv[2] === "create") {
           return ok({ result: { root_pane: { pane_id: "p1" }, workspace: { workspace_id: "w1" } } });
         }
         return ok({});
@@ -178,6 +194,6 @@ describe("herdr worker executor — orphaned workspace cleanup (dogfood-003 c6 f
 
     const harvest = await runHerdrWorker({ workDir: "/repo", runner }, "orchestrator-sensor", "prompt");
     expect(harvest.ok).toBe(true);
-    expect(commands.some((c) => c.startsWith("herdr workspace create"))).toBe(true);
+    expect(commands.some((argv) => argv[2] === "create")).toBe(true);
   });
 });

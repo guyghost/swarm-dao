@@ -9,7 +9,11 @@ import type { DAOAgent, Proposal } from "@guyghost/swarm-dao-core";
 import { createInitialState } from "@guyghost/swarm-dao-core";
 import { createTmuxHostAdapter, sanitizeSessionName } from "../src/adapter.js";
 
-type Call = { command: string; options?: { cwd?: string } };
+type Call = { argv: string[]; options?: { cwd?: string } };
+
+/** Joined argv form for assertions only — the adapter never builds a shell
+ * line; tmux commands ride as argv elements (the pane program is one element). */
+const line = (call: Call | undefined): string => (call?.argv ?? []).join(" ");
 
 function fakeTmux() {
   const calls: Call[] = [] as Call[];
@@ -29,20 +33,36 @@ function fakeTmux() {
     },
     paneError: "",
     runner: {
-      exec: async (command: string, options?: { cwd?: string }) => {
-        calls.push({ command, options });
-        if (command.includes("capture-pane")) {
+      exec: async (argv: readonly string[], options?: { cwd?: string }) => {
+        calls.push({ argv: [...argv], options });
+        const joined = argv.join(" ");
+        if (joined.includes("capture-pane")) {
           return { stdout: paneContent, stderr: "", exitCode: 0 };
         }
-        if (command.includes("tmux new-session") && newSessionFails) {
+        if (joined.includes("tmux new-session") && newSessionFails) {
           return { stdout: "", stderr: api.paneError, exitCode: 1 };
         }
-        if (command.includes("tmux new-session")) {
+        if (joined.includes("tmux new-session")) {
           // The pane writes its done marker when the session program runs.
-          const runDir = command.match(/([^\s'"]*\.dao\/tmux\/\d+\/[A-Za-z0-9_-]+)/)?.[1];
-          if (runDir) {
-            await fs.mkdir(runDir, { recursive: true });
-            await fs.writeFile(path.join(runDir, "done"), exitCode);
+          // The program carries the prompt path inside its shell code; the
+          // runDir is derivable from the -c cwd (same repository root).
+          const cwdAt = argv.indexOf("-c");
+          const cwd = cwdAt >= 0 ? (argv[cwdAt + 1] ?? "") : "";
+          const runDir = path.join(cwd, ".dao", "tmux", "1", "critic");
+          const proposalMatch = joined.match(/-p(\d+)-/);
+          const runDir2 =
+            proposalMatch !== null
+              ? path.join(
+                  cwd,
+                  ".dao",
+                  "tmux",
+                  proposalMatch[1] ?? "",
+                  joined.match(/-p\d+-([A-Za-z0-9_-]+)/)?.[1] ?? "",
+                )
+              : runDir;
+          if (runDir2) {
+            await fs.mkdir(runDir2, { recursive: true });
+            await fs.writeFile(path.join(runDir2, "done"), exitCode);
           }
         }
         return { stdout: "", stderr: "", exitCode: 0 };
@@ -92,15 +112,15 @@ describe("tmux host adapter", () => {
       systemPrompt: "PROMPT-critic",
     });
 
-    const newSession = fake.calls.find((c) => c.command.includes("tmux new-session"));
-    const capture = fake.calls.find((c) => c.command.includes("capture-pane"));
-    const kill = fake.calls.filter((c) => c.command.includes("tmux kill-session"));
-    expect(newSession?.command).toContain("swarm-dao-p1-critic");
-    expect(newSession?.command).toContain("agent-cli");
-    expect(newSession?.command).toContain("PROMPT=");
-    expect(newSession?.command).not.toContain("> output.md"); // output streams to the pane
+    const newSession = fake.calls.find((c) => line(c).includes("tmux new-session"));
+    const capture = fake.calls.find((c) => line(c).includes("capture-pane"));
+    const kill = fake.calls.filter((c) => line(c).includes("tmux kill-session"));
+    expect(line(newSession)).toContain("swarm-dao-p1-critic");
+    expect(line(newSession)).toContain("agent-cli");
+    expect(line(newSession)).toContain("PROMPT=");
+    expect(line(newSession)).not.toContain("> output.md"); // output streams to the pane
     // Stale-name purge before creation, then cleanup after harvest.
-    const newSessionIndex = fake.calls.findIndex((c) => c.command.includes("tmux new-session"));
+    const newSessionIndex = fake.calls.findIndex((c) => line(c).includes("tmux new-session"));
     expect(kill.length).toBe(2);
     const firstKill = kill[0] ?? { command: "" };
     const secondKill = kill[1] ?? { command: "" };
@@ -125,11 +145,11 @@ describe("tmux host adapter", () => {
       proposal: proposal(8),
       systemPrompt: "P",
     });
-    const newSession = fake.calls.find((c) => c.command.includes("tmux new-session"));
-    expect(newSession?.command).toContain("swarm-dao-p8-etc-passwd");
+    const newSession = fake.calls.find((c) => line(c).includes("tmux new-session"));
+    expect(line(newSession)).toContain("swarm-dao-p8-etc-passwd");
     // The run directory uses the sanitized segment — no traversal.
-    expect(newSession?.command).toContain(".dao/tmux/8/etc-passwd");
-    expect(newSession?.command).not.toContain("../");
+    expect(line(newSession)).toContain(".dao/tmux/8/etc-passwd");
+    expect(line(newSession)).not.toContain("../");
     const marker = path.join(workDir, ".dao/tmux/8/etc-passwd/done");
     expect(await fs.readFile(marker, "utf8")).toBe("0");
   });
@@ -173,8 +193,8 @@ describe("tmux host adapter", () => {
     // A fake that never writes the done marker: strip the simulate behavior.
     const calls: Call[] = [];
     const runner = {
-      exec: async (command: string, options?: { cwd?: string }) => {
-        calls.push({ command, options });
+      exec: async (argv: readonly string[], options?: { cwd?: string }) => {
+        calls.push({ argv: [...argv], options });
         return { stdout: "", stderr: "", exitCode: 0 };
       },
     };
@@ -192,7 +212,7 @@ describe("tmux host adapter", () => {
       systemPrompt: "P",
     });
     expect(output.error).toContain("timed out");
-    expect(calls.some((c) => c.command.includes("tmux kill-session"))).toBe(true);
+    expect(calls.some((c) => line(c).includes("tmux kill-session"))).toBe(true);
   });
 
   test("the per-call timeoutMs overrides the adapter default", async () => {
@@ -238,13 +258,13 @@ describe("tmux host adapter", () => {
     });
 
     await adapter.spawnAgent({ agent: agent("critic"), proposal: proposal(7), systemPrompt: "P" });
-    const kills = fake.calls.filter((c) => c.command.includes("tmux kill-session"));
-    const newSessionIndex = fake.calls.findIndex((c) => c.command.includes("tmux new-session"));
+    const kills = fake.calls.filter((c) => line(c).includes("tmux kill-session"));
+    const newSessionIndex = fake.calls.findIndex((c) => line(c).includes("tmux new-session"));
     // Only the pre-creation purge: the pane idles so the operator can inspect
     // its scrollback after harvest.
     expect(kills).toHaveLength(1);
     expect(fake.calls.indexOf(kills[0] ?? { command: "" })).toBeLessThan(newSessionIndex);
-    expect(fake.calls[newSessionIndex]?.command).toContain("while :");
+    expect(line(fake.calls[newSessionIndex])).toContain("while :");
   });
 
   test("readFile/writeFile are contained under workDir", async () => {
@@ -269,9 +289,12 @@ describe("tmux host adapter", () => {
       maxConcurrent: 3,
     });
     expect(outputs).toHaveLength(3);
-    const sessions = fake.calls.filter((c) => c.command.includes("tmux new-session"));
+    const sessions = fake.calls.filter((c) => line(c).includes("tmux new-session"));
     expect(sessions.length).toBe(3);
-    const names = sessions.map((s) => s.command.match(/-s (\S+?)(?: -c)/)?.[1]);
+    const names = sessions.map((s) => {
+      const at = s.argv.indexOf("-s");
+      return at >= 0 ? s.argv[at + 1] : undefined;
+    });
     expect(new Set(names).size).toBe(3);
   });
 
