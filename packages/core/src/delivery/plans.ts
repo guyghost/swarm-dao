@@ -180,8 +180,10 @@ export function parseDeliveryPlan(markdown: string): Partial<DeliveryPlan> {
 
   for (const line of markdown.split("\n")) {
     // "### Phase" headings also open phases: the format emits h3, and the
-    // original unanchored pattern matched them from offset 1.
-    const phaseHeading = line.match(/^#{2,}[ \t]*phase[ \t]*(\d+)[ \t]*:[ \t]*(.*)$/i);
+    // original unanchored pattern matched them from offset 1. Character
+    // classes stay disjoint ([ \t] vs digits vs .) so no quantifier pair can
+    // backtrack over the same characters.
+    const phaseHeading = line.match(/^#{2,}[ \t]*phase[ \t]*(\d+):(.*)$/i);
     if (phaseHeading) {
       flush();
       open = { number: parseInt(phaseHeading[1] ?? "0", 10), name: (phaseHeading[2] ?? "").trim(), body: [] };
