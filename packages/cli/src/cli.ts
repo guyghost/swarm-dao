@@ -8,7 +8,15 @@ import { exec } from "node:child_process";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
-import type { CommandRunnerPort, ProposalType, VotePosition } from "@guyghost/swarm-dao-core";
+import type {
+  AgentOutput,
+  CommandRunnerPort,
+  DAOAgent,
+  HostAdapter,
+  Proposal,
+  ProposalType,
+  VotePosition,
+} from "@guyghost/swarm-dao-core";
 import {
   ATTENTION_SOURCES,
   type AttentionSource,
@@ -31,9 +39,12 @@ import {
   ghBranchNameFor,
   ghCreateBranch,
   ghCreatePullRequest,
+  handleDaoDeliberate,
+  handleDaoRoundtable,
   initializeAgents,
   isGitHubEnabled,
   listProposals,
+  loadAgentDefinitions,
   loadConfig,
   PROPOSAL_TYPES,
   RejectProposalUseCase,
@@ -44,6 +55,7 @@ import {
   systemClock,
 } from "@guyghost/swarm-dao-core";
 import { createGraphRunner } from "@guyghost/swarm-dao-graph";
+import { createHerdrHostAdapter, herdrAgentName } from "@guyghost/swarm-dao-herdr-adapter";
 import {
   assertNoActiveSeriesForScope,
   ensureSeriesWorktree,
@@ -157,6 +169,70 @@ async function ensureLoaded(cwd: string): Promise<FileDaoStateRepository> {
   return repository;
 }
 
+// ── herdr child sessions (parent = this CLI, children = one workspace per agent) ──
+
+/**
+ * Every multi-agent CLI flow (deliberate, roundtable, implement) spawns its
+ * agents as REAL coding agents in herdr child sessions: this CLI process is
+ * the parent session that pilots the children — create workspace, start the
+ * agent (kind: pi/claude/codex/…), prompt, harvest, close. The operator can
+ * attach with `herdr` and watch any child live while it runs.
+ *
+ * Defaults come from .dao/config.json `herdr` (kind, keepPanes, timeoutMs);
+ * explicit flags win. Failing `herdr.kind` falls back to "pi".
+ */
+interface HerdrChildOptions {
+  kind: string;
+  keepPanes: boolean;
+  timeoutMs?: number;
+}
+
+function herdrChildOptionsFrom(
+  flags: Record<string, string | true>,
+  projectConfig: { herdr?: { kind?: string; keepPanes?: boolean; timeoutMs?: number } },
+): HerdrChildOptions {
+  const config = projectConfig.herdr ?? {};
+  const kindFlag = flags.kind;
+  if (kindFlag !== undefined && (typeof kindFlag !== "string" || kindFlag.trim().length === 0)) {
+    err("--kind requires a value (a herdr agent kind, e.g. pi, codex, claude)");
+  }
+  const kind = (typeof kindFlag === "string" ? kindFlag.trim() : undefined) ?? config.kind ?? "pi";
+  if (!SAFE_HERDR_KIND.test(kind)) {
+    err(`herdr kind '${kind}' is invalid — use a supported herdr agent kind (e.g. pi, codex, claude)`);
+  }
+  const timeoutFlag = flags["timeout-ms"];
+  let timeoutMs: number | undefined;
+  if (timeoutFlag !== undefined) {
+    if (typeof timeoutFlag !== "string" || timeoutFlag.trim().length === 0) err("--timeout-ms requires a value");
+    timeoutMs = Number(timeoutFlag);
+    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+      err("--timeout-ms must be a positive number of milliseconds (herdr ceiling: 300000)");
+    }
+  } else if (typeof config.timeoutMs === "number") {
+    timeoutMs = config.timeoutMs;
+  }
+  const keepPanes = flags["keep-panes"] === true || config.keepPanes === true;
+  return { kind, keepPanes, ...(timeoutMs !== undefined ? { timeoutMs } : {}) };
+}
+
+/** A herdr host adapter bound to `workDir` — the child agent's cwd (the repo,
+ * or the proposal's isolated worktree for parallel implement). */
+function herdrChildAdapter(child: HerdrChildOptions, workDir: string): HostAdapter {
+  return createHerdrHostAdapter({
+    workDir,
+    kind: child.kind,
+    keepPanes: child.keepPanes,
+    prefix: "swarm-dao",
+    ...(child.timeoutMs !== undefined ? { timeoutMs: child.timeoutMs } : {}),
+  });
+}
+
+function announceHerdrChildren(header: string, child: HerdrChildOptions, names: string[]): void {
+  info(`herdr parent session: this shell (${child.kind}) — ${header}:`);
+  for (const name of names) info(`  ${name}`);
+  info(c.dim("  attach with `herdr` to watch any child live"));
+}
+
 // ── Commands ────────────────────────────────────────────────
 
 /**
@@ -169,11 +245,14 @@ const CLI_IMPLEMENTED = [
   "init",
   "setup",
   "propose",
+  "deliberate",
+  "roundtable",
   "list",
   "show",
   "vote",
   "reject-proposal",
   "ship",
+  "implement",
   "github-config",
   "github-branch",
   "github-pr",
@@ -198,6 +277,12 @@ const CLI_IMPLEMENTED = [
  */
 const CLI_USAGE_DETAILS: Record<string, string> = {
   propose: "  propose --title <t> --type <T> --description <d> [--by <name>]\n        [--depends-on <id1,id2,...>]",
+  deliberate:
+    "  deliberate <id> [--kind <pi|codex|claude|…>] [--keep-panes] [--timeout-ms <ms>]\n        every agent votes as a real coding agent in its own herdr child session\n        (kind default: .dao/config.json herdr.kind, else pi)",
+  roundtable:
+    "  roundtable [--kind <pi|codex|claude|…>] [--keep-panes] [--timeout-ms <ms>]\n        every agent suggests a proposal idea in its own herdr child session",
+  implement:
+    "  implement <id> [<id>…] [--kind <pi|codex|claude|…>] [--keep-panes] [--timeout-ms <ms>]\n        dispatch one herdr child agent per proposal; multiple ids develop in\n        parallel, each in its own worktree (needs execution.isolation)",
   list: "  list [--status <s>] [--type <T>]",
   show: "  show <id>",
   vote: "  vote <id> --position <for|against|abstain> --reasoning <text>\n        [--weight <n>] [--agent <name>]",
@@ -342,6 +427,66 @@ async function cmdPropose(cwd: string, flags: Record<string, string | true>): Pr
   if (p.dependsOn && p.dependsOn.length > 0) {
     info(`  depends-on: #${p.dependsOn.join(", #")}`);
   }
+}
+
+/** swarm-dao deliberate <id> — every agent votes as a real coding agent in
+ *  its own herdr child session; outputs feed the same deterministic tally. */
+async function cmdDeliberate(cwd: string, positional: string[], flags: Record<string, string | true>): Promise<void> {
+  const idStr = positional[0];
+  if (!idStr) err("usage: swarm-dao deliberate <id> [--kind <pi|codex|claude|…>] [--keep-panes] [--timeout-ms <ms>]");
+  const id = Number(idStr);
+  if (!Number.isInteger(id)) err(`invalid proposal id '${idStr}'`);
+
+  const projectConfig = await loadConfig(getDaoRoot(cwd));
+  const child = herdrChildOptionsFrom(flags, projectConfig);
+  const repository = await ensureLoaded(cwd);
+  if (!getProposal(id)) err(`proposal #${id} not found`);
+
+  const agents = await loadAgentDefinitions(getDaoRoot(cwd), projectConfig);
+  announceHerdrChildren(
+    `${agents.length} child sessions vote on proposal #${id}`,
+    child,
+    agents.map((a) => herdrAgentName("swarm-dao", id, a.id)),
+  );
+
+  const presented = await handleDaoDeliberate(
+    {
+      adapter: herdrChildAdapter(child, cwd),
+      workDir: cwd,
+      deliberationMode: "auto",
+      controlToolName: "dao_check",
+      repository,
+      onDeliberationProgress: ({ agentName, phase }) => info(c.dim(`  [${phase}] ${agentName}`)),
+    },
+    id,
+  );
+  info(presented);
+}
+
+/** swarm-dao roundtable — every agent suggests a proposal idea from its own
+ *  herdr child session (children are named swarm-dao-p0-<agent>-<hash>:
+ *  roundtable runs on the synthetic proposal #0). */
+async function cmdRoundtable(cwd: string, flags: Record<string, string | true>): Promise<void> {
+  const projectConfig = await loadConfig(getDaoRoot(cwd));
+  const child = herdrChildOptionsFrom(flags, projectConfig);
+  const repository = await ensureLoaded(cwd);
+  if (!getState().initialized) err("DAO not initialized. Run: swarm-dao setup");
+
+  const agents = await loadAgentDefinitions(getDaoRoot(cwd), projectConfig);
+  announceHerdrChildren(
+    `${agents.length} child sessions suggest proposal ideas`,
+    child,
+    agents.map((a) => herdrAgentName("swarm-dao", 0, a.id)),
+  );
+
+  const presented = await handleDaoRoundtable({
+    adapter: herdrChildAdapter(child, cwd),
+    workDir: cwd,
+    deliberationMode: "auto",
+    controlToolName: "dao_check",
+    repository,
+  });
+  info(presented);
 }
 
 async function cmdList(cwd: string, flags: Record<string, string | true>): Promise<void> {
@@ -577,6 +722,137 @@ async function cmdShip(cwd: string, positional: string[], flags: Record<string, 
   for (const shippedId of result.shipped) {
     const proposal = getProposal(shippedId);
     info(`✓ Shipped #${shippedId}: ${proposal?.title ?? "proposal"}`);
+  }
+}
+
+// ── Implement (dispatch herdr child agents to build proposals) ──
+
+/** Synthetic agent bound to implementation dispatch — not a deliberation
+ *  voter: it carries no weight and never enters the tally. */
+const IMPLEMENTATION_AGENT: DAOAgent = {
+  id: "implementer",
+  name: "Implementer",
+  role: "delivery",
+  description: "herdr child agent that implements a proposal in an isolated workspace",
+  weight: 1,
+  systemPrompt: "",
+};
+
+function implementationPrompt(p: Proposal): string {
+  const criteria = Array.isArray(p.acceptanceCriteria)
+    ? p.acceptanceCriteria.map((ac) => `- ${typeof ac === "string" ? ac : ac.id}`).join("\n")
+    : "";
+  return [
+    `Implement proposal #${p.id} — ${p.title} (${p.type}).`,
+    "",
+    "Description:",
+    p.description,
+    ...(criteria ? ["", "Acceptance criteria:", criteria] : []),
+    "",
+    "You are working in an isolated checkout of the repository. Make the code changes needed to satisfy the proposal; keep the change minimal and focused. Run the project's checks/build/tests when done.",
+    "Finish with a short summary: what changed, files touched, and check results.",
+  ].join("\n");
+}
+
+interface ImplementResult {
+  id: number;
+  name?: string;
+  workDir?: string;
+  output?: AgentOutput;
+  error?: string;
+}
+
+/** swarm-dao implement <id> [<id>…] — one herdr child agent per proposal;
+ *  multiple ids develop in parallel, each in its own execution workspace
+ *  (worktree/sandbox isolation from .dao/config.json execution). */
+async function cmdImplement(cwd: string, positional: string[], flags: Record<string, string | true>): Promise<void> {
+  if (positional.length === 0) {
+    err("usage: swarm-dao implement <id> [<id>…] [--kind <pi|codex|claude|…>] [--keep-panes] [--timeout-ms <ms>]");
+  }
+  const ids = positional.map((s) => Number(s));
+  const bad = positional.find((_, i) => !Number.isInteger(ids[i]));
+  if (bad !== undefined) err(`invalid proposal id '${bad}'`);
+
+  const projectConfig = await loadConfig(getDaoRoot(cwd));
+  const child = herdrChildOptionsFrom(flags, projectConfig);
+  await ensureLoaded(cwd);
+  const proposals: Proposal[] = [];
+  for (const id of ids) {
+    const p = getProposal(id);
+    if (!p) err(`proposal #${id} not found`);
+    proposals.push(p);
+  }
+
+  // Parallel development only with per-proposal isolation: without a
+  // worktree/sandbox every child would edit the same checkout.
+  const isolation = projectConfig.execution?.isolation;
+  if (proposals.length > 1 && isolation !== "worktree" && isolation !== "sandbox") {
+    err(
+      `implementing ${proposals.length} proposals in parallel needs execution.isolation "worktree" (or "sandbox") in .dao/config.json — children would otherwise share one checkout`,
+    );
+  }
+
+  const workspace = createExecutionWorkspace(projectConfig.execution, cliRunner(), cwd);
+
+  announceHerdrChildren(
+    `${proposals.length} implementation child session(s) (${isolation ?? "none"} isolation)`,
+    child,
+    proposals.map((p) => herdrAgentName("swarm-dao", p.id, IMPLEMENTATION_AGENT.id)),
+  );
+
+  const results: ImplementResult[] = await Promise.all(
+    proposals.map(async (p): Promise<ImplementResult> => {
+      let workDir = cwd;
+      if (workspace) {
+        const prep = await workspace.prepare(p);
+        if (!prep.ok) return { id: p.id, error: `workspace: ${prep.error}` };
+        if (prep.path) workDir = prep.path;
+      }
+      const output = await herdrChildAdapter(child, workDir).spawnAgent({
+        agent: IMPLEMENTATION_AGENT,
+        proposal: p,
+        systemPrompt: implementationPrompt(p),
+        ...(child.timeoutMs !== undefined ? { timeoutMs: child.timeoutMs } : {}),
+      });
+      return { id: p.id, name: herdrAgentName("swarm-dao", p.id, IMPLEMENTATION_AGENT.id), workDir, output };
+    }),
+  );
+
+  // Audit after the fan-out: sequential writes to the shared DAO state.
+  for (const r of results) {
+    if (!r.error && r.name && r.workDir) {
+      await recordAudit(
+        r.id,
+        "delivery",
+        "implementation-dispatched",
+        "cli",
+        `herdr child ${r.name} (${child.kind}) → ${r.workDir}`,
+      );
+    }
+  }
+  await saveState();
+
+  let failures = 0;
+  for (const r of results) {
+    if (r.error) {
+      failures++;
+      info(`✗ #${r.id}: ${r.error}`);
+      continue;
+    }
+    if (r.output?.error) {
+      failures++;
+      info(`✗ #${r.id} (${r.name}): ${r.output.error}`);
+      continue;
+    }
+    const seconds = r.output ? Math.round(r.output.durationMs / 1000) : 0;
+    info(`✓ #${r.id} (${r.name}) — ${r.workDir} (${seconds}s)`);
+    const tail = (r.output?.content ?? "").trimEnd().split("\n").slice(-5).join("\n");
+    if (tail) info(c.dim(`    ${tail.replace(/\n/g, "\n    ")}`));
+  }
+  if (failures > 0) {
+    info(c.dim(`  → ${failures} child session(s) failed — details: .dao/herdr.log · audit: swarm-dao audit`));
+  } else {
+    info(c.dim("  → next: review each workspace, then swarm-dao execute/ship the proposals"));
   }
 }
 
@@ -1210,6 +1486,15 @@ export async function main(argv: string[], cwd: string = process.cwd()): Promise
         return 0;
       case "propose":
         await cmdPropose(cwd, flags);
+        return 0;
+      case "deliberate":
+        await cmdDeliberate(cwd, positional, flags);
+        return 0;
+      case "roundtable":
+        await cmdRoundtable(cwd, flags);
+        return 0;
+      case "implement":
+        await cmdImplement(cwd, positional, flags);
         return 0;
       case "list":
         await cmdList(cwd, flags);

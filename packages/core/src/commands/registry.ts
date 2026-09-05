@@ -108,6 +108,14 @@ export const DAO_COMMANDS: readonly DaoCommand[] = [
     hosts: ["mcp", "claude", "copilot", "codex", "pi", "opencode"],
   },
   {
+    id: "implement",
+    phase: "execute",
+    summary: "Dispatch herdr child agents to implement proposals in parallel",
+    mutating: true,
+    args: "<id> [<id>...] [--kind <k>] [--keep-panes] [--timeout-ms <ms>]",
+    hosts: ["cli"],
+  },
+  {
     id: "ship",
     phase: "ship",
     summary: "Ship a controlled proposal (optionally cascade dependencies)",
