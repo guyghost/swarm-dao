@@ -1,6 +1,6 @@
 {
   "name": "@guyghost/swarm-dao-cli",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "description": "Swarm DAO standalone CLI",
   "type": "module",
   "main": "./dist/cli.js",
@@ -25,11 +25,11 @@
     "prepublishOnly": "bun run build"
   },
   "dependencies": {
-    "@guyghost/swarm-dao-core": "^0.14.0",
-    "@guyghost/swarm-dao-graph": "^0.3.3",
-    "@guyghost/swarm-dao-herdr-adapter": "^0.3.0",
-    "@guyghost/swarm-dao-improvement": "^0.5.6",
-    "@guyghost/swarm-dao-product": "^0.3.3"
+    "@guyghost/swarm-dao-core": "^0.15.0",
+    "@guyghost/swarm-dao-graph": "^0.3.4",
+    "@guyghost/swarm-dao-herdr-adapter": "^0.4.0",
+    "@guyghost/swarm-dao-improvement": "^0.6.0",
+    "@guyghost/swarm-dao-product": "^0.3.4"
   },
   "devDependencies": {
     "@types/bun": "latest"
