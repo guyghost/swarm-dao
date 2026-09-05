@@ -1,5 +1,15 @@
 # @guyghost/swarm-dao-core
 
+## 0.14.0
+
+### Minor Changes
+
+- 3f6f71d: herdr child sessions by default for every multi-agent CLI flow. The new `swarm-dao deliberate <id>` makes every agent vote as a real coding agent in its own herdr child session, `swarm-dao roundtable` does the same for proposal ideas, and `swarm-dao implement <id> [<id>…]` dispatches one herdr child agent per proposal — multiple ids develop in parallel, each in its own execution worktree (requires `execution.isolation`). The CLI process is the parent session that pilots the children; attach with `herdr` to watch any child live. Kind and harvest options default from a new typed `herdr` section in `.dao/config.json` (`kind`, `keepPanes`, `timeoutMs`), overridable via `--kind`, `--keep-panes`, `--timeout-ms`. Also exports `herdrAgentName` from the herdr adapter and widens `ExecutionConfig.isolation` to include `"sandbox"` (already supported by GitWorkspace).
+
+### Patch Changes
+
+- 89e2158: Ground round-table agents in real project context. The shared brief now carries recent git commits and a docs listing with raised budgets (README 2400 chars, total 6000), RoundTableUseCase appends already-tracked proposals as an explicit do-not-re-propose list, and the suggestion prompt makes grounding mandatory (cite real files/commits, no generic suggestions).
+
 ## 0.13.0
 
 ### Minor Changes

@@ -1,5 +1,21 @@
 # @guyghost/swarm-dao-cli
 
+## 0.9.0
+
+### Minor Changes
+
+- 3f6f71d: herdr child sessions by default for every multi-agent CLI flow. The new `swarm-dao deliberate <id>` makes every agent vote as a real coding agent in its own herdr child session, `swarm-dao roundtable` does the same for proposal ideas, and `swarm-dao implement <id> [<id>…]` dispatches one herdr child agent per proposal — multiple ids develop in parallel, each in its own execution worktree (requires `execution.isolation`). The CLI process is the parent session that pilots the children; attach with `herdr` to watch any child live. Kind and harvest options default from a new typed `herdr` section in `.dao/config.json` (`kind`, `keepPanes`, `timeoutMs`), overridable via `--kind`, `--keep-panes`, `--timeout-ms`. Also exports `herdrAgentName` from the herdr adapter and widens `ExecutionConfig.isolation` to include `"sandbox"` (already supported by GitWorkspace).
+
+### Patch Changes
+
+- Updated dependencies [3f6f71d]
+- Updated dependencies [89e2158]
+  - @guyghost/swarm-dao-core@0.14.0
+  - @guyghost/swarm-dao-herdr-adapter@0.3.0
+  - @guyghost/swarm-dao-graph@0.3.3
+  - @guyghost/swarm-dao-improvement@0.5.6
+  - @guyghost/swarm-dao-product@0.3.3
+
 ## 0.8.0
 
 ### Minor Changes
