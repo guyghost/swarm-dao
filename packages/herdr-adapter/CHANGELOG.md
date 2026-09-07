@@ -1,5 +1,15 @@
 # @guyghost/swarm-dao-herdr-adapter
 
+## 0.4.2
+
+### Patch Changes
+
+- 9dd5891: Fix the `agent start` readiness race against herdr (`agent_pane_busy`). `herdr workspace create` returns before the fresh pane's shell has reached its interactive prompt, and `herdr agent start` classifies such a pane as busy instead of waiting — slower shell init under herd load (several agents working at once) made the failure intermittent and burned whole executor attempts (fresh workspace per retry, same race each time). `herdr agent start` is now retried on the SAME pane (1 s apart, via the new exported `startAgentUntilReady` helper) until the readiness budget (`startTimeoutMs`) is spent, in both the deliberation host adapter and the improvement-loop worker executor; any other herdr error code still fails immediately.
+- 5fdc442: Read herdr's real `agent_status` lifecycle field when classifying settled agent states. herdr exposes `result.agent.agent_status`; the executors only read `agent.status`/`agent.state`, so the blocked-agent guard (approval/question UI) could never fire — a blocked worker was harvested as a confusing transcript error instead of the accurate "agent is blocked — it never produced a signal/vote" (issue #138). Applies to both the improvement-loop worker executor and the herdr deliberation host adapter; test fixtures now mirror the real herdr JSON contract.
+- c393db4: Recover from `agent_prompt_stalled` instead of abandoning live workers. herdr's `agent prompt --wait` requires an observed state change within a hardcoded 5 s window; a fresh agent in a heavy repo under load can exceed it while the prompt was accepted and is being processed, and the executors treated the stall as a dead attempt — closing the workspace and retrying from scratch (issue #137, reproduced live: the agent answered while herdr reported `agent_prompt_stalled`). On stall, the new shared `promptAgentUntilSettled` helper grace-polls `agent get` (20 s default): if the agent came alive it waits for settle with `agent wait`; only a submission that stayed idle through the grace period is re-prompted, exactly once (a naive re-prompt risks double submission into a working agent).
+- Updated dependencies [00c84a1]
+  - @guyghost/swarm-dao-core@0.16.1
+
 ## 0.4.1
 
 ### Patch Changes
