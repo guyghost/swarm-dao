@@ -5,6 +5,7 @@ import {
   calibrationSlowdown,
   compareReports,
   formatComparisons,
+  ioCalibrationSlowdown,
 } from "../scripts/compare-benchmarks.js";
 import { type BenchmarkReport, formatReport, runSuites, summarize } from "../src/harness.js";
 
@@ -73,7 +74,13 @@ describe("benchmark harness", () => {
   });
 
   it("declares every core suite", () => {
-    expect(SUITES.map((suite) => suite.name)).toEqual(["calibration", "deliberation", "persistence", "artefacts"]);
+    expect(SUITES.map((suite) => suite.name)).toEqual([
+      "calibration",
+      "calibration-io",
+      "deliberation",
+      "persistence",
+      "artefacts",
+    ]);
     expect(SUITES.every((suite) => suite.cases.length > 0)).toBe(true);
   });
 
@@ -134,7 +141,7 @@ describe("benchmark harness", () => {
 });
 
 describe("bench:compare — flake adjudication (PR #79 finding)", () => {
-  const gates = { threshold: 0.25, floorMs: 0.05, slowdown: 1 };
+  const gates = { threshold: 0.25, floorMs: 0.05, slowdown: 1, ioSlowdown: 1 };
   const flagged = (currentMs: number, baselineMs: number) => [
     {
       suite: "artefacts",
@@ -191,7 +198,7 @@ describe("bench:compare — flake adjudication (PR #79 finding)", () => {
     const { confirmed, dismissed } = await adjudicateRegressions(
       flagged(0.14, 0.08),
       baseline,
-      { threshold: 0.25, floorMs: 0.05, slowdown: 2 },
+      { threshold: 0.25, floorMs: 0.05, slowdown: 2, ioSlowdown: 1 },
       async () => [0.14],
     );
     expect(confirmed).toHaveLength(0);
@@ -216,22 +223,27 @@ describe("calibrated comparison", () => {
 
   it("does not flag a fleet-wide slow runner as regressions", () => {
     // The exact false positives seen on PR #76: every measurement drifted
-    // ~40–55% because the runner itself was slow (calibration x1.55).
+    // ~40–55% because the runner itself was slow — CPU (calibration x1.55)
+    // AND disk (io kernel x1.55), each suite scaling with its own kernel.
     const baseline = report([
       { suite: "calibration", name: "reference kernel", meanMs: 0.5 },
+      { suite: "calibration-io", name: "io kernel", meanMs: 0.2 },
       { suite: "deliberation", name: "deliberate proposal", meanMs: 0.538 },
       { suite: "deliberation", name: "run control gates", meanMs: 0.16 },
       { suite: "persistence", name: "file persist (1 proposal)", meanMs: 0.14 },
     ]);
     const current = report([
       { suite: "calibration", name: "reference kernel", meanMs: 0.775 },
+      { suite: "calibration-io", name: "io kernel", meanMs: 0.31 },
       { suite: "deliberation", name: "deliberate proposal", meanMs: 0.842 }, // was 0.538 (+56.5%)
       { suite: "deliberation", name: "run control gates", meanMs: 0.246 }, // was 0.160 (+53.8%)
       { suite: "persistence", name: "file persist (1 proposal)", meanMs: 0.218 }, // was 0.140 (+55.7%)
     ]);
     const slowdown = calibrationSlowdown(current, baseline);
     expect(slowdown).toBe(1.55);
-    const comparisons = compareReports(current, baseline, 0.25, 0.05, slowdown ?? 1);
+    const ioSlowdown = ioCalibrationSlowdown(current, baseline);
+    expect(ioSlowdown).toBeCloseTo(1.55, 10);
+    const comparisons = compareReports(current, baseline, 0.25, 0.05, slowdown ?? 1, ioSlowdown ?? 1);
     expect(comparisons.filter((comparison) => comparison.status === "regression")).toHaveLength(0);
   });
 
@@ -259,6 +271,49 @@ describe("calibrated comparison", () => {
     ]);
     const slowdown = calibrationSlowdown(current, baseline) ?? 1;
     const comparisons = compareReports(current, baseline, 0.25, 0.05, slowdown);
+    expect(comparisons.filter((comparison) => comparison.status === "regression")).toHaveLength(1);
+  });
+
+  it("computes the I/O slowdown ratio from the io kernel", () => {
+    const io = (meanMs: number) => report([{ suite: "calibration-io", name: "io kernel", meanMs }]);
+    expect(ioCalibrationSlowdown(io(0.775), io(0.5))).toBeCloseTo(1.55, 10);
+    expect(ioCalibrationSlowdown(io(0.4), io(0.5))).toBe(1); // faster never tightens
+    expect(ioCalibrationSlowdown(io(5), io(1))).toBe(3); // capped
+    expect(ioCalibrationSlowdown(io(0.5), report([]))).toBeNull();
+  });
+
+  it("scales I/O-bound suites by the io kernel, not the CPU kernel (PR #133 incident)", () => {
+    // The exact false positives seen on #133: a persist-heavy runner with a
+    // calibration-identical CPU (io kernel x2.0).
+    const baseline = report([
+      { suite: "calibration", name: "reference kernel", meanMs: 0.5 },
+      { suite: "calibration-io", name: "io kernel", meanMs: 0.2 },
+      { suite: "persistence", name: "file persist (unchanged state)", meanMs: 0.636 },
+      { suite: "deliberation", name: "run control gates", meanMs: 0.16 },
+    ]);
+    const current = report([
+      { suite: "calibration", name: "reference kernel", meanMs: 0.5 }, // CPU identical
+      { suite: "calibration-io", name: "io kernel", meanMs: 0.4 }, // disk x2
+      { suite: "persistence", name: "file persist (unchanged state)", meanMs: 1.136 }, // was 0.636 (+78.6%)
+      { suite: "deliberation", name: "run control gates", meanMs: 0.246 }, // was 0.160 (+53.8%, cpu-slow!)
+    ]);
+    const comparisons = compareReports(current, baseline, 0.25, 0.05, 1, ioCalibrationSlowdown(current, baseline) ?? 1);
+    const regressions = comparisons.filter((comparison) => comparison.status === "regression");
+    // The persist flare is I/O noise (inside the io-scaled gate); the
+    // deliberation drift has a calm CPU kernel and stays a genuine regression.
+    expect(regressions.map((comparison) => comparison.suite)).toEqual(["deliberation"]);
+  });
+
+  it("still flags genuine I/O regressions beyond the io-scaled gate", () => {
+    const baseline = report([
+      { suite: "calibration-io", name: "io kernel", meanMs: 0.2 },
+      { suite: "persistence", name: "file persist (500 proposals)", meanMs: 0.55 },
+    ]);
+    const current = report([
+      { suite: "calibration-io", name: "io kernel", meanMs: 0.2 }, // disk identical
+      { suite: "persistence", name: "file persist (500 proposals)", meanMs: 1.46 }, // 2.65x — real regression
+    ]);
+    const comparisons = compareReports(current, baseline, 0.25, 0.05, 1, ioCalibrationSlowdown(current, baseline) ?? 1);
     expect(comparisons.filter((comparison) => comparison.status === "regression")).toHaveLength(1);
   });
 });

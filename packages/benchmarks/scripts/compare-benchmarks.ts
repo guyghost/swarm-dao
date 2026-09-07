@@ -17,6 +17,15 @@ const DEFAULT_FLOOR_MS = 0.05;
 const MAX_SLOWDOWN = 3;
 
 export const CALIBRATION_SUITE = "calibration";
+export const CALIBRATION_IO_SUITE = "calibration-io";
+
+/**
+ * Suites dominated by filesystem syscalls (mkdir/write): their cost tracks
+ * runner disk speed, which the pure-CPU kernel cannot see. These scale with
+ * the I/O calibration kernel instead of the CPU one (PR #133 incident:
+ * persistence cases flagged at +60–106% with a calibration-identical CPU).
+ */
+const IO_BOUND_SUITES = new Set(["persistence", CALIBRATION_IO_SUITE]);
 
 export type ComparisonStatus = "ok" | "new" | "regression";
 
@@ -33,30 +42,47 @@ function key(measurement: { suite: string; name: string }): string {
   return `${measurement.suite}/${measurement.name}`;
 }
 
-const meanCalibrationMs = (report: BenchmarkReport | null): number | null => {
-  const entries = (report?.measurements ?? []).filter((measurement) => measurement.suite === CALIBRATION_SUITE);
+const meanSuiteMs = (report: BenchmarkReport | null, suite: string): number | null => {
+  const entries = (report?.measurements ?? []).filter((measurement) => measurement.suite === suite);
   if (entries.length === 0) return null;
   return entries.reduce((sum, measurement) => sum + measurement.meanMs, 0) / entries.length;
 };
 
 /**
- * Ratio of current to baseline calibration-kernel time. This is pure runner
- * speed: shared CI runners routinely run whole jobs 30–60% slower, which used
- * to surface as fleet-wide fake regressions. Returns null when either report
- * has no calibration data (a pre-calibration baseline) so the caller can
- * replace the baseline instead of comparing apples to oranges.
+ * Ratio of current to baseline kernel time for a calibration suite. This is
+ * pure runner speed: shared CI runners routinely run whole jobs 30–60% slower,
+ * which used to surface as fleet-wide fake regressions. Returns null when
+ * either report has no calibration data (a pre-calibration baseline) so the
+ * caller can replace the baseline instead of comparing apples to oranges.
  */
+export function kernelSlowdown(
+  current: BenchmarkReport,
+  baseline: BenchmarkReport | null,
+  calibrationSuite: string,
+  maxSlowdown: number = MAX_SLOWDOWN,
+): number | null {
+  const currentMs = meanSuiteMs(current, calibrationSuite);
+  const baselineMs = meanSuiteMs(baseline, calibrationSuite);
+  if (currentMs === null || baselineMs === null || baselineMs === 0 || currentMs === 0) return null;
+  if (!Number.isFinite(currentMs / baselineMs)) return null;
+  // A faster runner never tightens the gate; a slower one relaxes it, capped.
+  return Math.min(Math.max(currentMs / baselineMs, 1), maxSlowdown);
+}
+
 export function calibrationSlowdown(
   current: BenchmarkReport,
   baseline: BenchmarkReport | null,
   maxSlowdown: number = MAX_SLOWDOWN,
 ): number | null {
-  const currentMs = meanCalibrationMs(current);
-  const baselineMs = meanCalibrationMs(baseline);
-  if (currentMs === null || baselineMs === null || baselineMs === 0 || currentMs === 0) return null;
-  if (!Number.isFinite(currentMs / baselineMs)) return null;
-  // A faster runner never tightens the gate; a slower one relaxes it, capped.
-  return Math.min(Math.max(currentMs / baselineMs, 1), maxSlowdown);
+  return kernelSlowdown(current, baseline, CALIBRATION_SUITE, maxSlowdown);
+}
+
+export function ioCalibrationSlowdown(
+  current: BenchmarkReport,
+  baseline: BenchmarkReport | null,
+  maxSlowdown: number = MAX_SLOWDOWN,
+): number | null {
+  return kernelSlowdown(current, baseline, CALIBRATION_IO_SUITE, maxSlowdown);
 }
 
 export function isRegression(
@@ -76,14 +102,17 @@ export function compareReports(
   threshold: number,
   floorMs: number = DEFAULT_FLOOR_MS,
   slowdown: number = 1,
+  ioSlowdown: number = 1,
 ): Comparison[] {
-  const allowedThreshold = threshold + (slowdown - 1);
-  const allowedFloor = floorMs * slowdown;
   const baselineByKey = new Map<string, BenchmarkMeasurement>(
     (baseline?.measurements ?? []).map((measurement) => [key(measurement), measurement]),
   );
 
   return current.measurements.map((measurement) => {
+    // I/O-bound suites scale with the filesystem kernel, the rest with CPU.
+    const suiteSlowdown = IO_BOUND_SUITES.has(measurement.suite) ? ioSlowdown : slowdown;
+    const allowedThreshold = threshold + (suiteSlowdown - 1);
+    const allowedFloor = floorMs * suiteSlowdown;
     const previous = baselineByKey.get(key(measurement));
     if (!previous || previous.meanMs === 0) {
       return {
@@ -97,10 +126,10 @@ export function compareReports(
     }
     const changeRatio = (measurement.meanMs - previous.meanMs) / previous.meanMs;
     // A regression requires BOTH the relative threshold and the absolute
-    // noise floor — and both scale with measured runner slowdown, so a slow
-    // shared runner cannot fail the whole fleet while a genuine algorithmic
-    // regression (relative AND absolute, way beyond both scaled gates) still
-    // fails on any runner.
+    // noise floor — and both scale with the measured runner slowdown for the
+    // case's resource class (CPU vs filesystem), so a slow shared runner
+    // cannot fail the whole fleet while a genuine algorithmic regression
+    // (relative AND absolute, way beyond both scaled gates) still fails.
     const regressed = isRegression(measurement.meanMs, previous.meanMs, allowedThreshold, allowedFloor);
     return {
       suite: measurement.suite,
@@ -169,11 +198,16 @@ export interface AdjudicationResult {
 export async function adjudicateRegressions(
   regressions: Comparison[],
   baseline: BenchmarkReport,
-  gates: { threshold: number; floorMs: number; slowdown: number },
+  gates: { threshold: number; floorMs: number; slowdown: number; ioSlowdown: number },
   reMeasure: (suite: string, name: string) => Promise<number[]> = reMeasureCase,
 ): Promise<AdjudicationResult> {
-  const allowedThreshold = gates.threshold + (gates.slowdown - 1);
-  const allowedFloor = gates.floorMs * gates.slowdown;
+  const gatesFor = (suite: string): { allowedThreshold: number; allowedFloor: number } => {
+    const suiteSlowdown = IO_BOUND_SUITES.has(suite) ? gates.ioSlowdown : gates.slowdown;
+    return {
+      allowedThreshold: gates.threshold + (suiteSlowdown - 1),
+      allowedFloor: gates.floorMs * suiteSlowdown,
+    };
+  };
   const baselineByKey = new Map<string, BenchmarkMeasurement>(
     (baseline.measurements ?? []).map((measurement) => [key(measurement), measurement]),
   );
@@ -187,6 +221,7 @@ export async function adjudicateRegressions(
     // the case was renamed between baseline and run, or a malformed baseline):
     // keep the honest failure — dismissal requires reproduced evidence, not
     // missing data (Copilot review on #81).
+    const { allowedThreshold, allowedFloor } = gatesFor(regression.suite);
     if (
       means.length === 0 ||
       baselineMs <= 0 ||
@@ -237,17 +272,32 @@ async function main(): Promise<void> {
     console.log(`Baseline has no calibration data — replaced ${baselineFile} from the current run.`);
     return;
   }
+  // The I/O kernel arrived after the CPU one. A baseline without I/O data
+  // cannot gate fs-bound suites apples to apples — replace it from the
+  // current run (same policy as the pre-CPU-calibration path above), so the
+  // next comparison is fully calibrated.
+  const ioSlowdown = ioCalibrationSlowdown(current, baseline);
+  if (ioSlowdown === null) {
+    await fs.writeFile(baselineFile, `${JSON.stringify(current, null, 2)}\n`, "utf8");
+    console.log(`Baseline has no I/O calibration data — replaced ${baselineFile} from the current run.`);
+    return;
+  }
 
-  const comparisons = compareReports(current, baseline, threshold, floorMs, slowdown);
+  const comparisons = compareReports(current, baseline, threshold, floorMs, slowdown, ioSlowdown);
   console.log(formatComparisons(comparisons));
   console.log(
-    `\ncalibration: runner slowdown x${slowdown.toFixed(2)} -> gate at >${((threshold + slowdown - 1) * 100).toFixed(0)}% and ${(floorMs * slowdown).toFixed(3)}ms.`,
+    `\ncalibration: cpu slowdown x${slowdown.toFixed(2)} -> gate at >${((threshold + slowdown - 1) * 100).toFixed(0)}% and ${(floorMs * slowdown).toFixed(3)}ms; io slowdown x${ioSlowdown.toFixed(2)} -> gate at >${((threshold + ioSlowdown - 1) * 100).toFixed(0)}% and ${(floorMs * ioSlowdown).toFixed(3)}ms.`,
   );
 
   const regressions = comparisons.filter((comparison) => comparison.status === "regression");
   if (regressions.length === 0) return;
 
-  const { confirmed, dismissed } = await adjudicateRegressions(regressions, baseline, { threshold, floorMs, slowdown });
+  const { confirmed, dismissed } = await adjudicateRegressions(regressions, baseline, {
+    threshold,
+    floorMs,
+    slowdown,
+    ioSlowdown,
+  });
   for (const flake of dismissed) {
     console.log(
       `ADJUDICATED  ${flake.suite}/${flake.name} — re-measured median ${flake.reMeasuredMs.toFixed(3)}ms vs ${flake.baselineMs?.toFixed(3)}ms is inside the gate; dismissed as runner noise.`,
@@ -258,7 +308,7 @@ async function main(): Promise<void> {
     return;
   }
   console.error(
-    `\n${confirmed.length} regression(s) reproduced beyond ${((threshold + slowdown - 1) * 100).toFixed(0)}% and ${(floorMs * slowdown).toFixed(3)}ms.`,
+    `\n${confirmed.length} regression(s) reproduced beyond their calibrated gates (cpu x${slowdown.toFixed(2)}, io x${ioSlowdown.toFixed(2)}).`,
   );
   process.exit(1);
 }

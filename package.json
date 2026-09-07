@@ -9,6 +9,7 @@
   "scripts": {
     "build": "bun run --filter '*' build",
     "test": "bun run --filter '*' test",
+    "version": "changeset version && bun install --lockfile-only",
     "test:integration": "bun run --filter @guyghost/swarm-dao-integration-tests test",
     "bench": "bun run --filter @guyghost/swarm-dao-benchmarks bench",
     "bench:ci": "bun run --filter @guyghost/swarm-dao-benchmarks bench:ci",
