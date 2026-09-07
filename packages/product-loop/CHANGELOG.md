@@ -1,5 +1,12 @@
 # @guyghost/swarm-dao-product
 
+## 0.3.4
+
+### Patch Changes
+
+- Updated dependencies [e536a70]
+  - @guyghost/swarm-dao-core@0.15.0
+
 ## 0.3.3
 
 ### Patch Changes
