@@ -272,10 +272,16 @@ async function main(): Promise<void> {
     console.log(`Baseline has no calibration data — replaced ${baselineFile} from the current run.`);
     return;
   }
-  // The I/O kernel arrived after the CPU one: a not-yet-calibrated baseline
-  // falls back to the CPU gate for one run; the freshly saved baseline then
-  // carries I/O data and the next comparison is fully calibrated.
-  const ioSlowdown = ioCalibrationSlowdown(current, baseline) ?? 1;
+  // The I/O kernel arrived after the CPU one. A baseline without I/O data
+  // cannot gate fs-bound suites apples to apples — replace it from the
+  // current run (same policy as the pre-CPU-calibration path above), so the
+  // next comparison is fully calibrated.
+  const ioSlowdown = ioCalibrationSlowdown(current, baseline);
+  if (ioSlowdown === null) {
+    await fs.writeFile(baselineFile, `${JSON.stringify(current, null, 2)}\n`, "utf8");
+    console.log(`Baseline has no I/O calibration data — replaced ${baselineFile} from the current run.`);
+    return;
+  }
 
   const comparisons = compareReports(current, baseline, threshold, floorMs, slowdown, ioSlowdown);
   console.log(formatComparisons(comparisons));
