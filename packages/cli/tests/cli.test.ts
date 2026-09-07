@@ -23,6 +23,12 @@ describe("cli.ts", () => {
       expect(await main(["roundtable", "--kind"], tmp)).toBe(1);
       expect(await main(["implement", "1", "--timeout-ms"], tmp)).toBe(1);
       expect(await main(["implement", "1", "--timeout-ms", "abc"], tmp)).toBe(1);
+      // Host selection: invalid values fail fast; tmux requires tmux.command;
+      // --kind is herdr-only.
+      expect(await main(["deliberate", "1", "--host", "zsh"], tmp)).toBe(1);
+      expect(await main(["deliberate", "1", "--host"], tmp)).toBe(1);
+      expect(await main(["roundtable", "--host", "tmux"], tmp)).toBe(1);
+      expect(await main(["roundtable", "--host", "tmux", "--kind", "pi"], tmp)).toBe(1);
       // Unknown proposal: DAO initializes fine, but no child sessions spawn.
       await main(["init"], tmp);
       await main(["setup"], tmp);
