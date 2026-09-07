@@ -40,7 +40,10 @@ export function presentExecution(result: Extract<ExecuteProposalResult, { ok: tr
   const taskCount = result.plan.phases.reduce((sum, phase) => sum + phase.tasks.length, 0);
   // snapshot.branch is the branch actually used: the delivery plan strategy
   // without isolation, the isolated dao/<id>-<slug> branch with a workspace.
-  return `# ✅ Proposal Executed — #${result.proposal.id}\n\n**Title:** ${result.proposal.title}\n**Status:** 🚀 executed\n**Branch:** \`${result.snapshot.branch}\`\n**Plan:** ${result.plan.phases.length} phases, ${taskCount} tasks\n\nThe delivery agent has prepared an implementation plan. Review the tasks and begin implementation.`;
+  // The workspace path is essential: implementation is delegated to the
+  // session agent, which cannot act on a branch name alone.
+  const workspace = result.workspacePath ?? "the current repository (no isolation)";
+  return `# ✅ Proposal Executed — #${result.proposal.id}\n\n**Title:** ${result.proposal.title}\n**Status:** 🚀 executed\n**Branch:** \`${result.snapshot.branch}\`\n**Workspace:** \`${workspace}\`\n**Plan:** ${result.plan.phases.length} phases, ${taskCount} tasks\n\nImplementation is delegated to the session agent — begin NOW: work in the workspace above on the branch above (run \`dao_plan proposalId=${result.proposal.id}\` for the full task list), implement the phases in order, and commit on the branch. Run \`dao_ship proposalId=${result.proposal.id}\` when the work is complete and verified.`;
 }
 
 export function presentShip(result: Extract<ShipProposalResult, { ok: true }>): string {

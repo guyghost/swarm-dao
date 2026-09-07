@@ -6,7 +6,14 @@ import type { ExecutionWorkspacePort } from "../../ports/workspace.js";
 import type { AuditEntry, DeliveryPlan, ExecutionSnapshot, Proposal } from "../../types/index.js";
 
 export type ExecuteProposalResult =
-  | { ok: true; proposal: Proposal; plan: DeliveryPlan; snapshot: ExecutionSnapshot }
+  | {
+      ok: true;
+      proposal: Proposal;
+      plan: DeliveryPlan;
+      snapshot: ExecutionSnapshot;
+      /** Isolated workspace the implementation must happen in, when configured. */
+      workspacePath?: string | null;
+    }
   | { ok: false; error: string };
 
 /** Caller-supplied detail is preserved; isolation facts are appended, never dropped. */
@@ -87,6 +94,6 @@ export class ExecuteProposalUseCase {
     };
     state.auditLog.push(audit);
     await this.dependencies.repository.persist();
-    return { ok: true, proposal, plan, snapshot };
+    return { ok: true, proposal, plan, snapshot, workspacePath: workspacePath ?? null };
   }
 }

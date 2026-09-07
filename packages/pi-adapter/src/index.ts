@@ -1834,7 +1834,19 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
       const parsed = parseDaoToolArgs(toolName, rest);
       if (typeof parsed === "string") return parsed;
       const result = await executor(`dao-cmd-${cmd.id}`, parsed, undefined, undefined, ctx);
-      return daoToolResultText(result);
+      const text = daoToolResultText(result);
+      // dao_execute delegates the real implementation work to THIS session's
+      // agent, but a command panel never reaches the LLM — the proposal
+      // stayed "executed" with nobody implementing it. Inject the result
+      // into the conversation and trigger a turn so implementation starts
+      // immediately (presentExecution carries the workspace and directive).
+      if (cmd.id === "execute" && typeof pi.sendMessage === "function") {
+        pi.sendMessage(
+          { customType: "dao-command-result", content: text, display: false, details: { command: cmd.id } },
+          { triggerTurn: true, deliverAs: "steer" },
+        );
+      }
+      return text;
     }
     return suggestDaoCommand(subcommand, "pi");
   };

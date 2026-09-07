@@ -171,6 +171,21 @@ declare module "@earendil-works/pi-coding-agent" {
         ctx: ExtensionCommandContext,
       ) => Promise<PiEventHandlerResult | undefined>,
     ): void;
+
+    // ── Conversation Injection ─────────────────────────────
+
+    /**
+     * Inject a custom message into the session. Custom messages participate
+     * in LLM context. Mirrors pi's extension API (pi.sendMessage).
+     *
+     * @param message - Custom message (customType, content, display, details)
+     * @param options - Delivery options: `deliverAs` ("steer" default |
+     *   "followUp" | "nextTurn") and `triggerTurn` (wake an idle agent)
+     */
+    sendMessage(
+      message: { customType: string; content: string; display?: boolean; details?: Record<string, unknown> },
+      options?: { deliverAs?: "steer" | "followUp" | "nextTurn"; triggerTurn?: boolean },
+    ): void;
   }
 
   /**

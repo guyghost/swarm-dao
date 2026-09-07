@@ -76,6 +76,7 @@ describe("ExecuteProposalUseCase with an execution workspace", () => {
     if (!result.ok) return;
     expect(prepared).toEqual([`${proposalId}:Isolated Feature`]);
     expect(result.snapshot.branch).toBe(`dao/${proposalId}-isolated-feature`);
+    expect(result.workspacePath).toBe("/repo/.dao/worktrees/x");
     expect(result.proposal.status).toBe("executed");
     const audit = repository
       .get()
@@ -111,6 +112,7 @@ describe("ExecuteProposalUseCase with an execution workspace", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.snapshot.branch).toBe(result.plan.branchStrategy);
+    expect(result.workspacePath).toBeNull();
   });
 
   test("ship-path audit details keep their own text and gain the isolation facts", async () => {
@@ -160,6 +162,9 @@ describe("ExecuteProposalUseCase with an execution workspace", () => {
 
     const rendered = presentExecution(executed);
     expect(rendered).toContain(`**Branch:** \`dao/${proposalId}-isolated-feature\``);
+    expect(rendered).toContain(`**Workspace:** \`/repo/.dao/worktrees/x\``);
+    expect(rendered).toContain("begin NOW");
+    expect(rendered).toContain(`dao_ship proposalId=${proposalId}`);
     expect(rendered).not.toContain(executed.plan.branchStrategy);
   });
 });

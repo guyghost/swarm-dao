@@ -627,7 +627,7 @@ describe("application architecture", () => {
     expect(prompts[0]).toContain("Already-tracked idea");
   });
 
-  it("rolls back from a snapshot without reopening a terminal proposal", async () => {
+  it("refuses rollback with the honest no-automated-revert boundary (no false success)", async () => {
     const state = createInitialState("/project/.dao");
     state.proposals.push({
       id: 1,
@@ -653,7 +653,13 @@ describe("application architecture", () => {
 
     const result = await new RollbackProposalUseCase({ repository }).execute({ proposalId: 1 });
 
-    expect(result).toMatchObject({ ok: true, snapshot: { commitSha: "abc123def456" } });
+    // The use case performs no git operations and the snapshot carries no
+    // recoverable commit: reporting success here was a false claim. It must
+    // refuse with the manual path instead — and never mutate the proposal.
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toContain("Automated rollback is not supported");
+    expect(result.error).toContain("branch main");
     expect(repository.get().proposals[0]?.status).toBe("executed");
   });
 
