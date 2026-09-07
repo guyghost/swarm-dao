@@ -170,6 +170,10 @@ export interface HerdrAdapterOptions {
   readinessRetryDelayMs?: number;
   /** Lines of terminal output harvested per agent (default 200). */
   readLines?: number;
+  /** Grace-poll budget after a stalled prompt (default 20 s). */
+  stalledGraceMs?: number;
+  /** Delay between stalled-prompt grace polls (default 2 s; 0 only for tests). */
+  stalledPollIntervalMs?: number;
   /** Keep the herdr workspaces alive after harvest (default false). */
   keepPanes?: boolean;
   /** Injectable command runner (tests). */
@@ -190,6 +194,73 @@ interface HerdrJson {
     agent?: { agent_status?: string; status?: string; state?: string };
   };
   error?: { code?: string; message?: string };
+}
+
+export interface AgentPromptRequest {
+  /** Unique herdr agent name ([a-z][a-z0-9_-]{0,31}). */
+  readonly agentName: string;
+  /** Verbatim prompt text (a single argv element — never shell-interpreted). */
+  readonly prompt: string;
+  /** herdr prompt/settle budget in ms (also used for the settle wait). */
+  readonly timeoutMs: number;
+  /** Grace-poll budget after a stalled prompt (default 20 s). */
+  readonly stalledGraceMs?: number;
+  /** Delay between grace polls (default 2 s; 0 only for tests). */
+  readonly pollIntervalMs?: number;
+}
+
+/** Settled, non-idle agent states proving a stalled prompt took effect. */
+const ACTIVE_AGENT_STATES = new Set(["working", "done", "blocked"]);
+
+/**
+ * Submit a prompt and wait for a settled state (idle | done | blocked),
+ * recovering from the transient agent_prompt_stalled classification: herdr
+ * requires an observed state change within a hardcoded 5 s window, and a fresh
+ * agent in a heavy repo under load can exceed it while the prompt was accepted
+ * and is being processed (issue #137). On stall, grace-poll the agent state;
+ * if the agent came alive, wait for a settled state with `agent wait`. If it
+ * stays idle through the grace period the submission was swallowed — re-prompt
+ * exactly ONCE (naive re-prompting risks double submission into a working
+ * agent).
+ */
+export async function promptAgentUntilSettled(
+  runner: HerdrRunner,
+  request: AgentPromptRequest,
+): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+  const promptArgs = (): string[] => [
+    "herdr",
+    "agent",
+    "prompt",
+    request.agentName,
+    request.prompt,
+    "--wait",
+    "--timeout",
+    String(request.timeoutMs),
+  ];
+  const graceMs = Math.min(Math.max(request.stalledGraceMs ?? 20_000, 0), 60_000);
+  const pollMs = Math.min(Math.max(request.pollIntervalMs ?? 2_000, 0), 30_000);
+
+  const isAlive = (response: { stdout: string; exitCode: number }): boolean =>
+    response.exitCode === 0 && ACTIVE_AGENT_STATES.has(agentState(parseHerdrJson(response.stdout)?.result) ?? "");
+
+  const prompted = await runner.exec(promptArgs());
+  if (prompted.exitCode === 0 || herdrErrorCode(prompted.stderr, prompted.stdout) !== "agent_prompt_stalled") {
+    return prompted;
+  }
+
+  const graceDeadline = Date.now() + graceMs;
+  for (;;) {
+    const got = await runner.exec(["herdr", "agent", "get", request.agentName]);
+    if (isAlive(got)) {
+      // The prompt took effect — herdr just missed the 5 s state transition.
+      return runner.exec(["herdr", "agent", "wait", request.agentName, "--timeout", String(request.timeoutMs)]);
+    }
+    if (Date.now() >= graceDeadline) break;
+    if (pollMs > 0) await sleep(pollMs);
+  }
+
+  // Still idle through the grace period: the submission was swallowed.
+  return runner.exec(promptArgs());
 }
 
 function parseHerdrJson(raw: string): HerdrJson | null {
@@ -286,6 +357,8 @@ export function createHerdrHostAdapter(options: HerdrAdapterOptions): HostAdapte
   const defaultTimeoutMs = Math.min(options.timeoutMs ?? DEFAULT_TIMEOUT_MS, 300_000);
   const startTimeoutMs = Math.min(options.startTimeoutMs ?? DEFAULT_START_TIMEOUT_MS, 300_000);
   const retryDelayMs = Math.min(Math.max(options.readinessRetryDelayMs ?? 1_000, 0), 60_000);
+  const stalledGraceMs = Math.min(Math.max(options.stalledGraceMs ?? 20_000, 0), 60_000);
+  const stalledPollIntervalMs = Math.min(Math.max(options.stalledPollIntervalMs ?? 2_000, 0), 30_000);
   const readLines = options.readLines ?? DEFAULT_READ_LINES;
   const prefix = sanitizeHerdrName(options.prefix ?? "swarm-dao");
   const keepPanes = options.keepPanes === true;
@@ -395,20 +468,18 @@ export function createHerdrHostAdapter(options: HerdrAdapterOptions): HostAdapte
         });
       }
 
-      // 3. Prompt and wait for a settled state (idle | done | blocked).
-      const prompted = await runner.exec([
-        "herdr",
-        "agent",
-        "prompt",
-        name,
+      // 3. Prompt and wait for a settled state (idle | done | blocked),
+      // recovering from herdr's transient agent_prompt_stalled classification.
+      const prompted = await promptAgentUntilSettled(runner, {
+        agentName: name,
         prompt,
-        "--wait",
-        "--timeout",
-        String(timeoutMs),
-      ]);
+        timeoutMs,
+        stalledGraceMs,
+        pollIntervalMs: stalledPollIntervalMs,
+      });
       if (prompted.exitCode !== 0) {
         const detail = herdrErrorDetail(prompted.stderr, prompted.stdout);
-        return finish({ error: `herdr agent prompt failed (likely timeout): ${detail}` });
+        return finish({ error: `herdr agent prompt failed: ${detail}` });
       }
       const state = agentState(parseHerdrJson(prompted.stdout)?.result);
       if (state === "blocked") {

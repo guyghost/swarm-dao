@@ -14,7 +14,7 @@ provided.
 | Continuity | `cooldown` + `COOLDOWN_ELAPSED` loops on success only; sequence increments per cycle | Covered |
 | Human cycle gates | `awaitingHumanCycleDecision` on `adjusting`/`retrying`; `CYCLE_RESUMED` only after the owner acted through `improvementctl` | Covered |
 | Cycle failure | `halted` on failed/blocked/cancelled cycle; restart is human-gated | Covered |
-| Worker failure | Blocked, timed-out, or unparseable workers end in `workerFailed`; bounded effect-level retries (two, fresh workspace each); `agent_pane_busy` retried on the same pane within the readiness budget | Covered |
+| Worker failure | Blocked, timed-out, or unparseable workers end in `workerFailed`; bounded effect-level retries (two, fresh workspace each); `agent_pane_busy` retried on the same pane within the readiness budget; `agent_prompt_stalled` recovered (grace-poll + at most one re-prompt) | Covered |
 | Signal rejection | Runner-rejected submissions end in `workerFailed` with recorded issues | Covered |
 | Anchor honesty | Commands frozen in the improvement graph JSON; failed anchors submitted as failed, never retried by the orchestrator | Covered |
 | Cancellation | Human `CANCEL_SERIES` accepted from every active state | Covered |

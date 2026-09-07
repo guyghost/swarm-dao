@@ -1,8 +1,9 @@
-export type { AgentStartRequest, HerdrAdapterOptions, HerdrRunner } from "./adapter.js";
+export type { AgentPromptRequest, AgentStartRequest, HerdrAdapterOptions, HerdrRunner } from "./adapter.js";
 export {
   createHerdrHostAdapter,
   herdrAgentName,
   herdrErrorCode,
+  promptAgentUntilSettled,
   sanitizeHerdrName,
   startAgentUntilReady,
   trimTrailingNewlines,

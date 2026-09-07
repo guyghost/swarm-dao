@@ -23,7 +23,12 @@
 import { execFile } from "node:child_process";
 import { ORCHESTRATOR_MAX_WORKER_RETRIES } from "@guyghost/swarm-dao-core/models/improvement";
 import type { HerdrRunner } from "@guyghost/swarm-dao-herdr-adapter";
-import { sanitizeHerdrName, startAgentUntilReady, trimTrailingNewlines } from "@guyghost/swarm-dao-herdr-adapter";
+import {
+  promptAgentUntilSettled,
+  sanitizeHerdrName,
+  startAgentUntilReady,
+  trimTrailingNewlines,
+} from "@guyghost/swarm-dao-herdr-adapter";
 
 /** execFile with utf8 strings, promise-shaped. Failures reject with the child
  * error carrying .code/.stdout/.stderr. Commands are ARGV — never shell
@@ -80,6 +85,11 @@ export interface HerdrWorkerOptions {
   /** Delay between same-pane agent start readiness retries (default 1 s; 0
    * only for tests). */
   readinessRetryDelayMs?: number;
+  /** Grace-poll budget after a stalled prompt (default 20 s). */
+  stalledGraceMs?: number;
+  /** Delay between stalled-prompt grace polls (default 2 s; 0 only for
+   * tests). */
+  stalledPollIntervalMs?: number;
   /** Injectable command runner (tests). */
   runner?: HerdrRunner;
 }
@@ -222,6 +232,8 @@ export async function runHerdrWorker(
   const startTimeoutMs = toBoundedInt(options.startTimeoutMs, 120_000, 1_000, 300_000);
   const readLines = toBoundedInt(options.readLines, 200, 1, 10_000);
   const readinessRetryDelayMs = toBoundedInt(options.readinessRetryDelayMs, 1_000, 0, 60_000);
+  const stalledGraceMs = toBoundedInt(options.stalledGraceMs, 20_000, 0, 60_000);
+  const stalledPollIntervalMs = toBoundedInt(options.stalledPollIntervalMs, 2_000, 0, 30_000);
 
   if (!SAFE_HERDR_KIND.test(kind))
     return { ok: false, error: `herdr kind '${kind}' is not a valid agent kind identifier.` };
@@ -275,18 +287,17 @@ export async function runHerdrWorker(
         continue;
       }
 
-      const prompted = await runner.exec([
-        "herdr",
-        "agent",
-        "prompt",
+      // 3. Prompt and wait for a settled state (idle | done | blocked),
+      // recovering from herdr's transient agent_prompt_stalled classification.
+      const prompted = await promptAgentUntilSettled(runner, {
         agentName,
         prompt,
-        "--wait",
-        "--timeout",
-        String(timeoutMs),
-      ]);
+        timeoutMs,
+        stalledGraceMs,
+        pollIntervalMs: stalledPollIntervalMs,
+      });
       if (prompted.exitCode !== 0) {
-        lastError = `herdr agent prompt failed (likely timeout): ${herdrErrorDetail(prompted.stderr, prompted.stdout)}`;
+        lastError = `herdr agent prompt failed: ${herdrErrorDetail(prompted.stderr, prompted.stdout)}`;
         continue;
       }
       if (agentState(parseHerdrJson(prompted.stdout)?.result) === "blocked") {

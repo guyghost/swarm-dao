@@ -141,6 +141,9 @@ typed observation:
   `pi`), bounded executor retries (two) with a fresh workspace per attempt;
   agent start is retried on the same pane while herdr classifies the fresh
   pane as busy (`agent_pane_busy`) within the attempt's readiness budget;
+  a stalled prompt (`agent_prompt_stalled`) is recovered by a grace-poll of
+  the agent state and, if the prompt took effect, a settle wait — otherwise
+  exactly one re-prompt;
   harvested output validated into a typed improvement signal.
 - SUBMIT_*: `improvementctl submit` with the validated signal files; accepted
   and rejected submissions are both journaled.

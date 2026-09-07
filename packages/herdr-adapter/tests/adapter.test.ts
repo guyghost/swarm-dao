@@ -31,6 +31,14 @@ const AGENT_SETTLED = (status: string) =>
     result: { agent: { name: "x", agent_status: status }, type: "agent_prompted" },
   });
 
+const AGENT_INFO = (status: string) =>
+  JSON.stringify({ id: "cli:agent:get", result: { agent: { name: "x", agent_status: status }, type: "agent_info" } });
+
+const PROMPT_STALLED = {
+  stderr: JSON.stringify({ error: { code: "agent_prompt_stalled", message: "no state change within 5000 ms" } }),
+  exitCode: 1,
+};
+
 function fakeHerdr(responses: Response[]) {
   const calls: Call[] = [];
   let index = 0;
@@ -212,6 +220,55 @@ describe("herdr host adapter", () => {
 
     expect(output.error).toContain("unsupported_agent_kind");
     expect(fake.calls.filter((call) => call.argv[2] === "start").length).toBe(1);
+  });
+
+  test("a stalled prompt whose agent came alive waits for settle (no re-prompt)", async () => {
+    const fake = fakeHerdr([
+      { stdout: WORKSPACE_CREATED, exitCode: 0 }, // workspace create
+      { stdout: AGENT_SETTLED("working"), exitCode: 0 }, // agent start
+      PROMPT_STALLED, // prompt --wait: herdr missed the 5 s state change
+      { stdout: AGENT_INFO("working"), exitCode: 0 }, // grace-poll: prompt took effect
+      { stdout: AGENT_INFO("idle"), exitCode: 0 }, // agent wait: settled
+      { exitCode: 0 }, // workspace close
+    ]);
+    const adapter = createHerdrHostAdapter({
+      workDir,
+      runner: fake.runner,
+      kind: "pi",
+      stalledGraceMs: 0,
+      stalledPollIntervalMs: 0,
+    });
+
+    const output = await adapter.spawnAgent({ agent: agent("critic"), proposal: proposal(8), systemPrompt: "P" });
+
+    expect(output.error).toBeUndefined();
+    expect(fake.calls.filter((call) => call.argv[2] === "prompt").length).toBe(1); // no double submission
+    expect(fake.calls.filter((call) => call.argv[2] === "get").length).toBe(1);
+    expect(fake.calls.filter((call) => call.argv[2] === "wait").length).toBe(1);
+  });
+
+  test("a stalled prompt whose agent stayed idle is re-prompted exactly once", async () => {
+    const fake = fakeHerdr([
+      { stdout: WORKSPACE_CREATED, exitCode: 0 }, // workspace create
+      { stdout: AGENT_SETTLED("working"), exitCode: 0 }, // agent start
+      PROMPT_STALLED, // first prompt stalled
+      { stdout: AGENT_INFO("idle"), exitCode: 0 }, // grace-poll: still idle → swallowed
+      { stdout: AGENT_SETTLED("idle"), exitCode: 0 }, // re-prompt: settled
+      { exitCode: 0 }, // workspace close
+    ]);
+    const adapter = createHerdrHostAdapter({
+      workDir,
+      runner: fake.runner,
+      kind: "pi",
+      stalledGraceMs: 0,
+      stalledPollIntervalMs: 0,
+    });
+
+    const output = await adapter.spawnAgent({ agent: agent("critic"), proposal: proposal(9), systemPrompt: "P" });
+
+    expect(output.error).toBeUndefined();
+    expect(fake.calls.filter((call) => call.argv[2] === "prompt").length).toBe(2);
+    expect(fake.calls.filter((call) => call.argv[2] === "wait").length).toBe(0);
   });
 
   test("a server error fails fast with the herdr error code", async () => {

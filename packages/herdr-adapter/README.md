@@ -23,7 +23,10 @@ For every agent, the adapter:
    reports `agent_pane_busy` and the adapter retries on the same pane until
    the readiness budget (`startTimeoutMs`) is spent.
 3. Submits the deliberation prompt: `herdr agent prompt <name> '<prompt>'
-   --wait` — settles on `idle`, `done`, or `blocked`.
+   --wait` — settles on `idle`, `done`, or `blocked`. A stalled prompt (herdr
+   enforces a 5 s observed-state-change window) is recovered: the adapter
+   grace-polls the agent state and, if the prompt took effect, waits for
+   settle; only a swallowed submission is re-prompted, exactly once.
 4. Harvests the ANSI-stripped terminal transcript:
    `herdr agent read <name> --source recent-unwrapped`.
 5. Closes the workspace (unless `keepPanes`).
