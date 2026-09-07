@@ -1,5 +1,13 @@
 # @guyghost/swarm-dao-copilot-adapter
 
+## 0.4.3
+
+### Patch Changes
+
+- Updated dependencies [5be1c48]
+  - @guyghost/swarm-dao-core@0.16.0
+  - @guyghost/swarm-dao-mcp@0.8.3
+
 ## 0.4.2
 
 ### Patch Changes

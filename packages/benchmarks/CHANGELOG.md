@@ -1,5 +1,12 @@
 # @guyghost/swarm-dao-benchmarks
 
+## 0.1.20
+
+### Patch Changes
+
+- Updated dependencies [5be1c48]
+  - @guyghost/swarm-dao-core@0.16.0
+
 ## 0.1.19
 
 ### Patch Changes
