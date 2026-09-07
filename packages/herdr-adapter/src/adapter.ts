@@ -14,6 +14,13 @@
 //   herdr agent read <name> --source recent-unwrapped --lines N     (ANSI-stripped output)
 //   herdr workspace close <id>                                      (unless keepPanes)
 //
+// Readiness race: workspace create returns before the fresh pane's shell has
+// reached its interactive prompt, and herdr's agent start classifies such a
+// pane as busy (agent_pane_busy) instead of waiting for the prompt — slower
+// shell init under herd load makes this intermittent. startAgentUntilReady
+// therefore retries agent start on the SAME pane (1 s apart) until the
+// readiness budget is spent, so one slow shell init no longer fails the agent.
+//
 // Every command is spawned as ARGV via execFile — the JS side never builds
 // a shell command line, so prompts and labels are never shell-interpreted.
 //
@@ -158,6 +165,9 @@ export interface HerdrAdapterOptions {
   timeoutMs?: number;
   /** agent start readiness timeout in ms (default 30s; herdr 3000..300000). */
   startTimeoutMs?: number;
+  /** Delay between same-pane agent start readiness retries (default 1 s; 0
+   * only for tests). */
+  readinessRetryDelayMs?: number;
   /** Lines of terminal output harvested per agent (default 200). */
   readLines?: number;
   /** Keep the herdr workspaces alive after harvest (default false). */
@@ -204,10 +214,75 @@ function agentState(result: HerdrJson["result"]): string | null {
   return result?.agent?.status ?? result?.agent?.state ?? null;
 }
 
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** herdr machine-readable error code from a failed command response, if any. */
+export function herdrErrorCode(stderr: string, stdout: string): string | null {
+  const parsed = parseHerdrJson(stderr.trim()) ?? parseHerdrJson(stdout.trim());
+  const code = parsed?.error?.code;
+  return typeof code === "string" ? code : null;
+}
+
+export interface AgentStartRequest {
+  /** Unique herdr agent name ([a-z][a-z0-9_-]{0,31}). */
+  readonly agentName: string;
+  /** herdr agent kind (pi, claude, …). */
+  readonly kind: string;
+  /** Pane to start the agent in. */
+  readonly paneId: string;
+  /** Readiness budget in ms — passed to herdr's --timeout and used as the
+   * same-pane agent_pane_busy retry budget. */
+  readonly timeoutMs: number;
+  /** Extra arguments passed to the agent executable (after herdr's --). */
+  readonly agentArgs?: readonly string[];
+  /** Delay between agent_pane_busy retries in ms (default 1 s; 0 for tests). */
+  readonly retryDelayMs?: number;
+}
+
+/**
+ * Start an agent in a pane, retrying on the SAME pane while herdr reports the
+ * transient agent_pane_busy (a fresh pane is not yet at its interactive shell
+ * prompt when agent start runs — workspace create returns before shell init
+ * finishes, slower under herd load). Retries run 1 s apart until timeoutMs is
+ * spent; any other failure code is not a readiness race and returns
+ * immediately.
+ */
+export async function startAgentUntilReady(
+  runner: HerdrRunner,
+  request: AgentStartRequest,
+): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+  const startArgs = (): string[] => [
+    "herdr",
+    "agent",
+    "start",
+    request.agentName,
+    "--kind",
+    request.kind,
+    "--pane",
+    request.paneId,
+    "--timeout",
+    String(request.timeoutMs),
+    ...(request.agentArgs && request.agentArgs.length > 0 ? ["--", ...request.agentArgs] : []),
+  ];
+  const delayMs = Math.min(Math.max(request.retryDelayMs ?? 1_000, 0), 60_000);
+  const deadline = Date.now() + request.timeoutMs;
+  let started = await runner.exec(startArgs());
+  while (
+    started.exitCode !== 0 &&
+    herdrErrorCode(started.stderr, started.stdout) === "agent_pane_busy" &&
+    Date.now() < deadline
+  ) {
+    if (delayMs > 0) await sleep(delayMs);
+    started = await runner.exec(startArgs());
+  }
+  return started;
+}
+
 export function createHerdrHostAdapter(options: HerdrAdapterOptions): HostAdapter {
   const runner = options.runner ?? defaultRunner();
   const defaultTimeoutMs = Math.min(options.timeoutMs ?? DEFAULT_TIMEOUT_MS, 300_000);
   const startTimeoutMs = Math.min(options.startTimeoutMs ?? DEFAULT_START_TIMEOUT_MS, 300_000);
+  const retryDelayMs = Math.min(Math.max(options.readinessRetryDelayMs ?? 1_000, 0), 60_000);
   const readLines = options.readLines ?? DEFAULT_READ_LINES;
   const prefix = sanitizeHerdrName(options.prefix ?? "swarm-dao");
   const keepPanes = options.keepPanes === true;
@@ -301,20 +376,16 @@ export function createHerdrHostAdapter(options: HerdrAdapterOptions): HostAdapte
         });
       }
 
-      // 2. Start the agent (blocks until herdr detects it ready for input).
-      const started = await runner.exec([
-        "herdr",
-        "agent",
-        "start",
-        name,
-        "--kind",
-        options.kind,
-        "--pane",
+      // 2. Start the agent (blocks until herdr detects it ready for input;
+      // same-pane retries while the fresh pane is still busy).
+      const started = await startAgentUntilReady(runner, {
+        agentName: name,
+        kind: options.kind,
         paneId,
-        "--timeout",
-        String(startTimeoutMs),
-        ...(agentArgs.length > 0 ? ["--", ...agentArgs] : []),
-      ]);
+        timeoutMs: startTimeoutMs,
+        agentArgs,
+        retryDelayMs,
+      });
       if (started.exitCode !== 0) {
         return finish({
           error: `herdr agent start (${options.kind}) failed: ${herdrErrorDetail(started.stderr, started.stdout)}`,

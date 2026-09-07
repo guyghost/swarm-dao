@@ -153,6 +153,64 @@ describe("herdr host adapter", () => {
     expect(fake.calls.some((call) => line(call).includes("workspace close"))).toBe(true);
   });
 
+  test("agent start retries on the same pane while herdr reports agent_pane_busy", async () => {
+    const BUSY = JSON.stringify({ error: { code: "agent_pane_busy", message: "pane not at prompt" } });
+    const fake = fakeHerdr([
+      { stdout: WORKSPACE_CREATED, exitCode: 0 }, // workspace create
+      { stderr: BUSY, exitCode: 1 }, // agent start: fresh pane not at prompt yet
+      { stdout: AGENT_SETTLED("working"), exitCode: 0 }, // agent start retry: ready
+      { stdout: AGENT_SETTLED("idle"), exitCode: 0 }, // prompt --wait
+      { exitCode: 0 }, // workspace close
+    ]);
+    const adapter = createHerdrHostAdapter({
+      workDir,
+      runner: fake.runner,
+      kind: "pi",
+      readinessRetryDelayMs: 0,
+    });
+
+    const output = await adapter.spawnAgent({
+      agent: agent("critic"),
+      proposal: proposal(6),
+      systemPrompt: "P",
+    });
+
+    const starts = fake.calls.filter((call) => call.argv[2] === "start");
+    expect(starts.length).toBe(2);
+    for (const call of starts) {
+      expect(call.argv).toContain("w9:p1"); // same pane across retries
+      expect(line(call)).toMatch(/herdr agent start swarm-dao-p6-critic-\w{4}/); // same agent
+    }
+    expect(fake.calls.filter((call) => call.argv[2] === "create").length).toBe(1); // no attempt burned
+    expect(output.error).toBeUndefined();
+  });
+
+  test("agent start failures other than agent_pane_busy are not retried on the pane", async () => {
+    const fake = fakeHerdr([
+      { stdout: WORKSPACE_CREATED, exitCode: 0 },
+      {
+        stderr: JSON.stringify({ error: { code: "unsupported_agent_kind", message: "nope" } }),
+        exitCode: 1,
+      },
+      { exitCode: 0 }, // workspace close
+    ]);
+    const adapter = createHerdrHostAdapter({
+      workDir,
+      runner: fake.runner,
+      kind: "pi",
+      readinessRetryDelayMs: 0,
+    });
+
+    const output = await adapter.spawnAgent({
+      agent: agent("critic"),
+      proposal: proposal(7),
+      systemPrompt: "P",
+    });
+
+    expect(output.error).toContain("unsupported_agent_kind");
+    expect(fake.calls.filter((call) => call.argv[2] === "start").length).toBe(1);
+  });
+
   test("a server error fails fast with the herdr error code", async () => {
     const fake = fakeHerdr([
       {

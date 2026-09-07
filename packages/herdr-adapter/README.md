@@ -18,7 +18,10 @@ For every agent, the adapter:
 1. Creates an **isolated herdr workspace** (one root pane, `--no-focus` —
    it never touches your existing layout).
 2. Starts the agent: `herdr agent start <name> --kind <kind>` — blocks until
-   herdr detects the agent is ready for input.
+   herdr detects the agent is ready for input. A freshly created pane may not
+   be at its shell prompt yet (slower shell init under load); herdr then
+   reports `agent_pane_busy` and the adapter retries on the same pane until
+   the readiness budget (`startTimeoutMs`) is spent.
 3. Submits the deliberation prompt: `herdr agent prompt <name> '<prompt>'
    --wait` — settles on `idle`, `done`, or `blocked`.
 4. Harvests the ANSI-stripped terminal transcript:

@@ -139,6 +139,8 @@ typed observation:
 - RUN_WORKERS: for each worker, the herdr lifecycle (workspace create → agent
   start → prompt --wait → read → workspace close), kind configured (default
   `pi`), bounded executor retries (two) with a fresh workspace per attempt;
+  agent start is retried on the same pane while herdr classifies the fresh
+  pane as busy (`agent_pane_busy`) within the attempt's readiness budget;
   harvested output validated into a typed improvement signal.
 - SUBMIT_*: `improvementctl submit` with the validated signal files; accepted
   and rejected submissions are both journaled.

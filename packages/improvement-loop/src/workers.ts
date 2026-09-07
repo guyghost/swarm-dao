@@ -8,6 +8,13 @@
 //   herdr agent read <name> --source recent-unwrapped --lines N
 //   herdr workspace close <id>
 //
+// Readiness race: workspace create returns before the fresh pane's shell has
+// reached its interactive prompt, and herdr's agent start classifies such a
+// pane as busy (agent_pane_busy) instead of waiting for the prompt — slower
+// shell init under herd load makes this intermittent. agent start is therefore
+// retried on the SAME pane (1 s apart) until the readiness budget is spent, so
+// one slow shell init no longer burns a whole attempt.
+//
 // Boundary: a blocked, timed-out, or unparseable worker is an ERROR, never a
 // signal (models/improvement-orchestrator.md). Executor retries are
 // effect-level, bounded, and idempotent (fresh workspace per attempt); they
@@ -16,7 +23,7 @@
 import { execFile } from "node:child_process";
 import { ORCHESTRATOR_MAX_WORKER_RETRIES } from "@guyghost/swarm-dao-core/models/improvement";
 import type { HerdrRunner } from "@guyghost/swarm-dao-herdr-adapter";
-import { sanitizeHerdrName, trimTrailingNewlines } from "@guyghost/swarm-dao-herdr-adapter";
+import { sanitizeHerdrName, startAgentUntilReady, trimTrailingNewlines } from "@guyghost/swarm-dao-herdr-adapter";
 
 /** execFile with utf8 strings, promise-shaped. Failures reject with the child
  * error carrying .code/.stdout/.stderr. Commands are ARGV — never shell
@@ -70,6 +77,9 @@ export interface HerdrWorkerOptions {
   readLines?: number;
   /** Keep the herdr workspaces alive after harvest (default false). */
   keepPanes?: boolean;
+  /** Delay between same-pane agent start readiness retries (default 1 s; 0
+   * only for tests). */
+  readinessRetryDelayMs?: number;
   /** Injectable command runner (tests). */
   runner?: HerdrRunner;
 }
@@ -208,6 +218,7 @@ export async function runHerdrWorker(
   const timeoutMs = toBoundedInt(options.timeoutMs, 300_000, 1_000, 300_000);
   const startTimeoutMs = toBoundedInt(options.startTimeoutMs, 120_000, 1_000, 300_000);
   const readLines = toBoundedInt(options.readLines, 200, 1, 10_000);
+  const readinessRetryDelayMs = toBoundedInt(options.readinessRetryDelayMs, 1_000, 0, 60_000);
 
   if (!SAFE_HERDR_KIND.test(kind))
     return { ok: false, error: `herdr kind '${kind}' is not a valid agent kind identifier.` };
@@ -245,19 +256,17 @@ export async function runHerdrWorker(
         continue;
       }
 
-      const started = await runner.exec([
-        "herdr",
-        "agent",
-        "start",
+      // agent_pane_busy is transient (pane not yet at its shell prompt):
+      // startAgentUntilReady retries on the same pane until the readiness
+      // budget is spent; any other code surfaces immediately.
+      const started = await startAgentUntilReady(runner, {
         agentName,
-        "--kind",
         kind,
-        "--pane",
         paneId,
-        "--timeout",
-        String(startTimeoutMs),
-        ...(agentArgs.length > 0 ? ["--", ...agentArgs] : []),
-      ]);
+        timeoutMs: startTimeoutMs,
+        agentArgs,
+        retryDelayMs: readinessRetryDelayMs,
+      });
       if (started.exitCode !== 0) {
         lastError = `herdr agent start (${kind}) failed: ${herdrErrorDetail(started.stderr, started.stdout)}`;
         continue;
