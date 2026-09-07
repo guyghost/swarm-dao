@@ -22,15 +22,19 @@ const AGENT_STARTED = JSON.stringify({
 
 const PROMPT_SETTLED = JSON.stringify({
   id: "cli:agent:prompt",
-  result: { agent: { name: "x", status: "idle" }, type: "ok" },
+  result: { agent: { name: "x", agent_status: "idle" }, type: "agent_prompted" },
+});
+const PROMPT_BLOCKED = JSON.stringify({
+  id: "cli:agent:prompt",
+  result: { agent: { name: "x", agent_status: "blocked" }, type: "agent_prompted" },
 });
 
 const herdrError = (code: string): string => JSON.stringify({ error: { code, message: "pane rejected the start" } });
 const BUSY = herdrError("agent_pane_busy");
 
-/** Fake herdr runner: scripted agent start responses (last one repeats), happy
- * path for every other lifecycle command. */
-function fakeHerdr(startResponses: string[]) {
+/** Fake herdr runner: scripted agent start responses (last one repeats),
+ * happy path for every other lifecycle command. */
+function fakeHerdr(startResponses: string[], promptResponse = PROMPT_SETTLED) {
   const calls: string[][] = [];
   let startCall = 0;
   const runner = {
@@ -48,7 +52,7 @@ function fakeHerdr(startResponses: string[]) {
             ? { stdout: AGENT_STARTED, stderr: "", exitCode: 0 }
             : { stdout: "", stderr: response, exitCode: 1 };
         }
-        if (argv[2] === "prompt") return { stdout: PROMPT_SETTLED, stderr: "", exitCode: 0 };
+        if (argv[2] === "prompt") return { stdout: promptResponse, stderr: "", exitCode: 0 };
         if (argv[2] === "read") return { stdout: "TRANSCRIPT", stderr: "", exitCode: 0 };
       }
       throw new Error(`unexpected command: ${argv.join(" ")}`);
@@ -89,6 +93,13 @@ describe("runHerdrWorker agent start readiness", () => {
     expect(fake.startCalls()[1]).toContain("sensor-r2");
     expect(fake.startCalls()[2]).toContain("sensor-r3");
     expect(result.ok === false && result.error.includes("unsupported_agent_kind")).toBe(true);
+  });
+
+  test("a blocked agent (real herdr agent_status field) is an error, never a signal", async () => {
+    const fake = fakeHerdr(["ok"], PROMPT_BLOCKED);
+    const result = await runHerdrWorker({ ...BASE_OPTIONS, runner: fake.runner }, "sensor", "PROMPT");
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.error.includes("blocked")).toBe(true);
   });
 
   test("gives up the pane after the readiness budget and retries with a fresh workspace", async () => {

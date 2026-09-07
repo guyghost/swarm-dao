@@ -162,7 +162,7 @@ interface HerdrJson {
   result?: {
     root_pane?: { pane_id?: string };
     workspace?: { workspace_id?: string };
-    agent?: { status?: string; state?: string };
+    agent?: { agent_status?: string; status?: string; state?: string };
     workspaces?: Array<{ label?: string; workspace_id?: string }>;
   };
 }
@@ -177,7 +177,10 @@ function parseHerdrJson(raw: string): HerdrJson | null {
 }
 
 function agentState(result: HerdrJson["result"]): string | null {
-  return result?.agent?.status ?? result?.agent?.state ?? null;
+  // herdr exposes the lifecycle field as agent_status (verified live); the
+  // others are defensive fallbacks — reading them alone silently disabled the
+  // blocked-worker guard (issue #138).
+  return result?.agent?.agent_status ?? result?.agent?.status ?? result?.agent?.state ?? null;
 }
 
 /** Close workspaces left behind by a run killed mid-flight (host timeout,

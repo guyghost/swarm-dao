@@ -26,7 +26,10 @@ const WORKSPACE_CREATED = JSON.stringify({
 });
 
 const AGENT_SETTLED = (status: string) =>
-  JSON.stringify({ id: "cli:agent:prompt", result: { agent: { name: "x", status }, type: "ok" } });
+  JSON.stringify({
+    id: "cli:agent:prompt",
+    result: { agent: { name: "x", agent_status: status }, type: "agent_prompted" },
+  });
 
 function fakeHerdr(responses: Response[]) {
   const calls: Call[] = [];

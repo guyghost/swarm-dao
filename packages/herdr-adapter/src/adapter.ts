@@ -187,7 +187,7 @@ interface HerdrJson {
   result?: {
     root_pane?: { pane_id?: string; workspace_id?: string };
     workspace?: { workspace_id?: string };
-    agent?: { status?: string; state?: string };
+    agent?: { agent_status?: string; status?: string; state?: string };
   };
   error?: { code?: string; message?: string };
 }
@@ -211,7 +211,10 @@ function herdrErrorDetail(stderr: string, stdout: string): string {
 }
 
 function agentState(result: HerdrJson["result"]): string | null {
-  return result?.agent?.status ?? result?.agent?.state ?? null;
+  // herdr exposes the lifecycle field as agent_status (verified live); the
+  // others are defensive fallbacks — reading them alone silently disabled the
+  // blocked-agent guard (issue #138).
+  return result?.agent?.agent_status ?? result?.agent?.status ?? result?.agent?.state ?? null;
 }
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
