@@ -70,7 +70,9 @@ import {
   type SandboxMode,
 } from "@guyghost/swarm-dao-improvement";
 import { createProductRunner } from "@guyghost/swarm-dao-product";
+import { createTmuxHostAdapter } from "@guyghost/swarm-dao-tmux-adapter";
 import { cmdDoctor } from "./doctor.js";
+import { type ChildHost, childSessionName, detectHostSession, type HostSession } from "./environment.js";
 import {
   cmdApprove,
   cmdImproveCancel,
@@ -169,55 +171,115 @@ async function ensureLoaded(cwd: string): Promise<FileDaoStateRepository> {
   return repository;
 }
 
-// ── herdr child sessions (parent = this CLI, children = one workspace per agent) ──
+// ── Child sessions (parent = this CLI, children = one workspace/session per agent) ──
 
 /**
  * Every multi-agent CLI flow (deliberate, roundtable, implement) spawns its
- * agents as REAL coding agents in herdr child sessions: this CLI process is
- * the parent session that pilots the children — create workspace, start the
- * agent (kind: pi/claude/codex/…), prompt, harvest, close. The operator can
- * attach with `herdr` and watch any child live while it runs.
+ * agents as REAL coding agents in child sessions: this CLI process is the
+ * parent session that pilots the children. The operator can attach to any
+ * child live while it runs.
  *
- * Defaults come from .dao/config.json `herdr` (kind, keepPanes, timeoutMs);
- * explicit flags win. Failing `herdr.kind` falls back to "pi".
+ * The host follows the detected terminal multiplexer (--host auto, the
+ * default): inside a herdr pane children are herdr workspaces, inside tmux
+ * they are tmux sessions running the operator-owned tmux.command; a bare
+ * shell falls back to herdr. Explicit --host wins.
  */
-interface HerdrChildOptions {
+interface ChildSessionOptions {
+  host: ChildHost;
+  detected: HostSession;
+  /** herdr only: agent kind (pi, claude, codex, …). */
   kind: string;
+  /** herdr keepPanes / tmux keepSessions (the --keep-panes flag maps to both). */
   keepPanes: boolean;
   timeoutMs?: number;
+  /** Operator-owned tmux agent command (required for the tmux host). */
+  tmuxCommand?: string;
 }
 
-function herdrChildOptionsFrom(
+function childSessionOptionsFrom(
   flags: Record<string, string | true>,
-  projectConfig: { herdr?: { kind?: string; keepPanes?: boolean; timeoutMs?: number } },
-): HerdrChildOptions {
-  const config = projectConfig.herdr ?? {};
-  const kindFlag = flags.kind;
-  if (kindFlag !== undefined && (typeof kindFlag !== "string" || kindFlag.trim().length === 0)) {
-    err("--kind requires a value (a herdr agent kind, e.g. pi, codex, claude)");
+  projectConfig: {
+    herdr?: { kind?: string; keepPanes?: boolean; timeoutMs?: number };
+    tmux?: { command?: string; keepSessions?: boolean; timeoutMs?: number };
+  },
+): ChildSessionOptions {
+  const hostFlag = flags.host;
+  if (hostFlag !== undefined && (typeof hostFlag !== "string" || hostFlag.trim().length === 0)) {
+    err("--host requires a value (herdr, tmux or auto)");
   }
-  const kind = (typeof kindFlag === "string" ? kindFlag.trim() : undefined) ?? config.kind ?? "pi";
-  if (!SAFE_HERDR_KIND.test(kind)) {
-    err(`herdr kind '${kind}' is invalid — use a supported herdr agent kind (e.g. pi, codex, claude)`);
+  const requested = typeof hostFlag === "string" ? hostFlag.trim() : "auto";
+  if (requested !== "herdr" && requested !== "tmux" && requested !== "auto") {
+    err(`--host must be herdr, tmux or auto, got '${requested}'`);
   }
+
+  const detected = detectHostSession();
+  const host: ChildHost = requested === "auto" ? (detected === "tmux" ? "tmux" : "herdr") : requested;
+  const herdrConfig = projectConfig.herdr ?? {};
+  const tmuxConfig = projectConfig.tmux ?? {};
+  const timeoutMs = childTimeoutFrom(flags, host === "tmux" ? tmuxConfig.timeoutMs : herdrConfig.timeoutMs);
+  const keepPanes = flags["keep-panes"] === true;
+
+  if (host === "herdr") {
+    const kindFlag = flags.kind;
+    if (kindFlag !== undefined && (typeof kindFlag !== "string" || kindFlag.trim().length === 0)) {
+      err("--kind requires a value (a herdr agent kind, e.g. pi, codex, claude)");
+    }
+    const kind = (typeof kindFlag === "string" ? kindFlag.trim() : undefined) ?? herdrConfig.kind ?? "pi";
+    if (!SAFE_HERDR_KIND.test(kind)) {
+      err(`herdr kind '${kind}' is invalid — use a supported herdr agent kind (e.g. pi, codex, claude)`);
+    }
+    return {
+      host,
+      detected,
+      kind,
+      keepPanes: keepPanes || herdrConfig.keepPanes === true,
+      ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+    };
+  }
+
+  if (flags.kind !== undefined) {
+    err("--kind applies to the herdr host — tmux children run the configured tmux.command");
+  }
+  const tmuxCommand = typeof tmuxConfig.command === "string" ? tmuxConfig.command.trim() : "";
+  if (tmuxCommand.length === 0) {
+    err(
+      'tmux children need an agent command: set { "tmux": { "command": "your-agent-cli \\"$PROMPT\\"" } } in .dao/config.json ($PROMPT carries the deliberation prompt), or run inside a herdr session / pass --host herdr.',
+    );
+  }
+  return {
+    host,
+    detected,
+    kind: "",
+    keepPanes: keepPanes || tmuxConfig.keepSessions === true,
+    ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+    tmuxCommand,
+  };
+}
+
+function childTimeoutFrom(flags: Record<string, string | true>, configTimeout: number | undefined): number | undefined {
   const timeoutFlag = flags["timeout-ms"];
-  let timeoutMs: number | undefined;
   if (timeoutFlag !== undefined) {
     if (typeof timeoutFlag !== "string" || timeoutFlag.trim().length === 0) err("--timeout-ms requires a value");
-    timeoutMs = Number(timeoutFlag);
+    const timeoutMs = Number(timeoutFlag);
     if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
-      err("--timeout-ms must be a positive number of milliseconds (herdr ceiling: 300000)");
+      err("--timeout-ms must be a positive number of milliseconds");
     }
-  } else if (typeof config.timeoutMs === "number") {
-    timeoutMs = config.timeoutMs;
+    return timeoutMs;
   }
-  const keepPanes = flags["keep-panes"] === true || config.keepPanes === true;
-  return { kind, keepPanes, ...(timeoutMs !== undefined ? { timeoutMs } : {}) };
+  return typeof configTimeout === "number" ? configTimeout : undefined;
 }
 
-/** A herdr host adapter bound to `workDir` — the child agent's cwd (the repo,
- * or the proposal's isolated worktree for parallel implement). */
-function herdrChildAdapter(child: HerdrChildOptions, workDir: string): HostAdapter {
+/** A host adapter bound to `workDir` — the child agent's cwd (the repo, or
+ *  the proposal's isolated worktree for parallel implement). */
+function childAdapter(child: ChildSessionOptions, workDir: string): HostAdapter {
+  if (child.host === "tmux") {
+    return createTmuxHostAdapter({
+      workDir,
+      command: child.tmuxCommand ?? "",
+      keepSessions: child.keepPanes,
+      ...(child.timeoutMs !== undefined ? { timeoutMs: child.timeoutMs } : {}),
+    });
+  }
   return createHerdrHostAdapter({
     workDir,
     kind: child.kind,
@@ -227,10 +289,20 @@ function herdrChildAdapter(child: HerdrChildOptions, workDir: string): HostAdapt
   });
 }
 
-function announceHerdrChildren(header: string, child: HerdrChildOptions, names: string[]): void {
-  info(`herdr parent session: this shell (${child.kind}) — ${header}:`);
+function childName(child: ChildSessionOptions, proposalId: number, agentId: string): string {
+  return childSessionName(child.host, herdrAgentName, "swarm-dao", proposalId, agentId);
+}
+
+function announceChildren(header: string, child: ChildSessionOptions, names: string[]): void {
+  const parent = child.host === "tmux" ? "tmux" : "herdr";
+  const detectedSuffix = child.detected === "none" ? "bare shell → herdr default" : `detected: ${child.detected}`;
+  info(`${parent} parent session: this shell (${detectedSuffix}) — ${header}:`);
   for (const name of names) info(`  ${name}`);
-  info(c.dim("  attach with `herdr` to watch any child live"));
+  info(
+    child.host === "tmux"
+      ? c.dim("  attach with `tmux attach -t <session>` to watch any child live")
+      : c.dim("  attach with `herdr` to watch any child live"),
+  );
 }
 
 // ── Commands ────────────────────────────────────────────────
@@ -278,11 +350,11 @@ const CLI_IMPLEMENTED = [
 const CLI_USAGE_DETAILS: Record<string, string> = {
   propose: "  propose --title <t> --type <T> --description <d> [--by <name>]\n        [--depends-on <id1,id2,...>]",
   deliberate:
-    "  deliberate <id> [--kind <pi|codex|claude|…>] [--keep-panes] [--timeout-ms <ms>]\n        every agent votes as a real coding agent in its own herdr child session\n        (kind default: .dao/config.json herdr.kind, else pi)",
+    "  deliberate <id> [--host <herdr|tmux|auto>] [--kind <pi|codex|claude|…>] [--keep-panes] [--timeout-ms <ms>]\n        every agent votes as a real coding agent in its own child session —\n        herdr by default; inside tmux, tmux sessions (--host overrides; herdr\n        kind default: .dao/config.json herdr.kind, else pi; tmux needs\n        .dao/config.json tmux.command)",
   roundtable:
-    "  roundtable [--kind <pi|codex|claude|…>] [--keep-panes] [--timeout-ms <ms>]\n        every agent suggests a proposal idea in its own herdr child session",
+    "  roundtable [--host <herdr|tmux|auto>] [--kind <pi|codex|claude|…>] [--keep-panes] [--timeout-ms <ms>]\n        every agent suggests a proposal idea in its own child session",
   implement:
-    "  implement <id> [<id>…] [--kind <pi|codex|claude|…>] [--keep-panes] [--timeout-ms <ms>]\n        dispatch one herdr child agent per proposal; multiple ids develop in\n        parallel, each in its own worktree (needs execution.isolation)",
+    "  implement <id> [<id>…] [--host <herdr|tmux|auto>] [--kind <pi|codex|claude|…>] [--keep-panes] [--timeout-ms <ms>]\n        dispatch one child agent per proposal; multiple ids develop in\n        parallel, each in its own worktree (needs execution.isolation)",
   list: "  list [--status <s>] [--type <T>]",
   show: "  show <id>",
   vote: "  vote <id> --position <for|against|abstain> --reasoning <text>\n        [--weight <n>] [--agent <name>]",
@@ -433,25 +505,28 @@ async function cmdPropose(cwd: string, flags: Record<string, string | true>): Pr
  *  its own herdr child session; outputs feed the same deterministic tally. */
 async function cmdDeliberate(cwd: string, positional: string[], flags: Record<string, string | true>): Promise<void> {
   const idStr = positional[0];
-  if (!idStr) err("usage: swarm-dao deliberate <id> [--kind <pi|codex|claude|…>] [--keep-panes] [--timeout-ms <ms>]");
+  if (!idStr)
+    err(
+      "usage: swarm-dao deliberate <id> [--host <herdr|tmux|auto>] [--kind <pi|codex|claude|…>] [--keep-panes] [--timeout-ms <ms>]",
+    );
   const id = Number(idStr);
   if (!Number.isInteger(id)) err(`invalid proposal id '${idStr}'`);
 
   const projectConfig = await loadConfig(getDaoRoot(cwd));
-  const child = herdrChildOptionsFrom(flags, projectConfig);
+  const child = childSessionOptionsFrom(flags, projectConfig);
   const repository = await ensureLoaded(cwd);
   if (!getProposal(id)) err(`proposal #${id} not found`);
 
   const agents = await loadAgentDefinitions(getDaoRoot(cwd), projectConfig);
-  announceHerdrChildren(
+  announceChildren(
     `${agents.length} child sessions vote on proposal #${id}`,
     child,
-    agents.map((a) => herdrAgentName("swarm-dao", id, a.id)),
+    agents.map((a) => childName(child, id, a.id)),
   );
 
   const presented = await handleDaoDeliberate(
     {
-      adapter: herdrChildAdapter(child, cwd),
+      adapter: childAdapter(child, cwd),
       workDir: cwd,
       deliberationMode: "auto",
       controlToolName: "dao_check",
@@ -468,19 +543,19 @@ async function cmdDeliberate(cwd: string, positional: string[], flags: Record<st
  *  roundtable runs on the synthetic proposal #0). */
 async function cmdRoundtable(cwd: string, flags: Record<string, string | true>): Promise<void> {
   const projectConfig = await loadConfig(getDaoRoot(cwd));
-  const child = herdrChildOptionsFrom(flags, projectConfig);
+  const child = childSessionOptionsFrom(flags, projectConfig);
   const repository = await ensureLoaded(cwd);
   if (!getState().initialized) err("DAO not initialized. Run: swarm-dao setup");
 
   const agents = await loadAgentDefinitions(getDaoRoot(cwd), projectConfig);
-  announceHerdrChildren(
+  announceChildren(
     `${agents.length} child sessions suggest proposal ideas`,
     child,
-    agents.map((a) => herdrAgentName("swarm-dao", 0, a.id)),
+    agents.map((a) => childName(child, 0, a.id)),
   );
 
   const presented = await handleDaoRoundtable({
-    adapter: herdrChildAdapter(child, cwd),
+    adapter: childAdapter(child, cwd),
     workDir: cwd,
     deliberationMode: "auto",
     controlToolName: "dao_check",
@@ -767,14 +842,16 @@ interface ImplementResult {
  *  (worktree/sandbox isolation from .dao/config.json execution). */
 async function cmdImplement(cwd: string, positional: string[], flags: Record<string, string | true>): Promise<void> {
   if (positional.length === 0) {
-    err("usage: swarm-dao implement <id> [<id>…] [--kind <pi|codex|claude|…>] [--keep-panes] [--timeout-ms <ms>]");
+    err(
+      "usage: swarm-dao implement <id> [<id>…] [--host <herdr|tmux|auto>] [--kind <pi|codex|claude|…>] [--keep-panes] [--timeout-ms <ms>]",
+    );
   }
   const ids = positional.map((s) => Number(s));
   const bad = positional.find((_, i) => !Number.isInteger(ids[i]));
   if (bad !== undefined) err(`invalid proposal id '${bad}'`);
 
   const projectConfig = await loadConfig(getDaoRoot(cwd));
-  const child = herdrChildOptionsFrom(flags, projectConfig);
+  const child = childSessionOptionsFrom(flags, projectConfig);
   await ensureLoaded(cwd);
   const proposals: Proposal[] = [];
   for (const id of ids) {
@@ -794,10 +871,10 @@ async function cmdImplement(cwd: string, positional: string[], flags: Record<str
 
   const workspace = createExecutionWorkspace(projectConfig.execution, cliRunner(), cwd);
 
-  announceHerdrChildren(
+  announceChildren(
     `${proposals.length} implementation child session(s) (${isolation ?? "none"} isolation)`,
     child,
-    proposals.map((p) => herdrAgentName("swarm-dao", p.id, IMPLEMENTATION_AGENT.id)),
+    proposals.map((p) => childName(child, p.id, IMPLEMENTATION_AGENT.id)),
   );
 
   const results: ImplementResult[] = await Promise.all(
@@ -808,13 +885,13 @@ async function cmdImplement(cwd: string, positional: string[], flags: Record<str
         if (!prep.ok) return { id: p.id, error: `workspace: ${prep.error}` };
         if (prep.path) workDir = prep.path;
       }
-      const output = await herdrChildAdapter(child, workDir).spawnAgent({
+      const output = await childAdapter(child, workDir).spawnAgent({
         agent: IMPLEMENTATION_AGENT,
         proposal: p,
         systemPrompt: implementationPrompt(p),
         ...(child.timeoutMs !== undefined ? { timeoutMs: child.timeoutMs } : {}),
       });
-      return { id: p.id, name: herdrAgentName("swarm-dao", p.id, IMPLEMENTATION_AGENT.id), workDir, output };
+      return { id: p.id, name: childName(child, p.id, IMPLEMENTATION_AGENT.id), workDir, output };
     }),
   );
 

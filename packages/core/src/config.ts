@@ -43,6 +43,16 @@ export interface HerdrConfig {
   timeoutMs?: number;
 }
 
+export interface TmuxConfig {
+  /** Operator-owned agent command run in each pane session; $PROMPT carries
+   *  the deliberation prompt (same trust level as package.json scripts). */
+  command?: string;
+  /** Keep child sessions alive after harvest (default false: killed). */
+  keepSessions?: boolean;
+  /** Per-child timeout in ms (default 300000). */
+  timeoutMs?: number;
+}
+
 export interface ProjectConfig {
   mode: ActivationMode;
   agentOverrides?: Record<string, Partial<DAOAgent>>;
@@ -56,6 +66,8 @@ export interface ProjectConfig {
   /** herdr child-session defaults for multi-agent CLI flows
    *  (deliberate, roundtable, implement). */
   herdr?: HerdrConfig;
+  /** tmux child-session defaults (used when the CLI detects a tmux session). */
+  tmux?: TmuxConfig;
 }
 
 export const DEFAULT_PROJECT_CONFIG: ProjectConfig = {
