@@ -92,8 +92,8 @@ sampling
 | `SAMPLES_SEALED` | `tool` | `sampling` | `auditing` only when both samples are present and non-empty |
 | `DRIFT_ESTIMATE` | `ai` | `auditing` | `arbitrating`; record the drift class as a signal only |
 | `ARBITRATION` | `tool` | `arbitrating` | `grounding`; record the deterministic arbitration outcome |
-| `ANCHOR_RECORDED` | `tool` | `grounding` | Record one anchor result; immutable within the current attempt, refreshable across an authorized retry |
-| `EVALUATE` | `system` | `grounding` | `succeeded`, `adjusting`, `retrying`, or `failed` per anchors, drift, and retry budget |
+| `ANCHOR_RECORDED` | `tool` | `grounding` | Record one anchor result (`passed \| failed \| blocked`); immutable within the current attempt, refreshable across an authorized retry. `blocked` means the anchor could not be measured: the verification command did not run to a verdict (execution-environment failure), which is different from the measured code failing |
+| `EVALUATE` | `system` | `grounding` | `succeeded`, `adjusting`, `retrying`, `failed`, or `blocked` per anchors, drift, and retry budget |
 | `REFERENCE_CHANGE_APPROVED` | `human` | `adjusting` | `sampling`; apply the new reference and clear cycle evidence |
 | `REFERENCE_CHANGE_REJECTED` | `human` | `adjusting` | `failed`; record the reason |
 | `RETRY_AUTHORIZED` | `human` | `retrying` | `sampling`; increment attempt and clear attempt-scoped evidence |
@@ -130,13 +130,19 @@ are stable identifiers and never change, so journals replay deterministically.
 
 `EVALUATE` selects exactly one outcome, in this order:
 
-1. If the drift class is `detached`, the cycle is not grounded regardless of
+1. If any required anchor is `blocked`, the verification itself could not run:
+   target is `blocked` (terminal) regardless of drift, other anchors, or the
+   retry budget — an unmeasurable environment invalidates the whole verdict,
+   and burning retries against a broken environment only accumulates dead
+   records. The series observes the blocked cycle and halts (`CYCLE_BLOCKED`);
+   the human owner repairs the environment and restarts.
+2. If the drift class is `detached`, the cycle is not grounded regardless of
    other evidence: target is `adjusting` (human must review the reference or
    the frozen set).
-2. Else if every required anchor is `passed`, non-empty, and bound to the
+3. Else if every required anchor is `passed`, non-empty, and bound to the
    current attempt, target is `succeeded`.
-3. Else if `attempt < maxRetries`, target is `retrying`.
-4. Else target is `failed`.
+4. Else if `attempt < maxRetries`, target is `retrying`.
+5. Else target is `failed`.
 
 ### Required ground-contact anchors
 
@@ -147,6 +153,18 @@ retained from an earlier attempt is NOT frozen in a failed state: grounding may
 re-run it and refresh its result at the current attempt (dogfood-003 c7: an
 infra-failed `frozen-set-intact` made every subsequent retry a dead end).
 Within one attempt an anchor result stays immutable — re-recording is rejected.
+
+**Blocked classification.** The anchor-verifier effect classifies an outcome as
+`blocked` only when the anchor command could not run to a verdict — for example
+the sandbox or container could not be launched, or the runner itself failed
+before executing the command. A command that executed and returned a failure is
+`failed`, never `blocked`. Classification is deterministic tool behavior with
+recorded evidence; it is never an AI judgment. A `blocked` anchor is retained
+and refreshed by the same immutability/refresh rules as `failed`, but it can
+never satisfy grounding: any `blocked` required anchor routes `EVALUATE` to the
+`blocked` terminal so the human owner repairs the environment and restarts
+(issue #145: an infra-failed anchor is not a product regression, and retrying
+into a broken environment is not recovery).
 
 1. `counter-metric-paired` — the optimizing metric's paired counter-metric was
    sampled and is non-empty. A metric never travels alone.
@@ -194,6 +212,8 @@ command.
    sampled (Goodhart).
 5. A cycle cannot reach `succeeded` without all six required anchors passed for
    the current attempt.
+5b. A cycle with any `blocked` required anchor lands on `blocked` — never
+   `retrying` or `succeeded` — and the series halts for a human restart.
 6. A `detached` drift estimate can never produce `succeeded`; it forces
    `adjusting`.
 7. Reference (target) values are owned by the human owner; AI signals never

@@ -53,8 +53,16 @@ provided.
 
 - There is no path from `sampling` to `succeeded` that bypasses the paired
   counter-metric, arbitration, and all six anchors.
-- `EVALUATE` has no success path when an anchor is missing, failed, empty, or
+- `EVALUATE` has no success path when an anchor is missing, failed, **blocked**, empty, or
   belongs to another attempt, and no success path when drift is `detached`.
+- A `blocked` anchor (verification command did not run to a verdict —
+  execution-environment failure, issue #145) routes `EVALUATE` to the `blocked`
+  terminal before every other outcome: the series halts (`CYCLE_BLOCKED`) and
+  the human owner repairs the environment and restarts. `blocked` never
+  satisfies grounding, never becomes `retrying`, and is classified by
+  deterministic tool behavior (command did not execute to a verdict), never by
+  AI judgment. Classification error path: a command that executed and failed is
+  `failed`, never `blocked`.
 - A metric cannot leave `sampling` without its counter-metric.
 - A reference value cannot enter the cycle except through a human event.
 - Arbitration cannot be overridden by an AI signal.
