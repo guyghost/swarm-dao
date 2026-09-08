@@ -121,7 +121,7 @@ export type OrchestratorSubmissionResult = Readonly<{
   snapshot: PersistedSeriesSnapshot;
 }>;
 
-export type AnchorCommandOutcome = Readonly<{ ok: boolean; detail: string }>;
+export type AnchorCommandOutcome = Readonly<{ ok: boolean; detail: string; infra?: boolean }>;
 
 export interface OrchestratorOnceDeps {
   /** Injected wall clock (ms) for cooldown scheduling; defaults to Date.now. */
@@ -258,11 +258,26 @@ const defaultRunCommand =
       const { stdout } = await execAsync(command, { cwd, timeout: 600_000 });
       return { ok: true, detail: tail(stdout.trim(), 300) || "exit 0" };
     } catch (error) {
-      const failure = error as { stdout?: string; stderr?: string; message?: string };
+      const failure = error as {
+        killed?: boolean;
+        code?: number | string;
+        message?: string;
+        stderr?: string;
+        stdout?: string;
+      };
       const detail = [failure.stderr, failure.stdout, failure.message]
         .filter((part) => part && part.length > 0)
         .join(" ");
-      return { ok: false, detail: tail(detail.trim(), 300) || "command failed" };
+      // Issue #145: classify "no verdict" as blocked — the runner killed the
+      // command (budget timeout) or the execution environment refused it
+      // (sandbox launch failures conventionally exit 125; a missing binary
+      // never ran). Everything else executed and measured a real failure.
+      const unmeasured = failure.killed === true || failure.code === 125 || /\bENOENT\b/.test(failure.message ?? "");
+      return {
+        ok: false,
+        detail: tail(detail.trim(), 300) || "command failed",
+        ...(unmeasured ? { infra: true } : {}),
+      };
     }
   };
 
@@ -775,19 +790,24 @@ export class OrchestratorRunner {
         continue;
       }
       const outcome = await runCommand(command);
+      // Issue #145: an unmeasured command (infra flag from the runner —
+      // timeout kill, sandbox launch refusal, missing binary) is recorded as
+      // blocked, never as a measured failure; EVALUATE then routes the cycle
+      // to the blocked terminal and the series halts for a human restart.
+      const status = outcome.ok ? "passed" : outcome.infra === true ? "blocked" : "failed";
       const result = await runner.submit({
         cycleId,
         type: "ANCHOR_RECORDED",
         source: "tool",
         producer: "anchor-verifier",
         occurredAt: this.#clock(),
-        payload: { anchor, status: outcome.ok ? "passed" : "failed" },
+        payload: { anchor, status },
         evidence: [`$ ${command}`, outcome.detail],
       });
       if (!result.accepted) {
         throw new Error(`anchor ${anchor} outcome rejected by the cycle runner: ${result.issues.join("; ")}`);
       }
-      outcomes.push(`${anchor}: ${outcome.ok ? "passed" : "failed"}`);
+      outcomes.push(`${anchor}: ${status}`);
     }
     const submitted = await this.submit({ type: "ANCHORS_SUBMITTED", source: "tool" });
     return this.#result(base, submitted, "ANCHORS_SUBMITTED", outcomes.join(", "));

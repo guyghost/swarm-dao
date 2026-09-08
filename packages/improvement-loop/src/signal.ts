@@ -169,14 +169,14 @@ const buildEvent = (
         issues.push("payload.anchor must be a required improvement anchor");
       }
       const status = payload.status;
-      if (status !== "passed" && status !== "failed") {
-        issues.push('payload.status must be "passed" or "failed"');
+      if (status !== "passed" && status !== "failed" && status !== "blocked") {
+        issues.push('payload.status must be "passed", "failed" or "blocked"');
       }
       return {
         type,
         source,
         anchor: isRequiredImprovementAnchor(anchor) ? anchor : "regression",
-        status: status === "failed" ? "failed" : "passed",
+        status: status === "failed" ? "failed" : status === "blocked" ? "blocked" : "passed",
         evidence: joinedEvidence(evidence, issues),
       };
     }

@@ -107,3 +107,33 @@ describe("validateImprovementSignal — ANCHOR_RECORDED evidence (dogfood-003 c7
     );
   });
 });
+
+describe("ANCHOR_RECORDED blocked status (issue #145)", () => {
+  it("accepts and preserves a blocked anchor outcome", () => {
+    const signal = validateImprovementSignal({
+      cycleId: "c1",
+      type: "ANCHOR_RECORDED",
+      source: "tool",
+      producer: "anchor-verifier",
+      occurredAt: "2031-01-01T00:00:00.000Z",
+      payload: { anchor: "regression", status: "blocked" },
+      evidence: ["sandbox could not be launched (exit 125)"],
+    });
+    expect(signal.ok).toBe(true);
+    if (!signal.ok) return;
+    expect(signal.event).toMatchObject({ type: "ANCHOR_RECORDED", anchor: "regression", status: "blocked" });
+  });
+
+  it("still rejects an unknown status", () => {
+    const signal = validateImprovementSignal({
+      cycleId: "c1",
+      type: "ANCHOR_RECORDED",
+      source: "tool",
+      producer: "anchor-verifier",
+      occurredAt: "2031-01-01T00:00:00.000Z",
+      payload: { anchor: "regression", status: "skipped" },
+      evidence: ["nope"],
+    });
+    expect(signal.ok).toBe(false);
+  });
+});

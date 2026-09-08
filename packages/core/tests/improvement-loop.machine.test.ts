@@ -262,3 +262,82 @@ describe("improvement-loop machine — anchor recording across retries (dogfood-
     expect(actor.getSnapshot().value).toBe("succeeded");
   });
 });
+
+describe("improvement-loop machine — blocked anchors (issue #145)", () => {
+  it("accepts a blocked anchor record (command did not run to a verdict)", () => {
+    const actor = reachGrounding();
+    actor.send({
+      type: "ANCHOR_RECORDED",
+      source: "tool",
+      anchor: "regression",
+      status: "blocked",
+      evidence: "sandbox could not be launched (exit 125)",
+    });
+    expect(actor.getSnapshot().value).toBe("grounding");
+    expect(actor.getSnapshot().context.anchors.regression).toMatchObject({
+      status: "blocked",
+      evidence: "sandbox could not be launched (exit 125)",
+    });
+  });
+
+  it("routes EVALUATE to the blocked terminal when a required anchor is blocked", () => {
+    const actor = reachGrounding();
+    for (const anchor of ["drift-audit", "anchor-reality", "frozen-set-intact"] as const) {
+      actor.send({ type: "ANCHOR_RECORDED", source: "tool", anchor, status: "passed", evidence: `${anchor} exited 0` });
+    }
+    actor.send({
+      type: "ANCHOR_RECORDED",
+      source: "tool",
+      anchor: "regression",
+      status: "blocked",
+      evidence: "sandbox could not be launched (exit 125)",
+    });
+    actor.send({ type: "EVALUATE", source: "system" });
+    const snapshot = actor.getSnapshot();
+    expect(snapshot.value).toBe("blocked");
+    expect(snapshot.context.terminalReason).toContain("regression");
+  });
+
+  it("blocked takes precedence over a detached drift estimate (environment invalidates the verdict)", () => {
+    const actor = startActor();
+    samplePair(actor);
+    seal(actor);
+    actor.send({ type: "DRIFT_ESTIMATE", source: "ai", driftClass: "detached" });
+    actor.send({ type: "ARBITRATION", source: "tool", outcome: "balanced" });
+    actor.send({
+      type: "ANCHOR_RECORDED",
+      source: "tool",
+      anchor: "regression",
+      status: "blocked",
+      evidence: "no verdict",
+    });
+    actor.send({ type: "EVALUATE", source: "system" });
+    expect(actor.getSnapshot().value).toBe("blocked");
+  });
+
+  it("keeps failed anchors on the retry path (unchanged when nothing is blocked)", () => {
+    const actor = reachGrounding();
+    actor.send({
+      type: "ANCHOR_RECORDED",
+      source: "tool",
+      anchor: "regression",
+      status: "failed",
+      evidence: "regression exited 1",
+    });
+    actor.send({ type: "EVALUATE", source: "system" });
+    expect(actor.getSnapshot().value).toBe("retrying");
+  });
+
+  it("still refuses a blocked record with empty evidence or a wrong source", () => {
+    const actor = reachGrounding();
+    actor.send({ type: "ANCHOR_RECORDED", source: "tool", anchor: "regression", status: "blocked", evidence: "" });
+    actor.send({
+      type: "ANCHOR_RECORDED",
+      source: "ai",
+      anchor: "regression",
+      status: "blocked",
+      evidence: "ai cannot classify",
+    });
+    expect(actor.getSnapshot().context.anchors.regression).toBeUndefined();
+  });
+});

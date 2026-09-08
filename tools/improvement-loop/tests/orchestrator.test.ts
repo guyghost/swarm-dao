@@ -613,3 +613,65 @@ describe("improvement-orchestrator wiring — grounding preflight (issue #143)",
     }
   });
 });
+
+describe("improvement-orchestrator wiring — infra-failed anchors (issue #145)", () => {
+  it("classifies unmeasured anchor commands as blocked and halts the series for a human restart", async () => {
+    const evidenceRoot = await mkdtemp(join(tmpdir(), "orchestrator-infra-"));
+    const cycleRoot = await mkdtemp(join(tmpdir(), "orchestrator-infra-cycles-"));
+    const workDir = await makeWorkDir();
+    try {
+      const runner = await OrchestratorRunner.create({ seriesId: "series-infra", evidenceRoot });
+      await startSeries(runner);
+      // The execution environment refused every anchor command: no verdict.
+      const deps = {
+        cycleEvidenceRoot: cycleRoot,
+        workDir,
+        runWorker: fakeWorker(),
+        runCommand: async () => ({ ok: false, detail: "sandbox could not be launched", infra: true }),
+      };
+      let step;
+      for (let index = 0; index < 8; index++) step = await runner.once(deps);
+
+      expect(runner.snapshot().state).toBe("halted"); // human restart gate
+      const cycleId = runner.snapshot().context.improvementCycleId as string;
+      const cycleSnapshot = JSON.parse(await readFile(join(cycleRoot, cycleId, "snapshot.json"), "utf8"));
+      expect(cycleSnapshot.state).toBe("blocked");
+      const anchors = cycleSnapshot.context.anchors as Record<string, { status: string }>;
+      expect(anchors.regression).toMatchObject({ status: "blocked" });
+      expect(step.event).toBe("CYCLE_BLOCKED");
+    } finally {
+      await rm(evidenceRoot, { recursive: true, force: true });
+      await rm(cycleRoot, { recursive: true, force: true });
+      await rm(workDir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps a measured failure as failed (attempted command, non-zero exit)", async () => {
+    const evidenceRoot = await mkdtemp(join(tmpdir(), "orchestrator-failed-"));
+    const cycleRoot = await mkdtemp(join(tmpdir(), "orchestrator-failed2-cycles-"));
+    const workDir = await makeWorkDir();
+    try {
+      const runner = await OrchestratorRunner.create({ seriesId: "series-measured", evidenceRoot });
+      await startSeries(runner);
+      const deps = {
+        cycleEvidenceRoot: cycleRoot,
+        workDir,
+        runWorker: fakeWorker(),
+        runCommand: async () => ({ ok: false, detail: "regression exited 1" }),
+      };
+      // grounding step only: the anchors are recorded as failed (measured).
+      let step;
+      for (let index = 0; index < 6; index++) step = await runner.once(deps);
+      expect(step.event).toBe("ANCHORS_SUBMITTED");
+      const cycleId = runner.snapshot().context.improvementCycleId as string;
+      const cycleSnapshot = JSON.parse(await readFile(join(cycleRoot, cycleId, "snapshot.json"), "utf8"));
+      const anchors = cycleSnapshot.context.anchors as Record<string, { status: string }>;
+      expect(anchors.regression).toMatchObject({ status: "failed" });
+      expect(anchors["frozen-set-intact"]).toMatchObject({ status: "failed" });
+    } finally {
+      await rm(evidenceRoot, { recursive: true, force: true });
+      await rm(cycleRoot, { recursive: true, force: true });
+      await rm(workDir, { recursive: true, force: true });
+    }
+  });
+});

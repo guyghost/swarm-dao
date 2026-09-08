@@ -14,7 +14,7 @@ export const IMPROVEMENT_TERMINAL_STATES = ["succeeded", "failed", "blocked", "c
 
 export type ImprovementAnchorName = (typeof REQUIRED_IMPROVEMENT_ANCHORS)[number];
 export type ImprovementSignalSource = "ai" | "tool" | "human" | "system";
-export type AnchorStatus = "passed" | "failed";
+export type AnchorStatus = "passed" | "failed" | "blocked";
 export type DriftClass = "none" | "partial" | "detached";
 
 export type Sample = Readonly<{ value: string; evidence: string }>;
@@ -148,8 +148,10 @@ const improvementSetup = setup({
       event.type === "ANCHOR_RECORDED" &&
       event.source === "tool" &&
       isRequiredImprovementAnchor(event.anchor) &&
-      (event.status === "passed" || event.status === "failed") &&
+      (event.status === "passed" || event.status === "failed" || event.status === "blocked") &&
       isNonEmpty(event.evidence),
+    hasBlockedAnchor: ({ context }) =>
+      REQUIRED_IMPROVEMENT_ANCHORS.some((anchor) => context.anchors[anchor]?.status === "blocked"),
     isSystemEvaluate: ({ event }) => event.type === "EVALUATE" && event.source === "system",
     isDetached: ({ context }) => context.driftClass === "detached",
     allAnchorsPassed: ({ context }) =>
@@ -259,6 +261,12 @@ const improvementSetup = setup({
       ...context,
       terminalReason: "reason" in event && isNonEmpty(event.reason) ? event.reason : "improvement cycle failed",
     })),
+    recordBlockedReason: assign(({ context }) => ({
+      ...context,
+      terminalReason: `blocked anchors (environment could not be measured): ${REQUIRED_IMPROVEMENT_ANCHORS.filter(
+        (anchor) => context.anchors[anchor]?.status === "blocked",
+      ).join(", ")}`,
+    })),
     recordVerificationFailure: assign(({ context }) => ({
       ...context,
       terminalReason: "required ground-contact anchors did not all pass",
@@ -312,6 +320,9 @@ export const improvementMachine = improvementSetup.createMachine({
     },
     evaluating: {
       always: [
+        // Issue #145: an unmeasurable environment invalidates the whole verdict —
+        // blocked precedes every other outcome and only a human restart recovers.
+        { guard: "hasBlockedAnchor", target: "#swarm-dao-improvement-loop.blocked", actions: "recordBlockedReason" },
         { guard: "isDetached", target: "adjusting", actions: "recordDetachedAdjustment" },
         { guard: "allAnchorsPassed", target: "succeeded", actions: "recordSuccess" },
         { guard: "canRetry", target: "retrying", actions: "recordVerificationFailure" },
