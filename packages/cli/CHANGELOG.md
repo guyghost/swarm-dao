@@ -1,5 +1,17 @@
 # @guyghost/swarm-dao-cli
 
+## 0.11.1
+
+### Patch Changes
+
+- c447a91: Grounding preflight and series-identity guards (issues #143, #144). Anchors now refuse to run on a dirty working tree: the grounding step checks `git status --porcelain` first and aborts with the offending path list, so worker debris or operator edits surface as a clear preflight error instead of false anchor failures and burned retries (non-git work directories keep the previous behavior). On the CLI side, `improve status/once/submit` fail with the resolved evidence-root path when the series does not exist there instead of answering from a phantom fresh idle snapshot, and `improve init` refuses an existing journal unless `--force` is passed — replay is never a clean slate, so a fresh series needs a new id while `--force` explicitly acknowledges resuming the recorded state.
+- a43a2bd: Fail fast on concurrent improvement runners instead of corrupting journal.ndjson (issue #139): the series journal sequence lived only in the running process's memory, so two `improve once`/`improve submit` processes on the same series interleaved appends and produced a duplicate sequence — after which every command failed the sequence contract and the series was unreadable without manual repair. Every append now re-reads the journal tail first and aborts with a clear, recoverable `concurrent improvement runner detected` error when another writer advanced the file (nothing is written; re-running reloads the state). Also completes `improve` usage/error help with the cycle- and series-level human-gate subcommands (`retry`, `reference`, `cancel-cycle`, `retry-workers`, `restart`, `cancel`, `cycles`), which shipped in CLI 0.5.0 but were missing from the short usage string.
+- Updated dependencies [76f8e01]
+- Updated dependencies [c447a91]
+- Updated dependencies [a43a2bd]
+  - @guyghost/swarm-dao-core@0.16.2
+  - @guyghost/swarm-dao-improvement@0.6.3
+
 ## 0.11.0
 
 ### Minor Changes
