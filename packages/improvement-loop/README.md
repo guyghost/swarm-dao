@@ -38,6 +38,26 @@ Exactly the four command-backed anchors (`counter-metric-paired` and
 `arbitration-policy` are recorded automatically by the machine). Unknown,
 missing, or machine-recorded anchors fail config validation.
 
+### Metric contract (optional)
+
+Without a declared metric, every sensor invents its own "obvious" metric for
+the scope — samples stop being comparable across workers and cycles. Bind the
+scope's optimizing metric (and its counter-metric) explicitly:
+
+```json
+{
+  "metric": {
+    "name": "backtest-primary-eval-v2",
+    "prompt": "Primary metric: net absolute PnL per eval-v2 run over the frozen dataset. Counter-metric: activeSignalRate drift.",
+    "evidence": "docs/backtest-diagnostics.md"
+  }
+}
+```
+
+`name` and `prompt` are required together; `evidence` is optional. The
+sensor/counter-sensor prompts embed the contract verbatim, so paired samples
+measure the same quantity (issue #142).
+
 ## Sandbox
 
 `--sandbox docker|container|auto|none` (with `--image`) runs every anchor

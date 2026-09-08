@@ -1,4 +1,5 @@
 import { dispatchProposalEvent } from "../../governance/proposal.utils.js";
+import { PROPOSAL_FINAL_STATUSES } from "../../models/proposal.machine.js";
 import type { ClockPort } from "../../ports/clock.js";
 import type { DaoStateRepositoryPort } from "../../ports/repository.js";
 import type { AuditEntry } from "../../types/index.js";
@@ -10,8 +11,11 @@ export type RejectProposalResult =
 /**
  * Human rejection path: an auditable veto/withdrawal of a proposal.
  * The proposal machine decides which event applies (DISCARD from `open`,
- * REJECT from `deliberating`/`approved`); this use case only picks the
- * event from the persisted status and records who rejected, and why.
+ * REJECT from `deliberating`/`approved`/`failed`); this use case only picks
+ * the event from the persisted status and records who rejected, and why.
+ * REJECT from `failed` is a closure annotation: the lifecycle is terminal,
+ * but the machine keeps this one transition so a dead proposal can carry an
+ * auditable reason instead of being an unannotatable zombie (issue #141).
  */
 export class RejectProposalUseCase {
   public constructor(
@@ -28,6 +32,12 @@ export class RejectProposalUseCase {
     if (!proposal) return { ok: false, error: `Proposal #${command.proposalId} not found.` };
     if (!command.reason || command.reason.trim().length === 0) {
       return { ok: false, error: "A rejection reason is required (it is recorded in the audit trail)." };
+    }
+    if (PROPOSAL_FINAL_STATUSES.has(proposal.status)) {
+      return {
+        ok: false,
+        error: `Proposal is in terminal status "${proposal.status}"; no transitions are permitted`,
+      };
     }
 
     const event = proposal.status === "open" ? ({ type: "DISCARD" } as const) : ({ type: "REJECT" } as const);

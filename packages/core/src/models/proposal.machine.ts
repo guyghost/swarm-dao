@@ -25,7 +25,11 @@ export type ProposalEvent =
   | { type: "DISCARD" }
   | { type: "ERROR"; message: string };
 
-export const PROPOSAL_FINAL_STATUSES: ReadonlySet<ProposalStatus> = new Set(["executed", "failed", "rejected"]);
+// `failed` is deliberately NOT final (issue #141): a gate failure is by
+// definition recoverable, and a dead proposal must stay annotatable — the
+// machine gives `failed` exactly one transition (REJECT → rejected) so the
+// closure reason is auditable while no lifecycle reuse is possible.
+export const PROPOSAL_FINAL_STATUSES: ReadonlySet<ProposalStatus> = new Set(["executed", "rejected"]);
 
 export function isProposalFinal(status: ProposalStatus): boolean {
   return PROPOSAL_FINAL_STATUSES.has(status);
@@ -91,7 +95,10 @@ export function createProposalMachine(initial: ProposalStatus = "open") {
         },
       },
       executed: { type: "final" },
-      failed: { type: "final" },
+      // `failed` is lifecycle-final (see PROPOSAL_FINAL_STATUSES) but keeps
+      // one closure transition: REJECT records an auditable reason on a dead
+      // proposal instead of leaving an unannotatable zombie (issue #141).
+      failed: { on: { REJECT: { target: "rejected", actions: "recordTransition" } } },
       rejected: { type: "final" },
     },
   });

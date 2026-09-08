@@ -22,6 +22,18 @@ export class ControlProposalUseCase {
     if (proposal.status !== "approved") {
       return { ok: false, error: `Must be approved (current: ${proposal.status})` };
     }
+    // Foreseeable ordering mistake guard (issue #141): a red-zone proposal
+    // without a completed dry-run always fails the mandatory-dry-run gate.
+    // Dispatching CONTROL_FAIL for it made the proposal a final zombie (the
+    // operator fixes the missing dry-run but the terminal state can never
+    // re-check). Refuse before any transition instead — the proposal stays
+    // approved and the operator runs the dry-run, then re-checks.
+    if (proposal.riskZone === "red" && !proposal.dryRunAt) {
+      return {
+        ok: false,
+        error: `Risk zone 'red' requires a completed dry-run before control — run dao_dry_run proposalId=${proposal.id} first. No state change was made (the proposal stays approved).`,
+      };
+    }
 
     const now = this.dependencies.clock.now();
     const control = runGates(proposal, state.config, { allProposals: state.proposals, now });

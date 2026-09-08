@@ -2,7 +2,12 @@ import { describe, expect, it } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { COMMAND_BACKED_ANCHORS, loadProjectImprovementConfig, validateProjectAnchorCommands } from "../src/config.js";
+import {
+  COMMAND_BACKED_ANCHORS,
+  loadMetricContract,
+  loadProjectImprovementConfig,
+  validateProjectAnchorCommands,
+} from "../src/config.js";
 import { resolveAnchorCommands } from "../src/orchestrator.js";
 
 const fourAnchors = (override: Record<string, string> = {}): Record<string, string> => {
@@ -69,6 +74,50 @@ describe("improvement-loop — per-project config (.dao/improvement.json)", () =
     const dir = await mkdtemp(join(tmpdir(), "improve-empty-"));
     try {
       expect(resolveAnchorCommands(dir)).rejects.toThrow(/improvement-loop\.graph\.json/);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("metric contract (issue #142)", () => {
+  const writeProject = async (dir: string, body: Record<string, unknown>): Promise<void> => {
+    await mkdir(join(dir, ".dao"), { recursive: true });
+    await writeFile(join(dir, ".dao/improvement.json"), JSON.stringify(body));
+  };
+
+  it("returns null when no metric section is declared", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "improve-metric-"));
+    try {
+      await writeProject(dir, { anchorCommands: fourAnchors() });
+      expect(await loadMetricContract(dir)).toBeNull();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("loads a declared metric contract", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "improve-metric-"));
+    try {
+      await writeProject(dir, {
+        anchorCommands: fourAnchors(),
+        metric: { name: "backtest-eval-v2", prompt: "net absolute PnL per eval-v2 run", evidence: "docs/metrics.md" },
+      });
+      expect(await loadMetricContract(dir)).toEqual({
+        name: "backtest-eval-v2",
+        prompt: "net absolute PnL per eval-v2 run",
+        evidence: "docs/metrics.md",
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a half-declared contract (name without prompt would be silent poison)", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "improve-metric-"));
+    try {
+      await writeProject(dir, { anchorCommands: fourAnchors(), metric: { name: "backtest-eval-v2" } });
+      expect(loadMetricContract(dir)).rejects.toThrow(/'metric' requires both 'name' and 'prompt'/);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

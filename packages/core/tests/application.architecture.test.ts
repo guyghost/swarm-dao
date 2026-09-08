@@ -359,6 +359,63 @@ describe("application architecture", () => {
     expect(repository.get().deliveryPlans[1]).toBeDefined();
   });
 
+  it("refuses red-zone control without a dry-run BEFORE any transition (no failed zombie, issue #141)", async () => {
+    const state = createInitialState("/project/.dao");
+    state.initialized = true;
+    state.proposals.push({
+      id: 3,
+      title: "Red zone without dry-run",
+      type: "security-change",
+      description: "Ordering mistake must not brick the proposal",
+      proposedBy: "user",
+      status: "approved",
+      votes: [],
+      agentOutputs: [],
+      riskZone: "red",
+      createdAt: "2031-01-01T00:00:00.000Z",
+    });
+    const repository = new InMemoryDaoStateRepository(state);
+    const useCase = new ControlProposalUseCase({
+      repository,
+      clock: { now: () => "2031-01-01T00:02:00.000Z" },
+    });
+
+    const result = await useCase.execute({ proposalId: 3, failOnGateFailure: true });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toContain("dao_dry_run proposalId=3");
+    // The proposal stays approved: the operator completes the dry-run and re-checks.
+    expect(repository.get().proposals[0]?.status).toBe("approved");
+  });
+
+  it("rejects a failed proposal as an auditable closure (issue #141)", async () => {
+    const state = createInitialState("/project/.dao");
+    state.initialized = true;
+    state.proposals.push({
+      id: 4,
+      title: "Gate-failed zombie",
+      type: "technical-change",
+      description: "Closure must be annotatable",
+      proposedBy: "user",
+      status: "failed",
+      votes: [],
+      agentOutputs: [],
+      createdAt: "2031-01-01T00:00:00.000Z",
+    });
+    const repository = new InMemoryDaoStateRepository(state);
+
+    const result = await new RejectProposalUseCase({
+      repository,
+      clock: { now: () => "2031-01-01T00:02:00.000Z" },
+    }).execute({ proposalId: 4, actor: "cli-user", reason: "gates failed on mandatory dry-run; superseded by #5" });
+
+    expect(result).toMatchObject({ ok: true, status: "rejected", via: "REJECT" });
+    expect(repository.get().proposals[0]?.status).toBe("rejected");
+    const audit = repository.get().auditLog.at(-1);
+    expect(audit?.details).toContain("superseded by #5");
+  });
+
   it("executes a controlled proposal without persistence or time hidden in delivery code", async () => {
     const state = createInitialState("/project/.dao");
     state.initialized = true;

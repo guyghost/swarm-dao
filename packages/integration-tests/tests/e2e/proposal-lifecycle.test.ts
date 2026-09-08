@@ -87,8 +87,10 @@ describe("E2E: proposal lifecycle through the host-tool surface", () => {
     expect(workspace.repository.get().proposals[0]?.riskZone).toBe("red");
 
     const blocked = await handleDaoControl(ctx, 1);
-    expect(blocked).toContain("GATES FAILED");
-    expect(blocked).toContain("Dry-run required");
+    // Issue #141: the red-zone ordering mistake is refused BEFORE any state
+    // transition — no gates-failed zombie, the proposal stays approved.
+    expect(blocked).toContain("dao_dry_run proposalId=1");
+    expect(blocked).toContain("No state change was made");
     expect(workspace.repository.get().proposals[0]?.status).toBe("approved");
 
     await handleDaoDryRun(1, workspace.repository);

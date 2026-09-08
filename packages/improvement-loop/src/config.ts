@@ -97,6 +97,36 @@ export async function loadProjectImprovementConfig(workDir: string): Promise<Pro
   return { path, raw: { ...parsed, anchorCommands } };
 }
 
+/** Optional metric contract (issue #142): binds WHICH quantity a scope's
+ * sensor/counter-sensor workers sample, so paired samples stay comparable
+ * across workers and cycles instead of each worker inventing its own
+ * "obvious" metric for the scope. */
+export interface ImprovementMetricContract {
+  /** Stable metric identifier samples must refer to. */
+  readonly name: string;
+  /** Verbatim definition embedded into the sampling worker prompts. */
+  readonly prompt: string;
+  /** Optional pointer to the metric's definition document. */
+  readonly evidence?: string;
+}
+
+/** Load the optional `metric` section; null when absent. Both `name` and
+ * `prompt` are required together — a half-declared contract would silently
+ * reintroduce the incomparable-samples problem it exists to prevent. */
+export const loadMetricContract = async (workDir: string): Promise<ImprovementMetricContract | null> => {
+  const config = await loadProjectImprovementConfig(workDir);
+  const metric = configSection(config, "metric");
+  const name = typeof metric.name === "string" && metric.name.trim().length > 0 ? metric.name.trim() : "";
+  const prompt = typeof metric.prompt === "string" && metric.prompt.trim().length > 0 ? metric.prompt.trim() : "";
+  if (!name && !prompt) return null;
+  if (!name || !prompt) {
+    throw new Error(`${PROJECT_CONFIG_PATH}: 'metric' requires both 'name' and 'prompt' when present`);
+  }
+  const evidence =
+    typeof metric.evidence === "string" && metric.evidence.trim().length > 0 ? metric.evidence.trim() : undefined;
+  return { name, prompt, evidence };
+};
+
 const configSection = (config: ProjectImprovementConfig | null, key: string): Record<string, unknown> => {
   const value = config?.raw[key];
   return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};

@@ -46,7 +46,12 @@ import { createImprovementRunner, type ImprovementRunner } from "./runner.js";
 // Re-exported for CLI hosts: init validates the cooldown floor.
 export { ORCHESTRATOR_MIN_COOLDOWN_MS };
 
-import { AUTO_RECORDED_ANCHORS, loadProjectImprovementConfig } from "./config.js";
+import {
+  AUTO_RECORDED_ANCHORS,
+  type ImprovementMetricContract,
+  loadMetricContract,
+  loadProjectImprovementConfig,
+} from "./config.js";
 import { extractLastJsonObject, runHerdrWorker, type WorkerHarvest } from "./workers.js";
 
 const execAsync = promisify(execCallback);
@@ -67,21 +72,36 @@ const PHASE_WORKERS: Readonly<Record<WorkerPhase, readonly string[]>> = {
 // Worker prompts are executor configuration, not model state (see
 // models/improvement-orchestrator.review.md); the machine binds only the
 // worker identities, the output contract, and the retry bound.
-const WORKER_PROMPTS: Readonly<Record<string, (scope: string) => string>> = {
+// Worker prompts are executor configuration, not model state (see
+// models/improvement-orchestrator.review.md); the machine binds only the
+// worker identities, the output contract, and the retry bound. When the
+// project declares a metric contract (.dao/improvement.json `metric`), the
+// sampling prompts embed it so paired samples measure the SAME quantity
+// across workers and cycles (issue #142) — without it, workers guess.
+const metricClause = (metric: ImprovementMetricContract | null): string =>
+  metric
+    ? `The scope's metric contract binds what you sample: ${metric.name} — ${metric.prompt}${
+        metric.evidence ? ` (definition: ${metric.evidence})` : ""
+      }. `
+    : "";
+
+const WORKER_PROMPTS: Readonly<Record<string, (scope: string, metric: ImprovementMetricContract | null) => string>> = {
   // Sample values are vocabulary-tolerant by model contract: the frozen
   // negative-outcome set {declined, fell} (models/improvement-loop.md,
   // "Deterministic arbitration policy") owns the counter-veto, so prompt
   // phrasing can drift without disarming it. Prompts keep the canonical
   // words so journal samples stay uniformly worded.
-  sensor: (scope) =>
+  sensor: (scope, metric) =>
     `You are the sensor worker of a Swarm DAO improvement series for scope '${scope}'. ` +
+    metricClause(metric) +
     `Observe the optimizing metric for this scope in the repository around you, then answer with ONLY a JSON object: ` +
     `{"sample": {"value": "improved|held|declined", "evidence": "<concise observation>"}}. No other text.`,
-  "counter-sensor": (scope) =>
+  "counter-sensor": (scope, metric) =>
     `You are the counter-sensor worker of a Swarm DAO improvement series for scope '${scope}'. ` +
+    metricClause(metric) +
     `Observe the counter-metric (the thing that must not regress while the optimizing metric moves), ` +
     `then answer with ONLY a JSON object: {"sample": {"value": "improved|held|declined", "evidence": "<concise observation>"}}. No other text.`,
-  "drift-auditor": (scope) =>
+  "drift-auditor": (scope, _metric) =>
     `You are the drift-auditor worker of a Swarm DAO improvement series for scope '${scope}'. ` +
     `Compare the current implementation behavior against the approved reference for this scope, ` +
     `then answer with ONLY a JSON object: {"driftClass": "none|partial|detached", "evidence": "<concise observation>"}. No other text.`,
@@ -249,7 +269,9 @@ const defaultRunCommand =
 const defaultRunWorker =
   (deps: OrchestratorOnceDeps, scope: string) =>
   async (_phase: WorkerPhase, worker: string): Promise<WorkerHarvest> => {
-    const prompt = WORKER_PROMPTS[worker]?.(scope);
+    const metric = await loadMetricContract(resolve(deps.workDir ?? process.cwd()));
+    const prompt = WORKER_PROMPTS[worker]?.(scope, metric);
+    if (!prompt) return { ok: false, error: `no prompt configured for worker '${worker}'` };
     if (!prompt) return { ok: false, error: `no prompt configured for worker '${worker}'` };
     return runHerdrWorker(
       { workDir: resolve(deps.workDir ?? process.cwd()), ...(deps.worker ?? {}) },

@@ -49,14 +49,15 @@ function makeControl(passed: boolean, blockers = 0): ControlCheckResult {
 // ── Tests ────────────────────────────────────────────────────
 
 describe("proposal state machine — invariants", () => {
-  it("final statuses are exactly executed, failed, rejected", () => {
-    expect(PROPOSAL_FINAL_STATUSES.size).toBe(3);
-    expect([...PROPOSAL_FINAL_STATUSES].sort()).toEqual(["executed", "failed", "rejected"]);
+  it("final statuses are exactly executed and rejected (failed stays annotatable, issue #141)", () => {
+    expect(PROPOSAL_FINAL_STATUSES.size).toBe(2);
+    expect([...PROPOSAL_FINAL_STATUSES].sort()).toEqual(["executed", "rejected"]);
   });
 
-  it("isProposalFinal identifies terminal statuses", () => {
+  it("isProposalFinal identifies terminal statuses (failed is annotatable, issue #141)", () => {
     expect(isProposalFinal("executed")).toBe(true);
-    expect(isProposalFinal("failed")).toBe(true);
+    expect(isProposalFinal("failed")).toBe(false);
+    expect(isProposalFinal("rejected")).toBe(true);
     expect(isProposalFinal("rejected")).toBe(true);
     expect(isProposalFinal("open")).toBe(false);
     expect(isProposalFinal("deliberating")).toBe(false);
@@ -128,6 +129,14 @@ describe("proposal state machine — nominal transitions", () => {
     dispatchProposalEvent(proposal, { type: "APPROVE", tally: makeTally(true) });
     expect(dispatchProposalEvent(proposal, { type: "CONTROL_FAIL" }).ok).toBe(true);
     expect(proposal.status).toBe("failed");
+  });
+
+  it("allows REJECT from failed as an auditable closure (issue #141)", () => {
+    dispatchProposalEvent(proposal, { type: "DELIBERATE" });
+    dispatchProposalEvent(proposal, { type: "APPROVE", tally: makeTally(true) });
+    dispatchProposalEvent(proposal, { type: "CONTROL_FAIL" });
+    expect(dispatchProposalEvent(proposal, { type: "REJECT" }).ok).toBe(true);
+    expect(proposal.status).toBe("rejected");
   });
 
   it("fails on execution failure from controlled", () => {
@@ -218,7 +227,7 @@ describe("proposal state machine — global escape hatches", () => {
 
 describe("proposal state machine — terminal states are immutable", () => {
   it("ignores every event once terminal", () => {
-    for (const terminal of ["executed", "failed", "rejected"] as const) {
+    for (const terminal of ["executed", "rejected"] as const) {
       const proposal = makeProposal(terminal);
       const events: Parameters<typeof dispatchProposalEvent>[1][] = [
         { type: "DELIBERATE" },
@@ -236,5 +245,27 @@ describe("proposal state machine — terminal states are immutable", () => {
         expect(proposal.status).toBe(terminal);
       }
     }
+  });
+
+  it("failed accepts only its closure REJECT — every other event is refused (issue #141)", () => {
+    const events: Parameters<typeof dispatchProposalEvent>[1][] = [
+      { type: "DELIBERATE" },
+      { type: "APPROVE", tally: makeTally(true) },
+      { type: "CONTROL_PASS", result: makeControl(true) },
+      { type: "CONTROL_FAIL" },
+      { type: "EXECUTE_SUCCESS" },
+      { type: "FAIL" },
+      { type: "DISCARD" },
+      { type: "ERROR", message: "late" },
+    ];
+    for (const event of events) {
+      const proposal = makeProposal("failed");
+      expect(dispatchProposalEvent(proposal, event).ok).toBe(false);
+      expect(proposal.status).toBe("failed");
+    }
+    // The one permitted transition: closure via REJECT.
+    const proposal = makeProposal("failed");
+    expect(dispatchProposalEvent(proposal, { type: "REJECT" }).ok).toBe(true);
+    expect(proposal.status).toBe("rejected");
   });
 });
