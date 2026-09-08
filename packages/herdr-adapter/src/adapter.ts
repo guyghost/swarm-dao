@@ -9,6 +9,11 @@
 //
 // Lifecycle per agent (packages/herdr-adapter):
 //   herdr workspace create --cwd <repo> --label <name> --no-focus   (isolated pane)
+//     — or, for a git-worktree cwd under a detectable parent session:
+//       herdr worktree open --workspace <parent> --path <checkout> …
+//       (the child nests under the parent in the Spaces sidebar, so the
+//        spawned agent's owner is visible at a glance); same-checkout
+//        children get a `parent` workspace token instead
 //   herdr agent start <name> --kind <kind> --pane <id> --timeout    (blocks until ready)
 //   herdr agent prompt <name> '<prompt>' --wait --timeout           (settles on idle/done/blocked)
 //   herdr agent read <name> --source recent-unwrapped --lines N     (ANSI-stripped output)
@@ -176,6 +181,10 @@ export interface HerdrAdapterOptions {
   stalledPollIntervalMs?: number;
   /** Keep the herdr workspaces alive after harvest (default false). */
   keepPanes?: boolean;
+  /** Parent herdr workspace id for child-session linkage (default:
+   * HERDR_WORKSPACE_ID when running inside a herdr pane). Worktree children
+   * open nested under it; same-checkout children get a parent token. */
+  parentWorkspaceId?: string;
   /** Injectable command runner (tests). */
   runner?: HerdrRunner;
   /** Agent name / workspace label prefix (default "swarm-dao"). */
@@ -190,7 +199,8 @@ interface HerdrJson {
   id?: string;
   result?: {
     root_pane?: { pane_id?: string; workspace_id?: string };
-    workspace?: { workspace_id?: string };
+    workspace?: { workspace_id?: string; label?: string };
+    label?: string;
     agent?: { agent_status?: string; status?: string; state?: string };
   };
   error?: { code?: string; message?: string };
@@ -297,6 +307,121 @@ export function herdrErrorCode(stderr: string, stdout: string): string | null {
   return typeof code === "string" ? code : null;
 }
 
+/** Parent herdr workspace for child-session linkage: herdr injects
+ * HERDR_ENV=1 and HERDR_WORKSPACE_ID into panes it manages, so a process
+ * spawned from a herdr pane (this CLI, an orchestrator) inherits the parent
+ * context its children can be linked to. Returns undefined outside herdr. */
+export function herdrParentWorkspaceId(env: Record<string, string | undefined> = process.env): string | undefined {
+  return env.HERDR_ENV === "1" && env.HERDR_WORKSPACE_ID ? env.HERDR_WORKSPACE_ID : undefined;
+}
+
+/** A registered git worktree checkout carries a .git FILE pointing at the
+ * primary repo's worktree metadata; a primary checkout has a .git directory
+ * (or none). */
+async function isGitWorktreeCheckout(workDir: string): Promise<boolean> {
+  try {
+    return (await fs.stat(path.join(workDir, ".git"))).isFile();
+  } catch {
+    return false;
+  }
+}
+
+export interface ChildWorkspaceRequest {
+  /** Directory the child agent works in (repo checkout or git worktree). */
+  readonly workDir: string;
+  /** Workspace label (the sanitized child agent name). */
+  readonly label: string;
+  /** Parent herdr workspace id (see herdrParentWorkspaceId). When set, the
+   * child is linked to the parent session; when absent nothing changes. */
+  readonly parentWorkspaceId?: string;
+}
+
+export type ChildWorkspaceResult = { ok: true; paneId: string; workspaceId: string } | { ok: false; error: string };
+
+/**
+ * Create the herdr workspace a child agent runs in, linked to the parent
+ * session when one is given:
+ *  - git-worktree checkout + parent → `worktree open` nests the child under
+ *    the parent workspace in the Spaces sidebar (herdr's parent/children
+ *    view), so a spawned agent's owner is visible at a glance;
+ *  - same-checkout child + parent → plain workspace stamped with a `parent`
+ *    provenance token (renderable as $parent in Space sidebar rows);
+ *  - no parent → exactly the plain workspace create.
+ * Linking is presentation-only and best-effort: every linking failure falls
+ * back to the plain workspace, and only a create failure fails the child.
+ */
+export async function createChildWorkspace(
+  runner: HerdrRunner,
+  request: ChildWorkspaceRequest,
+): Promise<ChildWorkspaceResult> {
+  if (request.parentWorkspaceId && (await isGitWorktreeCheckout(request.workDir))) {
+    const opened = await runner.exec([
+      "herdr",
+      "worktree",
+      "open",
+      "--workspace",
+      request.parentWorkspaceId,
+      "--path",
+      request.workDir,
+      "--label",
+      request.label,
+      "--no-focus",
+    ]);
+    const openedPane = parseHerdrJson(opened.stdout)?.result?.root_pane?.pane_id ?? null;
+    const openedWorkspace = parseHerdrJson(opened.stdout)?.result?.workspace?.workspace_id ?? null;
+    if (opened.exitCode === 0 && openedPane && openedWorkspace) {
+      return { ok: true, paneId: openedPane, workspaceId: openedWorkspace };
+    }
+    // Linking is presentation-only — fall back to the plain workspace below.
+  }
+
+  const created = await runner.exec([
+    "herdr",
+    "workspace",
+    "create",
+    "--cwd",
+    request.workDir,
+    "--label",
+    request.label,
+    "--no-focus",
+  ]);
+  if (created.exitCode !== 0) {
+    return { ok: false, error: `herdr workspace create failed: ${herdrErrorDetail(created.stderr, created.stdout)}` };
+  }
+  const paneId = parseHerdrJson(created.stdout)?.result?.root_pane?.pane_id ?? null;
+  const workspaceId = parseHerdrJson(created.stdout)?.result?.workspace?.workspace_id ?? null;
+  if (!paneId || !workspaceId) {
+    return {
+      ok: false,
+      error: `herdr workspace create returned no pane/workspace id: ${created.stdout.slice(0, 200)}`,
+    };
+  }
+
+  if (request.parentWorkspaceId) {
+    // Worktree children are already nested; same-checkout children only get
+    // the provenance token. Human-readable parent label, id as fallback —
+    // and never a run failure over display metadata.
+    const parent = parseHerdrJson(
+      (await runner.exec(["herdr", "workspace", "get", request.parentWorkspaceId]).catch(() => ({ stdout: "" })))
+        .stdout,
+    )?.result;
+    const parentLabel = parent?.workspace?.label ?? parent?.label ?? request.parentWorkspaceId;
+    await runner
+      .exec([
+        "herdr",
+        "workspace",
+        "report-metadata",
+        workspaceId,
+        "--source",
+        "swarm-dao",
+        "--token",
+        `parent=${parentLabel}`,
+      ])
+      .catch(() => undefined);
+  }
+  return { ok: true, paneId, workspaceId };
+}
+
 export interface AgentStartRequest {
   /** Unique herdr agent name ([a-z][a-z0-9_-]{0,31}). */
   readonly agentName: string;
@@ -362,6 +487,7 @@ export function createHerdrHostAdapter(options: HerdrAdapterOptions): HostAdapte
   const readLines = options.readLines ?? DEFAULT_READ_LINES;
   const prefix = sanitizeHerdrName(options.prefix ?? "swarm-dao");
   const keepPanes = options.keepPanes === true;
+  const parentWorkspaceId = options.parentWorkspaceId ?? herdrParentWorkspaceId();
   const agentArgs = options.agentArgs ?? [];
 
   /** Resolve the deepest EXISTING ancestor's realpath, then rejoin the rest —
@@ -428,29 +554,21 @@ export function createHerdrHostAdapter(options: HerdrAdapterOptions): HostAdapte
     let workspaceId: string | null = null;
 
     try {
-      // 1. Isolated workspace with one root pane (never touches the user's layout).
-      const created = await runner.exec([
-        "herdr",
-        "workspace",
-        "create",
-        "--cwd",
-        options.workDir,
-        "--label",
-        name,
-        "--no-focus",
-      ]);
-      if (created.exitCode !== 0) {
+      // 1. Isolated workspace with one root pane (never touches the user's
+      // layout), linked to the parent herdr session when one is detectable
+      // (worktree children nest under it in the Spaces sidebar).
+      const created = await createChildWorkspace(runner, {
+        workDir: options.workDir,
+        label: name,
+        parentWorkspaceId,
+      });
+      if (!created.ok) {
         return finish({
-          error: `herdr workspace create failed: ${herdrErrorDetail(created.stderr, created.stdout)} (is the herdr server running? start it with \`herdr\`)`,
+          error: `${created.error} (is the herdr server running? start it with \`herdr\`)`,
         });
       }
-      const paneId = parseHerdrJson(created.stdout)?.result?.root_pane?.pane_id ?? null;
-      workspaceId = parseHerdrJson(created.stdout)?.result?.workspace?.workspace_id ?? null;
-      if (!paneId || !workspaceId) {
-        return finish({
-          error: `herdr workspace create returned no pane/workspace id: ${created.stdout.slice(0, 200)}`,
-        });
-      }
+      const paneId = created.paneId;
+      workspaceId = created.workspaceId;
 
       // 2. Start the agent (blocks until herdr detects it ready for input;
       // same-pane retries while the fresh pane is still busy).

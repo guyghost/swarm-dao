@@ -7,7 +7,20 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import type { DAOAgent, Proposal } from "@guyghost/swarm-dao-core";
 import { createInitialState } from "@guyghost/swarm-dao-core";
-import { createHerdrHostAdapter, herdrAgentName, sanitizeHerdrName, stripEchoedVoteTemplates } from "../src/adapter.js";
+import {
+  createChildWorkspace,
+  createHerdrHostAdapter,
+  herdrAgentName,
+  herdrParentWorkspaceId,
+  sanitizeHerdrName,
+  stripEchoedVoteTemplates,
+} from "../src/adapter.js";
+
+// Hermetic unit tests: child-session linkage defaults come from the host
+// environment (HERDR_WORKSPACE_ID when this process runs inside a herdr
+// pane) — pin it off; linkage tests pass explicit parent ids.
+process.env.HERDR_ENV = "0";
+delete process.env.HERDR_WORKSPACE_ID;
 
 type Call = { argv: string[]; options?: { cwd?: string } };
 
@@ -33,6 +46,20 @@ const AGENT_SETTLED = (status: string) =>
 
 const AGENT_INFO = (status: string) =>
   JSON.stringify({ id: "cli:agent:get", result: { agent: { name: "x", agent_status: status }, type: "agent_info" } });
+
+const WORKTREE_OPENED = JSON.stringify({
+  id: "cli:worktree:open",
+  result: {
+    root_pane: { pane_id: "w3:p1", workspace_id: "w3" },
+    workspace: { workspace_id: "w3", label: "child" },
+    type: "worktree_opened",
+  },
+});
+
+const WORKSPACE_INFO = JSON.stringify({
+  id: "cli:workspace:get",
+  result: { type: "workspace_info", workspace: { workspace_id: "wP", label: "parent-label" } },
+});
 
 const PROMPT_STALLED = {
   stderr: JSON.stringify({ error: { code: "agent_prompt_stalled", message: "no state change within 5000 ms" } }),
@@ -510,5 +537,157 @@ describe("herdr host adapter", () => {
       await fs.rm(path.join(workDir, "escape"), { force: true });
       await fs.rm(outside, { recursive: true, force: true });
     }
+  });
+
+  test("spawnAgent opens worktree children as workspaces linked to the parent session", async () => {
+    // workDir carries a .git FILE → registered git worktree checkout.
+    await fs.writeFile(path.join(workDir, ".git"), "gitdir: /tmp/elsewhere/.git/worktrees/probe\n");
+    const fake = fakeHerdr([
+      { stdout: WORKTREE_OPENED, exitCode: 0 }, // worktree open
+      { stdout: "{}", exitCode: 0 }, // agent start
+      { stdout: AGENT_SETTLED("idle"), exitCode: 0 }, // prompt --wait
+      { exitCode: 0 }, // workspace close
+    ]);
+    const adapter = createHerdrHostAdapter({ workDir, runner: fake.runner, kind: "pi", parentWorkspaceId: "wP" });
+    await adapter.spawnAgent({ agent: agent("critic"), proposal: proposal(1), systemPrompt: "PROMPT-critic" });
+    const commands = fake.calls.map((call) => line(call));
+    expect(commands[0]).toContain("herdr worktree open");
+    expect(commands[0]).toContain("--workspace wP");
+    expect(commands[0]).toContain(`--path ${workDir}`);
+    expect(commands[0]).toContain("--no-focus");
+    expect(commands.filter((command) => command.includes("workspace create"))).toEqual([]);
+    // The agent lifecycle continues inside the opened (linked) workspace.
+    expect(commands[1]).toContain("--pane w3:p1");
+    expect(commands[4]).toContain("herdr workspace close w3");
+    await fs.rm(path.join(workDir, ".git"), { force: true });
+  });
+});
+
+describe("child workspace linkage (parent herdr session)", () => {
+  let plainDir: string;
+  let worktreeDir: string;
+
+  beforeAll(async () => {
+    plainDir = await fs.mkdtemp(path.join(tmpdir(), "swarm-dao-herdr-plain-"));
+    worktreeDir = await fs.mkdtemp(path.join(tmpdir(), "swarm-dao-herdr-wtree-"));
+    // A registered worktree checkout carries a .git FILE, not a directory.
+    await fs.writeFile(path.join(worktreeDir, ".git"), "gitdir: /tmp/elsewhere/.git/worktrees/probe\n");
+  });
+
+  afterAll(async () => {
+    await fs.rm(plainDir, { recursive: true, force: true });
+    await fs.rm(worktreeDir, { recursive: true, force: true });
+  });
+
+  const recorder = () => {
+    const calls: Call[] = [];
+    return {
+      calls,
+      runner: {
+        exec: async (argv: readonly string[]) => {
+          calls.push({ argv: [...argv] });
+          if (argv[2] === "open") return { stdout: WORKTREE_OPENED, stderr: "", exitCode: 0 };
+          if (argv[2] === "create") return { stdout: WORKSPACE_CREATED, stderr: "", exitCode: 0 };
+          if (argv[2] === "get") return { stdout: WORKSPACE_INFO, stderr: "", exitCode: 0 };
+          return { stdout: "{}", stderr: "", exitCode: 0 };
+        },
+      },
+    };
+  };
+
+  test("env detection: HERDR_ENV=1 + HERDR_WORKSPACE_ID, otherwise none", () => {
+    expect(herdrParentWorkspaceId({ HERDR_ENV: "1", HERDR_WORKSPACE_ID: "wW" } as never)).toBe("wW");
+    expect(herdrParentWorkspaceId({ HERDR_ENV: "0", HERDR_WORKSPACE_ID: "wW" } as never)).toBeUndefined();
+    expect(herdrParentWorkspaceId({} as never)).toBeUndefined();
+  });
+
+  test("worktree checkout + parent → worktree open nested under the parent", async () => {
+    const fake = recorder();
+    const result = await createChildWorkspace(fake.runner, {
+      workDir: worktreeDir,
+      label: "child",
+      parentWorkspaceId: "wP",
+    });
+    expect(result).toEqual({ ok: true, paneId: "w3:p1", workspaceId: "w3" });
+    expect(fake.calls).toHaveLength(1);
+    const argv = fake.calls[0].argv;
+    expect(argv.slice(0, 3)).toEqual(["herdr", "worktree", "open"]);
+    expect(argv).toContain("--workspace");
+    expect(argv[argv.indexOf("--workspace") + 1]).toBe("wP");
+    expect(argv[argv.indexOf("--path") + 1]).toBe(worktreeDir);
+    expect(argv[argv.indexOf("--label") + 1]).toBe("child");
+    expect(argv).toContain("--no-focus");
+  });
+
+  test("worktree open failure falls back to a plain workspace create", async () => {
+    const calls: Call[] = [];
+    const runner = {
+      exec: async (argv: readonly string[]) => {
+        calls.push({ argv: [...argv] });
+        if (argv[2] === "open") return { stdout: "", stderr: "boom", exitCode: 1 };
+        if (argv[2] === "create") return { stdout: WORKSPACE_CREATED, stderr: "", exitCode: 0 };
+        return { stdout: "{}", stderr: "", exitCode: 0 };
+      },
+    };
+    const result = await createChildWorkspace(runner, {
+      workDir: worktreeDir,
+      label: "child",
+      parentWorkspaceId: "wP",
+    });
+    expect(result).toEqual({ ok: true, paneId: "w9:p1", workspaceId: "w9" });
+    // Nesting failed → the provenance token preserves the visible link.
+    expect(calls.map((call) => call.argv[2])).toEqual(["open", "create", "get", "report-metadata"]);
+  });
+
+  test("same-checkout child + parent → plain create, then a parent provenance token", async () => {
+    const fake = recorder();
+    const result = await createChildWorkspace(fake.runner, {
+      workDir: plainDir,
+      label: "child",
+      parentWorkspaceId: "wP",
+    });
+    expect(result).toEqual({ ok: true, paneId: "w9:p1", workspaceId: "w9" });
+    expect(fake.calls.map((call) => call.argv[2])).toEqual(["create", "get", "report-metadata"]);
+    const metadata = fake.calls[2].argv;
+    expect(metadata.slice(0, 3)).toEqual(["herdr", "workspace", "report-metadata"]);
+    expect(metadata[3]).toBe("w9");
+    expect(metadata).toContain("--source");
+    expect(metadata[metadata.indexOf("--source") + 1]).toBe("swarm-dao");
+    // Human-readable parent label (from workspace get), not the opaque id.
+    expect(metadata[metadata.indexOf("--token") + 1]).toBe("parent=parent-label");
+  });
+
+  test("token report failure never fails the creation", async () => {
+    const runner = {
+      exec: async (argv: readonly string[]) => {
+        if (argv[2] === "create") return { stdout: WORKSPACE_CREATED, stderr: "", exitCode: 0 };
+        return { stdout: "", stderr: "boom", exitCode: 1 };
+      },
+    };
+    const result = await createChildWorkspace(runner, {
+      workDir: plainDir,
+      label: "child",
+      parentWorkspaceId: "wP",
+    });
+    expect(result).toEqual({ ok: true, paneId: "w9:p1", workspaceId: "w9" });
+  });
+
+  test("no parent → plain create only", async () => {
+    const fake = recorder();
+    const result = await createChildWorkspace(fake.runner, { workDir: plainDir, label: "child" });
+    expect(result).toEqual({ ok: true, paneId: "w9:p1", workspaceId: "w9" });
+    expect(fake.calls.map((call) => call.argv[2])).toEqual(["create"]);
+  });
+
+  test("create failure carries the herdr detail", async () => {
+    const runner = {
+      exec: async () => ({
+        stdout: "",
+        stderr: JSON.stringify({ error: { code: "x", message: "down" } }),
+        exitCode: 1,
+      }),
+    };
+    const result = await createChildWorkspace(runner, { workDir: plainDir, label: "child" });
+    expect(result).toEqual({ ok: false, error: "herdr workspace create failed: x: down" });
   });
 });

@@ -3,6 +3,8 @@
 // as a real coding agent inside a herdr workspace, mirroring the battle-tested
 // lifecycle of packages/herdr-adapter:
 //   herdr workspace create --cwd <repo> --label <name> --no-focus
+//     (or `herdr worktree open --workspace <parent>` for series-worktree
+//      workers, linking the child to the parent session's Spaces entry)
 //   herdr agent start <name> --kind <kind> --pane <id> --timeout <ms> -- <args>
 //   herdr agent prompt <name> '<prompt>' --wait --timeout <ms>
 //   herdr agent read <name> --source recent-unwrapped --lines N
@@ -21,9 +23,14 @@
 // never change series or cycle state.
 
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
+import { homedir } from "node:os";
+import path from "node:path";
 import { ORCHESTRATOR_MAX_WORKER_RETRIES } from "@guyghost/swarm-dao-core/models/improvement";
 import type { HerdrRunner } from "@guyghost/swarm-dao-herdr-adapter";
 import {
+  createChildWorkspace,
+  herdrParentWorkspaceId,
   promptAgentUntilSettled,
   sanitizeHerdrName,
   startAgentUntilReady,
@@ -71,9 +78,18 @@ export interface HerdrWorkerOptions {
   /** herdr agent kind (default "pi"). */
   kind?: string;
   /** Extra args passed to the agent executable. Default: ["-ne"] for the pi
-   * kind (signal-only workers must not carry the dao_* extension tools);
-   * other kinds default to no extra args. */
+   * kind (signal-only workers must not carry the dao_* extension tools), plus
+   * an explicit -e to herdr's state reporter when it is installed so herdr
+   * keeps a lifecycle state authority on the worker pane; other kinds default
+   * to no extra args. */
   agentArgs?: readonly string[];
+  /** Path checked (for existence) before appending `-e` to the pi kind
+   * default args. Default: herdr's pi integration install location. */
+  piStateReporterPath?: string;
+  /** Parent herdr workspace id for child-session linkage (default:
+   * HERDR_WORKSPACE_ID when running inside a herdr pane). Series-worktree
+   * workers open nested under it; same-checkout workers get a parent token. */
+  parentWorkspaceId?: string;
   /** Per-attempt prompt timeout in ms (default 5 min; herdr max 300000). */
   timeoutMs?: number;
   /** agent start readiness timeout in ms (default 120 s; herdr max 300000). */
@@ -104,6 +120,24 @@ export const SAFE_HERDR_KIND = /^[a-z][a-z0-9_-]{0,31}$/;
  * sidesteps the local .pi extension conflict. Other kinds use their own
  * defaults unless the caller passes explicit agentArgs. */
 export const DEFAULT_PI_AGENT_ARGS: readonly string[] = ["-ne"];
+
+/** Default install path of herdr's pi state integration (reported by
+ * `herdr integration status`); herdr's lifecycle state authority for pi. */
+export const PI_STATE_REPORTER_PATH = path.join(homedir(), ".pi", "agent", "extensions", "herdr-agent-state.ts");
+
+/**
+ * pi worker args with herdr's state reporter loaded explicitly when it is
+ * installed. -ne disables extension discovery, so without this the reporter
+ * never loads and herdr falls back to screen-manifest detection — which
+ * matches no rule on a fast worker pane, herdr observes no state change, and
+ * every `agent prompt --wait` trips agent_prompt_stalled with a frozen
+ * state_change_seq while the worker actually completes (reproduced live).
+ * Explicit -e still works under -ne, and discovery stays off, so the dao_*
+ * extension tools are still never loaded.
+ */
+export function piWorkerAgentArgs(reporterPath: string = PI_STATE_REPORTER_PATH): readonly string[] {
+  return existsSync(reporterPath) ? [...DEFAULT_PI_AGENT_ARGS, "-e", reporterPath] : DEFAULT_PI_AGENT_ARGS;
+}
 
 /**
  * Escape raw control characters that are illegal inside JSON string literals.
@@ -225,7 +259,7 @@ export async function runHerdrWorker(
 ): Promise<WorkerHarvest> {
   const runner = options.runner ?? defaultRunner();
   const kind = options.kind ?? "pi";
-  const agentArgs = options.agentArgs ?? (kind === "pi" ? DEFAULT_PI_AGENT_ARGS : []);
+  const agentArgs = options.agentArgs ?? (kind === "pi" ? piWorkerAgentArgs(options.piStateReporterPath) : []);
   // herdr's own timeout ceiling is 300000ms; readLines is capped to keep the
   // read command (and the harvested transcript) bounded.
   const timeoutMs = toBoundedInt(options.timeoutMs, 300_000, 1_000, 300_000);
@@ -234,6 +268,7 @@ export async function runHerdrWorker(
   const readinessRetryDelayMs = toBoundedInt(options.readinessRetryDelayMs, 1_000, 0, 60_000);
   const stalledGraceMs = toBoundedInt(options.stalledGraceMs, 20_000, 0, 60_000);
   const stalledPollIntervalMs = toBoundedInt(options.stalledPollIntervalMs, 2_000, 0, 30_000);
+  const parentWorkspaceId = options.parentWorkspaceId ?? herdrParentWorkspaceId();
 
   if (!SAFE_HERDR_KIND.test(kind))
     return { ok: false, error: `herdr kind '${kind}' is not a valid agent kind identifier.` };
@@ -250,26 +285,20 @@ export async function runHerdrWorker(
     const agentName = attempt === 1 ? baseName : `${baseName}-r${attempt}`.slice(0, 32);
     let workspaceId: string | null = null;
     try {
-      const created = await runner.exec([
-        "herdr",
-        "workspace",
-        "create",
-        "--cwd",
-        options.workDir,
-        "--label",
-        agentName,
-        "--no-focus",
-      ]);
-      if (created.exitCode !== 0) {
-        lastError = `herdr workspace create failed: ${herdrErrorDetail(created.stderr, created.stdout)}`;
+      // Linked to the parent herdr session when one is detectable: series
+      // worktree workers nest under it in the Spaces sidebar (linked
+      // worktree children); same-checkout workers get a parent token.
+      const created = await createChildWorkspace(runner, {
+        workDir: options.workDir,
+        label: agentName,
+        parentWorkspaceId,
+      });
+      if (!created.ok) {
+        lastError = created.error;
         continue;
       }
-      const paneId = parseHerdrJson(created.stdout)?.result?.root_pane?.pane_id ?? null;
-      workspaceId = parseHerdrJson(created.stdout)?.result?.workspace?.workspace_id ?? null;
-      if (!paneId || !workspaceId) {
-        lastError = `herdr workspace create returned no pane/workspace id: ${created.stdout.slice(0, 200)}`;
-        continue;
-      }
+      const paneId = created.paneId;
+      workspaceId = created.workspaceId;
 
       // agent_pane_busy is transient (pane not yet at its shell prompt):
       // startAgentUntilReady retries on the same pane until the readiness
