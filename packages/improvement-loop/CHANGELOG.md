@@ -1,5 +1,20 @@
 # @guyghost/swarm-dao-improvement
 
+## 0.6.3
+
+### Patch Changes
+
+- 76f8e01: Two governance/quality fixes from the dogfood series.
+
+  **#141 — a gate failure no longer creates a final zombie.** A red-zone proposal checked without the mandatory dry-run dispatched `CONTROL_FAIL` into the final `failed` state: no re-check (even after completing the dry-run), no rejection, no annotation — only a duplicate proposal could move forward. Now `dao_control` refuses red-zone proposals without a completed dry-run _before_ any transition ("run dao_dry_run proposalId=N first; no state change was made — the proposal stays approved"), and `failed` is no longer lifecycle-final: it carries exactly one closure transition, `REJECT → rejected`, so even a dead proposal gets an auditable reason. `executed`/`rejected` remain the only final statuses.
+
+  **#142 — optional metric contract.** `.dao/improvement.json` now accepts a `metric` section (`name` + `prompt`, optional `evidence`); when present, the sensor/counter-sensor prompts embed it verbatim so paired samples measure the same declared quantity across workers and cycles instead of each worker inventing its own "obvious" scope metric (which made arbitration decisions meaningless). A half-declared contract (name without prompt) fails config validation.
+
+- c447a91: Grounding preflight and series-identity guards (issues #143, #144). Anchors now refuse to run on a dirty working tree: the grounding step checks `git status --porcelain` first and aborts with the offending path list, so worker debris or operator edits surface as a clear preflight error instead of false anchor failures and burned retries (non-git work directories keep the previous behavior). On the CLI side, `improve status/once/submit` fail with the resolved evidence-root path when the series does not exist there instead of answering from a phantom fresh idle snapshot, and `improve init` refuses an existing journal unless `--force` is passed — replay is never a clean slate, so a fresh series needs a new id while `--force` explicitly acknowledges resuming the recorded state.
+- a43a2bd: Fail fast on concurrent improvement runners instead of corrupting journal.ndjson (issue #139): the series journal sequence lived only in the running process's memory, so two `improve once`/`improve submit` processes on the same series interleaved appends and produced a duplicate sequence — after which every command failed the sequence contract and the series was unreadable without manual repair. Every append now re-reads the journal tail first and aborts with a clear, recoverable `concurrent improvement runner detected` error when another writer advanced the file (nothing is written; re-running reloads the state). Also completes `improve` usage/error help with the cycle- and series-level human-gate subcommands (`retry`, `reference`, `cancel-cycle`, `retry-workers`, `restart`, `cancel`, `cycles`), which shipped in CLI 0.5.0 but were missing from the short usage string.
+- Updated dependencies [76f8e01]
+  - @guyghost/swarm-dao-core@0.16.2
+
 ## 0.6.2
 
 ### Patch Changes
