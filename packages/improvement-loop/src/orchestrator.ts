@@ -427,6 +427,7 @@ export class OrchestratorRunner {
       afterState: after.state,
       ...(event ? { event } : {}),
     };
+    await this.#assertJournalAtSequence(this.#sequence - 1);
     await appendFile(resolve(this.#seriesDirectory, "journal.ndjson"), `${JSON.stringify(entry)}\n`, "utf8");
     await this.#persistSnapshot(persisted);
     // One active series per scope (invariant 7): the runner maintains the
@@ -435,6 +436,48 @@ export class OrchestratorRunner {
       await rememberActiveSeries(this.#evidenceRoot, after.context.scope, this.#seriesId);
     }
     return { accepted, issues, snapshot: persisted };
+  }
+
+  /** Concurrency guard (issue #139): the sequence lives in this process's
+   * memory, so two runners on the same series interleave appends and corrupt
+   * journal.ndjson with a duplicate sequence — after which every command fails
+   * the sequence contract and the series is unreadable. Re-reading the tail
+   * before each append is O(n), but journals are small; a mismatch means
+   * another writer advanced the file: fail fast with a recoverable message
+   * instead of bricking the series. */
+  async #assertJournalAtSequence(expectedLast: number): Promise<void> {
+    let content: string;
+    try {
+      content = await readFile(resolve(this.#seriesDirectory, "journal.ndjson"), "utf8");
+    } catch (error) {
+      if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") {
+        if (expectedLast !== 0)
+          throw new Error(`series journal vanished while series state is at sequence ${expectedLast}`);
+        return;
+      }
+      throw error;
+    }
+    const lastLine = content
+      .split("\n")
+      .filter((line) => line.trim().length > 0)
+      .at(-1);
+    if (lastLine === undefined) {
+      if (expectedLast !== 0)
+        throw new Error(`series journal is empty while series state is at sequence ${expectedLast}`);
+      return;
+    }
+    let last: unknown;
+    try {
+      last = JSON.parse(lastLine);
+    } catch {
+      throw new Error("series journal tail is not valid JSON — refusing to append (inspect the journal manually)");
+    }
+    const lastSequence = isRecord(last) && typeof last.sequence === "number" ? last.sequence : Number.NaN;
+    if (lastSequence !== expectedLast) {
+      throw new Error(
+        `concurrent improvement runner detected: journal is at sequence ${lastSequence}, this runner holds ${expectedLast} — nothing was written; re-run the command to reload the series state`,
+      );
+    }
   }
 
   async #restoreJournal(): Promise<void> {

@@ -379,7 +379,16 @@ const CLI_USAGE_DETAILS: Record<string, string> = {
   improve: `  improve init --series-id <id> --scope <s> --reference-hash <hash> [--cooldown-ms <ms>]
         improve status --series-id <id>
         improve once --series-id <id> [--sandbox <docker|container|auto|none>] [--image <img>]
-        improve submit --series-id <id> --event <file>`,
+        improve submit --series-id <id> --event <file>
+        improve cycles --series-id <id>
+      cycle human gates (see: swarm-dao attention --source improvement-loop)
+        improve retry --cycle-id <id> | --series-id <id>          cycle 'retrying' → RETRY_AUTHORIZED
+        improve reference --cycle-id <id> --decision approve|reject   cycle 'adjusting'
+        improve cancel-cycle --cycle-id <id> | --series-id <id> --reason "<text>"
+      series human gates (see: swarm-dao attention --source improvement-series)
+        improve retry-workers --series-id <id>                    series 'workerFailed'
+        improve restart --series-id <id>                          series 'halted'
+        improve cancel --series-id <id> --reason "<text>"`,
 };
 
 /** All commands in the registry, grouped by phase, for lookup by id. */

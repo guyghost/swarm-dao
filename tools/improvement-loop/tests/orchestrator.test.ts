@@ -491,3 +491,36 @@ describe("improvement-orchestrator wiring — grounding idempotency and retry re
     }
   });
 });
+
+describe("improvement-orchestrator wiring — concurrent runners (issue #139)", () => {
+  it("fails fast instead of corrupting journal.ndjson when another runner advanced it", async () => {
+    const evidenceRoot = await mkdtemp(join(tmpdir(), "orchestrator-concurrent-"));
+    try {
+      const a = await OrchestratorRunner.create({ seriesId: "series-duel", evidenceRoot });
+      await startSeries(a); // journal sequence 1
+
+      // A second runner restores from the file and appends sequence 2 (a
+      // machine-rejected event still advances the journal).
+      const b = await OrchestratorRunner.create({ seriesId: "series-duel", evidenceRoot });
+      const bResult = await b.submit({ type: "EVENT_NO_MACHINE_MATCH", source: "tool" });
+      expect(bResult.accepted).toBe(false);
+
+      // Runner A still holds sequence 1 in memory: its next append must fail
+      // fast with a recoverable message — a duplicate sequence would brick
+      // every later command with "violates the sequence contract".
+      expect(
+        a.submit({ type: "EVENT_NO_MACHINE_MATCH", source: "tool" }),
+      ).rejects.toThrow(/concurrent improvement runner detected/);
+
+      // The journal stays contract-valid and loadable by a fresh runner.
+      const c = await OrchestratorRunner.create({ seriesId: "series-duel", evidenceRoot });
+      expect(c.snapshot().state).toBe("preparing");
+      const journal = await readFile(join(evidenceRoot, "series-duel", "journal.ndjson"), "utf8");
+      const lines = journal.split("\n").filter((line) => line.trim().length > 0);
+      expect(lines.length).toBe(2);
+      expect(JSON.parse(lines[1])).toMatchObject({ sequence: 2 });
+    } finally {
+      await rm(evidenceRoot, { recursive: true, force: true });
+    }
+  });
+});
