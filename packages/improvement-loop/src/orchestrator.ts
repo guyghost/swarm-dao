@@ -729,6 +729,11 @@ export class OrchestratorRunner {
 
     const commands = await resolveAnchorCommands(workDir);
     const runCommand = deps.runCommand ?? defaultRunCommand(workDir);
+    // Grounding preflight (issue #143): anchor outcomes only mean "did the
+    // code change behavior vs the reference" when the tree is clean. Worker
+    // debris or operator edits silently turn into failed anchors and burned
+    // retries — surface the dirt before running anything.
+    await this.#assertCleanTree(workDir);
     // Crash-resume idempotency: an anchor already recorded at the current
     // attempt is immutable (machine contract) — re-running its command and
     // re-submitting would be rejected and throw. Skip what is already
@@ -764,6 +769,24 @@ export class OrchestratorRunner {
     }
     const submitted = await this.submit({ type: "ANCHORS_SUBMITTED", source: "tool" });
     return this.#result(base, submitted, "ANCHORS_SUBMITTED", outcomes.join(", "));
+  }
+
+  /** Grounding preflight: refuse to run anchors on a dirty tree. Trees that
+   * are not git repositories cannot be verified and keep the previous
+   * behavior (test evidence roots, foreign layouts). */
+  async #assertCleanTree(workDir: string): Promise<void> {
+    const inRepo = await execAsync("git rev-parse --is-inside-work-tree", { cwd: workDir })
+      .then(() => true)
+      .catch(() => false);
+    if (!inRepo) return;
+    const { stdout } = await execAsync("git status --porcelain", { cwd: workDir });
+    const dirty = stdout.split("\n").filter((line) => line.trim().length > 0);
+    if (dirty.length === 0) return;
+    const listed = dirty.slice(0, 20).join("\n  ");
+    const more = dirty.length > 20 ? `\n  … and ${dirty.length - 20} more` : "";
+    throw new Error(
+      `grounding preflight: the working tree at ${workDir} is not clean (${dirty.length} path(s)) — anchor results would measure debris, not the proposal. Clean or commit the paths below, then re-run:\n  ${listed}${more}`,
+    );
   }
 
   async #submitEvaluate(

@@ -1171,7 +1171,8 @@ const IMPROVE_CYCLE_ROOT = ".dao/improvement-cycles";
 
 const IMPROVE_USAGE = `usage: swarm-dao improve <init|status|once|submit|cycles|retry|retry-workers|restart|cancel|reference> [options]
 
-  init   --series-id <id> --scope <s> --reference-hash <hash> [--cooldown-ms <ms>]
+  init   --series-id <id> --scope <s> --reference-hash <hash> [--cooldown-ms <ms>] [--force]
+         (init replays an existing journal; --force acknowledges it — never a clean slate)
   status --series-id <id> [--json]
   cycles --series-id <id> [--json]     cycle history for the series
   once   --series-id <id> [--exec <branch|worktree|container>]
@@ -1313,6 +1314,21 @@ async function cmdImprove(cwd: string, positional: string[], flags: Record<strin
   const evidenceRoot = path.resolve(cwd, rootFlag("evidence-root", IMPROVE_SERIES_ROOT));
   const cycleRoot = path.resolve(cwd, rootFlag("cycle-root", IMPROVE_CYCLE_ROOT));
 
+  /** Phantom-series guard (issue #144): the evidence root resolves relative
+   * to the process CWD, so running from a subdirectory can silently answer
+   * from a fresh idle snapshot and mislead the operator ("series is
+   * terminal (idle)"). Read paths must prove the series exists at the
+   * resolved root or fail with that path. */
+  const requireSeriesEvidence = async (root: string): Promise<void> => {
+    try {
+      await fs.access(path.join(root, seriesId, "snapshot.json"));
+    } catch {
+      err(
+        `no series '${seriesId}' under ${root} (no snapshot.json) — check --evidence-root, or run from the repository root`,
+      );
+    }
+  };
+
   if (sub === "init") {
     // Grounding needs gates: refuse a series whose project has no anchor config.
     await resolveAnchorCommands(cwd);
@@ -1325,6 +1341,20 @@ async function cmdImprove(cwd: string, positional: string[], flags: Record<strin
       err(`--cooldown-ms must be an integer >= ${ORCHESTRATOR_MIN_COOLDOWN_MS}\n${IMPROVE_USAGE}`);
     }
     await assertNoActiveSeriesForScope(evidenceRoot, scope, seriesId);
+    // init replays an existing journal (deterministic restore) — that is
+    // never a clean slate (issue #144): after RESTART_SERIES the operator
+    // re-running init would resurrect the pre-restart context. Refuse, and
+    // require an explicit --force to continue from the existing journal.
+    const journalPath = path.join(evidenceRoot, seriesId, "journal.ndjson");
+    const journalExists = await fs
+      .access(journalPath)
+      .then(() => true)
+      .catch(() => false);
+    if (journalExists && flags.force !== true) {
+      err(
+        `series journal already exists at ${journalPath} — init replays it and is never a clean slate. Use a new --series-id for a fresh series, or pass --force to continue from the existing journal.`,
+      );
+    }
     const runner = await OrchestratorRunner.create({ seriesId, evidenceRoot });
     const result = await runner.submit({ type: "START_SERIES", source: "human", scope, referenceHash, cooldownMs });
     info(JSON.stringify(result.snapshot, null, 2));
@@ -1335,6 +1365,7 @@ async function cmdImprove(cwd: string, positional: string[], flags: Record<strin
 
   if (sub === "status") {
     const located = await locateRoot(cwd, seriesId, SERIES_ROOT_CANDIDATES, rootFlagValue("evidence-root"));
+    await requireSeriesEvidence(located.root);
     const runner = await OrchestratorRunner.create({ seriesId, evidenceRoot: located.root });
     const snapshot = runner.snapshot();
     if (flags.json === true) {
@@ -1429,7 +1460,9 @@ async function cmdImprove(cwd: string, positional: string[], flags: Record<strin
     if (!isHumanChannelEvent(event)) {
       err("submit only forwards human events (RETRY_WORKERS, RESTART_SERIES, CANCEL_SERIES with a non-empty reason)");
     }
-    const runner = await OrchestratorRunner.create({ seriesId, evidenceRoot });
+    const runner = await requireSeriesEvidence(evidenceRoot).then(() =>
+      OrchestratorRunner.create({ seriesId, evidenceRoot }),
+    );
     const result = await runner.submit(event);
     info(JSON.stringify(result.snapshot, null, 2));
     return result.accepted ? 0 : 2;
@@ -1464,6 +1497,7 @@ async function cmdImprove(cwd: string, positional: string[], flags: Record<strin
     worker: workerOptionsFrom(flags, config),
     ...(runCommand ? { runCommand } : {}),
   };
+  await requireSeriesEvidence(evidenceRoot);
   const runner = await OrchestratorRunner.create({ seriesId, evidenceRoot });
   const result = await runner.once(deps);
   info(JSON.stringify(result, null, 2));

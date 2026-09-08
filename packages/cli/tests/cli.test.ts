@@ -72,10 +72,10 @@ describe("cli.ts — improve sandbox flags", () => {
 });
 
 describe("cli.ts — improve series roots", () => {
-  it("answers status for an unknown series (fresh idle runner; no DAO proposal state touched)", async () => {
+  it("fails status for an unknown series with the resolved root (no phantom idle answer, issue #144)", async () => {
     const tmp = await fs.mkdtemp(path.join(tmpdir(), "swarm-cli-status-"));
     const code = await main(["improve", "status", "--series-id", "nope", "--evidence-root", tmp], process.cwd());
-    expect(code).toBe(0);
+    expect(code).toBe(1);
     await fs.rm(tmp, { recursive: true, force: true });
   });
 
@@ -98,13 +98,60 @@ describe("cli.ts — improve series roots", () => {
     try {
       await exec("git init -q .", { cwd });
       await exec("git -c user.email=t@t -c user.name=t commit -q --allow-empty -m init", { cwd });
-      // Idle series: once is a gate result, but the worktree is still prepared.
+      await fs.mkdir(path.join(cwd, ".dao"), { recursive: true });
+      await fs.writeFile(
+        path.join(cwd, ".dao/improvement.json"),
+        JSON.stringify({
+          anchorCommands: {
+            "drift-audit": "echo drift",
+            "anchor-reality": "echo reality",
+            "frozen-set-intact": "echo frozen",
+            regression: "echo regression",
+          },
+        }),
+        "utf8",
+      );
+      // The series must exist before once (phantom-series guard, issue #144):
+      // init refuses an existing journal without --force, which this fresh
+      // series does not have.
+      expect(
+        await main(["improve", "init", "--series-id", "wt-1", "--scope", "s", "--reference-hash", "a".repeat(64)], cwd),
+      ).toBe(0);
       const code = await main(["improve", "once", "--series-id", "wt-1", "--exec", "worktree"], cwd);
       expect(code).toBe(0);
       const marker = await fs.readFile(path.join(cwd, ".dao/worktrees/wt-1/.git"), "utf8");
       expect(marker).toContain("gitdir:");
-      // Second run reuses the worktree instead of failing.
-      expect(await main(["improve", "once", "--series-id", "wt-1", "--exec", "worktree"], cwd)).toBe(0);
+      // No second once here: with the cycle initialized it would drive real
+      // sampling workers instead of just proving worktree reuse.
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("init refuses an existing journal unless --force (replay is not a clean slate, issue #144)", async () => {
+    const cwd = await fs.mkdtemp(path.join(tmpdir(), "swarm-improve-init-"));
+    try {
+      await fs.mkdir(path.join(cwd, ".dao"), { recursive: true });
+      await fs.writeFile(
+        path.join(cwd, ".dao/improvement.json"),
+        JSON.stringify({
+          anchorCommands: {
+            "drift-audit": "echo drift",
+            "anchor-reality": "echo reality",
+            "frozen-set-intact": "echo frozen",
+            regression: "echo regression",
+          },
+        }),
+        "utf8",
+      );
+      const base = ["improve", "init", "--series-id", "s1", "--scope", "s", "--reference-hash", "a".repeat(64)];
+      expect(await main(base, cwd)).toBe(0);
+      // Second init without --force must refuse (the journal exists).
+      expect(await main(base, cwd)).toBe(1);
+      // --force acknowledges the replay: the runner restores the already-
+      // started series and the MACHINE rejects a second START_SERIES (exit 2
+      // = rejected submission; state unchanged). Resume is once/submit.
+      expect(await main([...base, "--force"], cwd)).toBe(2);
     } finally {
       await fs.rm(cwd, { recursive: true, force: true });
     }

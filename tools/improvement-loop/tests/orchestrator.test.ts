@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
@@ -50,16 +51,42 @@ const startSeries = async (runner: OrchestratorRunner) => {
   return result.snapshot;
 };
 
+/** A grounding work directory: a throwaway tree carrying the frozen anchor
+ * model, so tests never depend on the developer's working tree state. */
+const makeWorkDir = async (): Promise<string> => {
+  const dir = await mkdtemp(join(tmpdir(), "orchestrator-work-"));
+  await mkdir(join(dir, "models"), { recursive: true });
+  await copyFile(
+    resolve(import.meta.dir, "../../../models/improvement-loop.graph.json"),
+    join(dir, "models/improvement-loop.graph.json"),
+  );
+  return dir;
+};
+
+/** git init + commit everything (mirrors a real checked-out worktree). */
+const initGitRepo = async (dir: string): Promise<void> => {
+  const run = (args: string[]) =>
+    new Promise((resolve, reject) =>
+      execFile("git", ["-c", "user.email=t@t", "-c", "user.name=t", ...args], { cwd: dir }, (e) =>
+        e ? reject(e) : resolve(undefined),
+      ),
+    );
+  await run(["init", "-q"]);
+  await run(["add", "-A"]);
+  await run(["commit", "-qm", "init"]);
+};
+
 describe("improvement-orchestrator wiring — nominal series", () => {
   it("drives a full cycle through the real improvement runner and schedules the next", async () => {
     const evidenceRoot = await mkdtemp(join(tmpdir(), "orchestrator-wiring-"));
     const cycleRoot = await mkdtemp(join(tmpdir(), "orchestrator-cycles-"));
+    const workDir = await makeWorkDir();
     try {
       const runner = await OrchestratorRunner.create({ seriesId: "series-wiring", evidenceRoot });
       await startSeries(runner);
       expect(runner.snapshot().state).toBe("preparing");
 
-      const deps = { cycleEvidenceRoot: cycleRoot, runWorker: fakeWorker(), runCommand: okCommand };
+      const deps = { cycleEvidenceRoot: cycleRoot, workDir, runWorker: fakeWorker(), runCommand: okCommand };
 
       // preparing -> sampling: the improvement cycle exists on disk with the
       // series-derived id and immutable correlation inputs.
@@ -148,6 +175,7 @@ describe("improvement-orchestrator wiring — nominal series", () => {
     } finally {
       await rm(evidenceRoot, { recursive: true, force: true });
       await rm(cycleRoot, { recursive: true, force: true });
+      await rm(workDir, { recursive: true, force: true });
     }
   });
 });
@@ -156,10 +184,11 @@ describe("improvement-orchestrator wiring — cooldown persistence", () => {
   it("persists cooldownEnteredAt so a fresh runner resumes the timer instead of restarting it", async () => {
     const evidenceRoot = await mkdtemp(join(tmpdir(), "orchestrator-cooldown-"));
     const cycleRoot = await mkdtemp(join(tmpdir(), "orchestrator-cooldown-cycles-"));
+    const workDir = await makeWorkDir();
     try {
       const runner = await OrchestratorRunner.create({ seriesId: "series-cooldown", evidenceRoot });
       await startSeries(runner);
-      const deps = { cycleEvidenceRoot: cycleRoot, runWorker: fakeWorker(), runCommand: okCommand };
+      const deps = { cycleEvidenceRoot: cycleRoot, workDir, runWorker: fakeWorker(), runCommand: okCommand };
       for (let phase = 0; phase < 8; phase++) await runner.once(deps); // preparing..observing -> cooldown
       expect(runner.snapshot().state).toBe("cooldown");
 
@@ -174,6 +203,7 @@ describe("improvement-orchestrator wiring — cooldown persistence", () => {
     } finally {
       await rm(evidenceRoot, { recursive: true, force: true });
       await rm(cycleRoot, { recursive: true, force: true });
+      await rm(workDir, { recursive: true, force: true });
     }
   });
 });
@@ -182,6 +212,7 @@ describe("improvement-orchestrator wiring — human gates", () => {
   it("routes worker failures to workerFailed and retries only through a human event", async () => {
     const evidenceRoot = await mkdtemp(join(tmpdir(), "orchestrator-fail-"));
     const cycleRoot = await mkdtemp(join(tmpdir(), "orchestrator-fail-cycles-"));
+    const workDir = await makeWorkDir();
     try {
       const runner = await OrchestratorRunner.create({ seriesId: "series-fail", evidenceRoot });
       await startSeries(runner);
@@ -208,16 +239,18 @@ describe("improvement-orchestrator wiring — human gates", () => {
     } finally {
       await rm(evidenceRoot, { recursive: true, force: true });
       await rm(cycleRoot, { recursive: true, force: true });
+      await rm(workDir, { recursive: true, force: true });
     }
   });
 
   it("routes a runner-rejected sample signal to the sampling phase with the runner's issues", async () => {
     const evidenceRoot = await mkdtemp(join(tmpdir(), "orchestrator-reject-"));
     const cycleRoot = await mkdtemp(join(tmpdir(), "orchestrator-reject-cycles-"));
+    const workDir = await makeWorkDir();
     try {
       const runner = await OrchestratorRunner.create({ seriesId: "series-reject", evidenceRoot });
       await startSeries(runner);
-      const deps = { cycleEvidenceRoot: cycleRoot, runWorker: fakeWorker() };
+      const deps = { cycleEvidenceRoot: cycleRoot, workDir, runWorker: fakeWorker() };
       await runner.once(deps);
 
       // The bad sensor answer is harvested at the sampling step; the sealing
@@ -237,12 +270,14 @@ describe("improvement-orchestrator wiring — human gates", () => {
     } finally {
       await rm(evidenceRoot, { recursive: true, force: true });
       await rm(cycleRoot, { recursive: true, force: true });
+      await rm(workDir, { recursive: true, force: true });
     }
   });
 
   it("pauses on a retrying cycle and resumes only once the human authorized the retry", async () => {
     const evidenceRoot = await mkdtemp(join(tmpdir(), "orchestrator-retry-"));
     const cycleRoot = await mkdtemp(join(tmpdir(), "orchestrator-retry-cycles-"));
+    const workDir = await makeWorkDir();
     try {
       const runner = await OrchestratorRunner.create({ seriesId: "series-retry", evidenceRoot });
       await startSeries(runner);
@@ -250,6 +285,7 @@ describe("improvement-orchestrator wiring — human gates", () => {
       // `retrying` (attempt 0 of 2), so the series must pause for the human.
       const deps = {
         cycleEvidenceRoot: cycleRoot,
+        workDir,
         runWorker: fakeWorker(),
         runCommand: async () => ({ ok: false, detail: "regression failed" }),
       };
@@ -287,6 +323,7 @@ describe("improvement-orchestrator wiring — human gates", () => {
     } finally {
       await rm(evidenceRoot, { recursive: true, force: true });
       await rm(cycleRoot, { recursive: true, force: true });
+      await rm(workDir, { recursive: true, force: true });
     }
   });
 });
@@ -295,10 +332,11 @@ describe("improvement-orchestrator wiring — journal replay", () => {
   it("restores an identical series snapshot by replaying the journal", async () => {
     const evidenceRoot = await mkdtemp(join(tmpdir(), "orchestrator-replay-"));
     const cycleRoot = await mkdtemp(join(tmpdir(), "orchestrator-replay-cycles-"));
+    const workDir = await makeWorkDir();
     try {
       const runner = await OrchestratorRunner.create({ seriesId: "series-replay", evidenceRoot });
       await startSeries(runner);
-      const deps = { cycleEvidenceRoot: cycleRoot, runWorker: fakeWorker(), runCommand: okCommand };
+      const deps = { cycleEvidenceRoot: cycleRoot, workDir, runWorker: fakeWorker(), runCommand: okCommand };
       await runner.once(deps);
       await runner.once(deps);
       await runner.once(deps);
@@ -312,6 +350,7 @@ describe("improvement-orchestrator wiring — journal replay", () => {
     } finally {
       await rm(evidenceRoot, { recursive: true, force: true });
       await rm(cycleRoot, { recursive: true, force: true });
+      await rm(workDir, { recursive: true, force: true });
     }
   });
 });
@@ -391,11 +430,12 @@ describe("improvement-orchestrator wiring — grounding idempotency and retry re
   it("skips anchors recorded at the current attempt and refreshes retained ones across a retry", async () => {
     const evidenceRoot = await mkdtemp(join(tmpdir(), "orchestrator-c7-"));
     const cycleRoot = await mkdtemp(join(tmpdir(), "orchestrator-c7-cycles-"));
+    const workDir = await makeWorkDir();
     const cycleId = "series-c7-c1";
     try {
       const runner = await OrchestratorRunner.create({ seriesId: "series-c7", evidenceRoot });
       await startSeries(runner);
-      const deps = { cycleEvidenceRoot: cycleRoot, runWorker: fakeWorker(), runCommand: okCommand };
+      const deps = { cycleEvidenceRoot: cycleRoot, workDir, runWorker: fakeWorker(), runCommand: okCommand };
 
       // Drive to grounding, then fail every command-backed anchor.
       await runner.once(deps); // preparing -> sampling
@@ -488,6 +528,7 @@ describe("improvement-orchestrator wiring — grounding idempotency and retry re
     } finally {
       await rm(evidenceRoot, { recursive: true, force: true });
       await rm(cycleRoot, { recursive: true, force: true });
+      await rm(workDir, { recursive: true, force: true });
     }
   });
 });
@@ -508,9 +549,9 @@ describe("improvement-orchestrator wiring — concurrent runners (issue #139)", 
       // Runner A still holds sequence 1 in memory: its next append must fail
       // fast with a recoverable message — a duplicate sequence would brick
       // every later command with "violates the sequence contract".
-      expect(
-        a.submit({ type: "EVENT_NO_MACHINE_MATCH", source: "tool" }),
-      ).rejects.toThrow(/concurrent improvement runner detected/);
+      expect(a.submit({ type: "EVENT_NO_MACHINE_MATCH", source: "tool" })).rejects.toThrow(
+        /concurrent improvement runner detected/,
+      );
 
       // The journal stays contract-valid and loadable by a fresh runner.
       const c = await OrchestratorRunner.create({ seriesId: "series-duel", evidenceRoot });
@@ -521,6 +562,54 @@ describe("improvement-orchestrator wiring — concurrent runners (issue #139)", 
       expect(JSON.parse(lines[1])).toMatchObject({ sequence: 2 });
     } finally {
       await rm(evidenceRoot, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("improvement-orchestrator wiring — grounding preflight (issue #143)", () => {
+  it("refuses to run anchors on a dirty tree and lists the debris", async () => {
+    const evidenceRoot = await mkdtemp(join(tmpdir(), "orchestrator-preflight-"));
+    const cycleRoot = await mkdtemp(join(tmpdir(), "orchestrator-preflight-cycles-"));
+    const workDir = await makeWorkDir();
+    try {
+      // A git repo whose tracked tree is clean but carries worker debris (untracked draft file).
+      await initGitRepo(workDir);
+      await writeFile(join(workDir, "debris.txt"), "left by a worker", "utf8");
+
+      const runner = await OrchestratorRunner.create({ seriesId: "series-preflight", evidenceRoot });
+      await startSeries(runner);
+      const deps = { cycleEvidenceRoot: cycleRoot, workDir, runWorker: fakeWorker(), runCommand: okCommand };
+      for (let index = 0; index < 5; index++) await runner.once(deps); // preparing → grounding
+      expect(runner.snapshot().state).toBe("grounding");
+
+      expect(runner.once(deps)).rejects.toThrow(/not clean .*debris\.txt/s);
+      // The cycle stays in grounding: nothing was recorded — a clean re-run converges.
+      expect(runner.snapshot().state).toBe("grounding");
+    } finally {
+      await rm(evidenceRoot, { recursive: true, force: true });
+      await rm(cycleRoot, { recursive: true, force: true });
+      await rm(workDir, { recursive: true, force: true });
+    }
+  });
+
+  it("runs anchors normally on a clean git tree", async () => {
+    const evidenceRoot = await mkdtemp(join(tmpdir(), "orchestrator-preflight-ok-"));
+    const cycleRoot = await mkdtemp(join(tmpdir(), "orchestrator-preflight-ok-cycles-"));
+    const workDir = await makeWorkDir();
+    try {
+      await initGitRepo(workDir);
+
+      const runner = await OrchestratorRunner.create({ seriesId: "series-preflight-ok", evidenceRoot });
+      await startSeries(runner);
+      const deps = { cycleEvidenceRoot: cycleRoot, workDir, runWorker: fakeWorker(), runCommand: okCommand };
+      for (let index = 0; index < 5; index++) await runner.once(deps); // preparing → grounding
+      const step = await runner.once(deps);
+      expect(step.event).toBe("ANCHORS_SUBMITTED");
+      expect(runner.snapshot().state).toBe("evaluating");
+    } finally {
+      await rm(evidenceRoot, { recursive: true, force: true });
+      await rm(cycleRoot, { recursive: true, force: true });
+      await rm(workDir, { recursive: true, force: true });
     }
   });
 });
