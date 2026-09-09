@@ -1,14 +1,19 @@
 // Unit tests for the herdr worker executor: the agent start readiness race
-// (agent_pane_busy) and the stalled-prompt recovery (agent_prompt_stalled).
-// workspace create returns before the fresh pane's shell is at its interactive
-// prompt; herdr then fails agent start fast with agent_pane_busy. The executor
-// must retry agent start on the SAME pane within the readiness budget instead
-// of burning a whole attempt (fresh workspace) on a transient classification.
-// Likewise, agent prompt --wait fails fast with agent_prompt_stalled when
-// herdr's hardcoded 5 s state-change window is exceeded — including while the
-// prompt was accepted and is being processed.
+// (agent_pane_busy) and the state-detection-free transcript harvest (issue
+// #148). workspace create returns before the fresh pane's shell is at its
+// interactive prompt; herdr then fails agent start fast with agent_pane_busy.
+// The executor must retry agent start on the SAME pane within the readiness
+// budget instead of burning a whole attempt (fresh workspace) on a transient
+// classification.
+//
+// Prompt submission uses NO --wait: herdr state detection misreads busy
+// coding-agent panes (agent_prompt_stalled with a frozen state_change_seq
+// while the worker works, and grace-poll recovery re-prompts a live worker).
+// The transcript itself is the authority: the executor polls `herdr agent
+// read` until the last JSON object satisfies the worker contract (resolved
+// value, non-placeholder evidence) or the output settles.
 import { describe, expect, test } from "bun:test";
-import { runHerdrWorker } from "../src/workers.js";
+import { extractLastJsonObject, isWorkerContract, runHerdrWorker } from "../src/workers.js";
 
 const WORKSPACE_CREATED = JSON.stringify({
   id: "cli:workspace:create",
@@ -24,41 +29,37 @@ const AGENT_STARTED = JSON.stringify({
   result: { agent: { name: "x", status: "idle" }, type: "agent_started" },
 });
 
-const PROMPT_SETTLED = JSON.stringify({
-  id: "cli:agent:prompt",
-  result: { agent: { name: "x", agent_status: "idle" }, type: "agent_prompted" },
-});
-
-const PROMPT_BLOCKED = JSON.stringify({
-  id: "cli:agent:prompt",
-  result: { agent: { name: "x", agent_status: "blocked" }, type: "agent_prompted" },
-});
-
-const AGENT_INFO = (state: string): string =>
-  JSON.stringify({ id: "cli:agent:get", result: { agent: { name: "x", agent_status: state }, type: "agent_info" } });
+type Response = { stdout?: string; stderr?: string; exitCode?: number };
 
 const herdrError = (code: string): string => JSON.stringify({ error: { code, message: "rejected" } });
-const BUSY = herdrError("agent_pane_busy");
-const STALLED = herdrError("agent_prompt_stalled");
+
+// The prompt template workers are told to answer with (orchestrator.ts
+// WORKER_PROMPTS); an agent that merely echoes it has not answered.
+const PROMPT_TEMPLATE = '{"sample": {"value": "improved|held|declined", "evidence": "<concise observation>"}}';
+
+const SENSOR_ANSWER =
+  '{"sample": {"value": "improved", "evidence": "cargo test duration fell from 41s to 9s across five runs."}}';
+
+const DRIFT_ANSWER = '{"driftClass": "none", "evidence": "arbitration still rejects declined counter-samples."}';
+
+const PROSE = "The agent narrates its work without ever answering the contract.";
+
+const READ_OK: Response = { stdout: SENSOR_ANSWER, exitCode: 0 };
 
 interface FakeScript {
   /** Per agent start call: "ok" or a herdr error JSON (last one repeats). */
   start?: string[];
-  /** Per agent prompt call (last one repeats; default settled OK). */
-  prompt?: { stdout?: string; stderr?: string; exitCode?: number }[];
-  /** Per agent get call: agent_status (last one repeats; default "idle"). */
-  get?: string[];
-  /** Per agent wait call (last one repeats; default settled idle). */
-  wait?: { stdout?: string; exitCode?: number }[];
+  /** Per agent prompt call (last one repeats; default accepted). */
+  prompt?: Response[];
+  /** Per agent read call (last one repeats) or a per-call function (e.g.
+   * ever-growing transcripts that never settle). */
+  read?: Response[] | ((call: number) => Response);
 }
-
-const PROMPT_OK = { stdout: PROMPT_SETTLED, exitCode: 0 };
-const PROMPT_STALLED = { stderr: STALLED, exitCode: 1 };
 
 /** Fake herdr runner with per-command response queues (last one repeats). */
 function fakeHerdr(script: FakeScript = {}) {
   const calls: string[][] = [];
-  const counters = { start: 0, prompt: 0, get: 0, wait: 0 };
+  const counters = { start: 0, prompt: 0, read: 0 };
   const runner = {
     exec: async (argv: readonly string[]) => {
       calls.push([...argv]);
@@ -76,20 +77,18 @@ function fakeHerdr(script: FakeScript = {}) {
             : { stdout: "", stderr: response, exitCode: 1 };
         }
         if (argv[2] === "prompt") {
-          const queue = script.prompt ?? [PROMPT_OK];
+          const queue = script.prompt ?? [{ exitCode: 0 }];
           const response = queue[Math.min(counters.prompt++, queue.length - 1)];
           return { stdout: response.stdout ?? "", stderr: response.stderr ?? "", exitCode: response.exitCode ?? 0 };
         }
-        if (argv[2] === "get") {
-          const queue = script.get ?? ["idle"];
-          return { stdout: AGENT_INFO(queue[Math.min(counters.get++, queue.length - 1)]), stderr: "", exitCode: 0 };
+        if (argv[2] === "read") {
+          const source = script.read ?? [READ_OK];
+          const response =
+            typeof source === "function"
+              ? source(counters.read++)
+              : source[Math.min(counters.read++, source.length - 1)];
+          return { stdout: response.stdout ?? "", stderr: response.stderr ?? "", exitCode: response.exitCode ?? 0 };
         }
-        if (argv[2] === "wait") {
-          const queue = script.wait ?? [{ stdout: AGENT_INFO("idle"), exitCode: 0 }];
-          const response = queue[Math.min(counters.wait++, queue.length - 1)];
-          return { stdout: response.stdout ?? "", stderr: "", exitCode: response.exitCode ?? 0 };
-        }
-        if (argv[2] === "read") return { stdout: "TRANSCRIPT", stderr: "", exitCode: 0 };
       }
       throw new Error(`unexpected command: ${argv.join(" ")}`);
     },
@@ -104,15 +103,14 @@ const BASE_OPTIONS = {
   workDir: "/tmp/repo",
   startTimeoutMs: 30_000,
   readinessRetryDelayMs: 0,
-  stalledGraceMs: 0,
-  stalledPollIntervalMs: 0,
+  pollIntervalMs: 0,
 };
 
 describe("runHerdrWorker agent start readiness", () => {
   test("retries agent start on the same pane while herdr reports agent_pane_busy", async () => {
-    const fake = fakeHerdr({ start: [BUSY, BUSY, "ok"] });
+    const fake = fakeHerdr({ start: [herdrError("agent_pane_busy"), herdrError("agent_pane_busy"), "ok"] });
     const result = await runHerdrWorker({ ...BASE_OPTIONS, runner: fake.runner }, "sensor", "PROMPT");
-    expect(result).toEqual({ ok: true, content: "TRANSCRIPT" });
+    expect(result).toEqual({ ok: true, content: SENSOR_ANSWER });
     const starts = fake.callsOf("start");
     expect(starts.length).toBe(3);
     for (const call of starts) {
@@ -136,7 +134,7 @@ describe("runHerdrWorker agent start readiness", () => {
   });
 
   test("gives up the pane after the readiness budget and retries with a fresh workspace", async () => {
-    const fake = fakeHerdr({ start: [BUSY] });
+    const fake = fakeHerdr({ start: [herdrError("agent_pane_busy")] });
     const result = await runHerdrWorker(
       { ...BASE_OPTIONS, startTimeoutMs: 1_000, runner: fake.runner },
       "sensor",
@@ -151,47 +149,120 @@ describe("runHerdrWorker agent start readiness", () => {
   });
 });
 
-describe("runHerdrWorker stalled-prompt recovery", () => {
-  test("waits for settle when a stalled prompt actually took effect", async () => {
-    const fake = fakeHerdr({
-      prompt: [PROMPT_STALLED], // one prompt call, reported stalled
-      get: ["working"], // the agent came alive: the prompt took effect
-      wait: [{ stdout: AGENT_INFO("idle"), exitCode: 0 }],
-    });
+describe("runHerdrWorker transcript harvest", () => {
+  test("submits the prompt without --wait and harvests the contract transcript", async () => {
+    const fake = fakeHerdr();
     const result = await runHerdrWorker({ ...BASE_OPTIONS, runner: fake.runner }, "sensor", "PROMPT");
-    expect(result).toEqual({ ok: true, content: "TRANSCRIPT" });
-    expect(fake.callsOf("prompt").length).toBe(1); // no re-prompt: no double submission
-    expect(fake.callsOf("get").length).toBe(1);
-    expect(fake.callsOf("wait").length).toBe(1);
+    expect(result).toEqual({ ok: true, content: SENSOR_ANSWER });
+    const promptCall = fake.callsOf("prompt")[0];
+    expect(promptCall).toContain("sensor");
+    expect(promptCall).toContain("PROMPT");
+    expect(promptCall).not.toContain("--wait");
+    expect(promptCall).not.toContain("--timeout");
+    const readCall = fake.callsOf("read")[0];
+    expect(readCall).toContain("recent-unwrapped");
+    expect(readCall.join(" ")).toMatch(/--lines \d+/);
   });
 
-  test("re-prompts exactly once when the stalled submission was swallowed", async () => {
+  test("accepts the real answer only once the echoed prompt template is gone", async () => {
+    const transcript = `${PROMPT_TEMPLATE}\n${SENSOR_ANSWER}`;
     const fake = fakeHerdr({
-      prompt: [PROMPT_STALLED, PROMPT_OK],
-      get: ["idle"], // never came alive: submission was swallowed
+      read: [
+        { stdout: PROMPT_TEMPLATE, exitCode: 0 },
+        { stdout: transcript, exitCode: 0 },
+      ],
     });
     const result = await runHerdrWorker({ ...BASE_OPTIONS, runner: fake.runner }, "sensor", "PROMPT");
-    expect(result).toEqual({ ok: true, content: "TRANSCRIPT" });
-    expect(fake.callsOf("prompt").length).toBe(2); // original + exactly one re-prompt
-    expect(fake.callsOf("wait").length).toBe(0);
+    expect(result).toEqual({ ok: true, content: transcript });
+    // Integration: the harvested transcript feeding extractLastJsonObject
+    // yields the contract (last JSON object wins over the echoed template).
+    expect(extractLastJsonObject(transcript)?.sample).toEqual({
+      value: "improved",
+      evidence: "cargo test duration fell from 41s to 9s across five runs.",
+    });
   });
 
-  test("burns the attempt when the re-prompt stalls again", async () => {
-    const fake = fakeHerdr({ prompt: [PROMPT_STALLED], get: ["idle"] });
+  test("accepts a drift contract answered at top level (driftClass + evidence)", async () => {
+    const transcript = `comparing reference...\n${DRIFT_ANSWER}`;
+    const fake = fakeHerdr({ read: [{ stdout: transcript, exitCode: 0 }] });
+    const result = await runHerdrWorker({ ...BASE_OPTIONS, runner: fake.runner }, "drift-auditor", "PROMPT");
+    expect(result).toEqual({ ok: true, content: transcript });
+  });
+
+  test("repairs hard-wrapped JSON before contract matching", async () => {
+    const wrapped = 'preamble {"sample": {"value": "held",\n"evidence": "metric flat across\nall five runs."}}';
+    const fake = fakeHerdr({ read: [{ stdout: wrapped, exitCode: 0 }] });
+    const result = await runHerdrWorker({ ...BASE_OPTIONS, runner: fake.runner }, "sensor", "PROMPT");
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(extractLastJsonObject(result.content)?.sample).toEqual({
+        value: "held",
+        evidence: "metric flat across\nall five runs.",
+      });
+    }
+  });
+
+  test("keeps polling through transient read failures until the contract appears", async () => {
+    const fake = fakeHerdr({ read: [{ exitCode: 1, stderr: herdrError("pane_gone") }, READ_OK] });
+    const result = await runHerdrWorker({ ...BASE_OPTIONS, runner: fake.runner }, "sensor", "PROMPT");
+    expect(result).toEqual({ ok: true, content: SENSOR_ANSWER });
+    expect(fake.callsOf("read").length).toBe(2);
+  });
+
+  test("fails the attempt when the transcript settles without a contract, naming the captured size", async () => {
+    const fake = fakeHerdr({ read: [{ stdout: PROSE, exitCode: 0 }] });
     const result = await runHerdrWorker({ ...BASE_OPTIONS, runner: fake.runner }, "sensor", "PROMPT");
     expect(result.ok).toBe(false);
-    expect(result.ok === false && result.error.includes("agent_prompt_stalled")).toBe(true);
-    // 3 attempts, each: prompt → grace get → one re-prompt.
-    expect(fake.callsOf("prompt").length).toBe(6);
-    expect(fake.workspaceCreates().length).toBe(3);
+    expect(result.ok === false && result.error.includes("settled without a valid contract")).toBe(true);
+    expect(result.ok === false && /captured \d+ chars/.test(result.error)).toBe(true);
+    // Exactly one prompt per attempt: double submission is structurally
+    // impossible (no stall classification, no recovery re-prompt).
+    expect(fake.callsOf("prompt").length).toBe(3);
+  });
+
+  test("fails the attempt at the harvest deadline when the transcript never settles", async () => {
+    let call = 0;
+    const fake = fakeHerdr({ read: () => ({ stdout: `${PROSE} x`.repeat(++call), exitCode: 0 }) });
+    const result = await runHerdrWorker(
+      { ...BASE_OPTIONS, timeoutMs: 1_000, pollIntervalMs: 50, runner: fake.runner },
+      "sensor",
+      "PROMPT",
+    );
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && /captured \d+ chars/.test(result.error)).toBe(true);
+    expect(fake.callsOf("prompt").length).toBe(3);
+  });
+
+  test("surfaces a failed prompt submission as an attempt error without harvesting", async () => {
+    const fake = fakeHerdr({ prompt: [{ exitCode: 1, stderr: herdrError("unknown_agent") }] });
+    const result = await runHerdrWorker({ ...BASE_OPTIONS, runner: fake.runner }, "sensor", "PROMPT");
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.error.includes("unknown_agent")).toBe(true);
+    expect(fake.callsOf("read").length).toBe(0);
   });
 });
 
-describe("runHerdrWorker blocked agents", () => {
-  test("a blocked agent (real herdr agent_status field) is an error, never a signal", async () => {
-    const fake = fakeHerdr({ prompt: [{ stdout: PROMPT_BLOCKED, exitCode: 0 }] });
-    const result = await runHerdrWorker({ ...BASE_OPTIONS, runner: fake.runner }, "sensor", "PROMPT");
-    expect(result.ok).toBe(false);
-    expect(result.ok === false && result.error.includes("blocked")).toBe(true);
+describe("isWorkerContract", () => {
+  test("accepts sample and drift contracts with real evidence", () => {
+    expect(isWorkerContract(extractLastJsonObject(SENSOR_ANSWER))).toBe(true);
+    expect(isWorkerContract(extractLastJsonObject(DRIFT_ANSWER))).toBe(true);
+  });
+
+  test("rejects the echoed prompt template (menu value, placeholder evidence)", () => {
+    expect(isWorkerContract(extractLastJsonObject(PROMPT_TEMPLATE))).toBe(false);
+  });
+
+  test("rejects answers without evidence or with placeholder evidence", () => {
+    expect(isWorkerContract(extractLastJsonObject('{"sample": {"value": "improved", "evidence": ""}}'))).toBe(false);
+    expect(isWorkerContract(extractLastJsonObject('{"sample": {"value": "improved", "evidence": "<todo>"}}'))).toBe(
+      false,
+    );
+    expect(isWorkerContract(extractLastJsonObject('{"driftClass": "none"}'))).toBe(false);
+  });
+
+  test("rejects non-contract shapes and absent JSON", () => {
+    expect(isWorkerContract(null)).toBe(false);
+    expect(isWorkerContract(extractLastJsonObject(PROSE))).toBe(false);
+    expect(isWorkerContract(extractLastJsonObject('{"foo": 1}'))).toBe(false);
   });
 });

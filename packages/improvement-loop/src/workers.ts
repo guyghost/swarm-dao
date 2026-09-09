@@ -6,9 +6,17 @@
 //     (or `herdr worktree open --workspace <parent>` for series-worktree
 //      workers, linking the child to the parent session's Spaces entry)
 //   herdr agent start <name> --kind <kind> --pane <id> --timeout <ms> -- <args>
-//   herdr agent prompt <name> '<prompt>' --wait --timeout <ms>
-//   herdr agent read <name> --source recent-unwrapped --lines N
+//   herdr agent prompt <name> '<prompt>'
+//   herdr agent read <name> --source recent-unwrapped --lines N   (polled)
 //   herdr workspace close <id>
+//
+// State-detection-free harvest (#148): herdr state detection misreads busy
+// coding-agent panes — `agent prompt --wait` reports agent_prompt_stalled
+// with a frozen state_change_seq while the worker works, and grace-poll
+// recovery re-prompts a live worker (double submission). The prompt is
+// therefore submitted without --wait and the transcript is polled directly:
+// the attempt ends when its last JSON object satisfies the worker contract,
+// the output settles without one, or the deadline expires.
 //
 // Readiness race: workspace create returns before the fresh pane's shell has
 // reached its interactive prompt, and herdr's agent start classifies such a
@@ -31,7 +39,6 @@ import type { HerdrRunner } from "@guyghost/swarm-dao-herdr-adapter";
 import {
   createChildWorkspace,
   herdrParentWorkspaceId,
-  promptAgentUntilSettled,
   sanitizeHerdrName,
   startAgentUntilReady,
   trimTrailingNewlines,
@@ -90,7 +97,10 @@ export interface HerdrWorkerOptions {
    * HERDR_WORKSPACE_ID when running inside a herdr pane). Series-worktree
    * workers open nested under it; same-checkout workers get a parent token. */
   parentWorkspaceId?: string;
-  /** Per-attempt prompt timeout in ms (default 5 min; herdr max 300000). */
+  /** Per-attempt harvest deadline in ms (default 10 min; ceiling 15 min).
+   * The old herdr --wait cap no longer applies: real observation work
+   * (running repo measurements, reading models) legitimately takes 5–10 min
+   * under load. */
   timeoutMs?: number;
   /** agent start readiness timeout in ms (default 120 s; herdr max 300000). */
   startTimeoutMs?: number;
@@ -101,11 +111,9 @@ export interface HerdrWorkerOptions {
   /** Delay between same-pane agent start readiness retries (default 1 s; 0
    * only for tests). */
   readinessRetryDelayMs?: number;
-  /** Grace-poll budget after a stalled prompt (default 20 s). */
-  stalledGraceMs?: number;
-  /** Delay between stalled-prompt grace polls (default 2 s; 0 only for
+  /** Delay between transcript harvest polls (default 5 s; 0 only for
    * tests). */
-  stalledPollIntervalMs?: number;
+  pollIntervalMs?: number;
   /** Injectable command runner (tests). */
   runner?: HerdrRunner;
 }
@@ -206,7 +214,6 @@ interface HerdrJson {
   result?: {
     root_pane?: { pane_id?: string };
     workspace?: { workspace_id?: string };
-    agent?: { agent_status?: string; status?: string; state?: string };
     workspaces?: Array<{ label?: string; workspace_id?: string }>;
   };
 }
@@ -218,13 +225,6 @@ function parseHerdrJson(raw: string): HerdrJson | null {
   } catch {
     return null;
   }
-}
-
-function agentState(result: HerdrJson["result"]): string | null {
-  // herdr exposes the lifecycle field as agent_status (verified live); the
-  // others are defensive fallbacks — reading them alone silently disabled the
-  // blocked-worker guard (issue #138).
-  return result?.agent?.agent_status ?? result?.agent?.status ?? result?.agent?.state ?? null;
 }
 
 /** Close workspaces left behind by a run killed mid-flight (host timeout,
@@ -260,14 +260,13 @@ export async function runHerdrWorker(
   const runner = options.runner ?? defaultRunner();
   const kind = options.kind ?? "pi";
   const agentArgs = options.agentArgs ?? (kind === "pi" ? piWorkerAgentArgs(options.piStateReporterPath) : []);
-  // herdr's own timeout ceiling is 300000ms; readLines is capped to keep the
-  // read command (and the harvested transcript) bounded.
-  const timeoutMs = toBoundedInt(options.timeoutMs, 300_000, 1_000, 300_000);
+  // The harvest deadline bounds the whole attempt; readLines is capped to
+  // keep the read command (and the harvested transcript) bounded.
+  const timeoutMs = toBoundedInt(options.timeoutMs, 600_000, 1_000, 900_000);
   const startTimeoutMs = toBoundedInt(options.startTimeoutMs, 120_000, 1_000, 300_000);
   const readLines = toBoundedInt(options.readLines, 200, 1, 10_000);
   const readinessRetryDelayMs = toBoundedInt(options.readinessRetryDelayMs, 1_000, 0, 60_000);
-  const stalledGraceMs = toBoundedInt(options.stalledGraceMs, 20_000, 0, 60_000);
-  const stalledPollIntervalMs = toBoundedInt(options.stalledPollIntervalMs, 2_000, 0, 30_000);
+  const pollIntervalMs = toBoundedInt(options.pollIntervalMs, 5_000, 0, 60_000);
   const parentWorkspaceId = options.parentWorkspaceId ?? herdrParentWorkspaceId();
 
   if (!SAFE_HERDR_KIND.test(kind))
@@ -316,39 +315,67 @@ export async function runHerdrWorker(
         continue;
       }
 
-      // 3. Prompt and wait for a settled state (idle | done | blocked),
-      // recovering from herdr's transient agent_prompt_stalled classification.
-      const prompted = await promptAgentUntilSettled(runner, {
-        agentName,
-        prompt,
-        timeoutMs,
-        stalledGraceMs,
-        pollIntervalMs: stalledPollIntervalMs,
-      });
+      // 3. Submit the prompt without waiting on herdr state detection: busy
+      // coding-agent panes read as idle with a frozen state_change_seq, so
+      // --wait stalls on live workers and grace-poll recovery re-prompts
+      // them (double submission). The transcript itself is the authority
+      // (issue #148); at most one prompt per attempt, ever.
+      const prompted = await runner.exec(["herdr", "agent", "prompt", agentName, prompt]);
       if (prompted.exitCode !== 0) {
         lastError = `herdr agent prompt failed: ${herdrErrorDetail(prompted.stderr, prompted.stdout)}`;
         continue;
       }
-      if (agentState(parseHerdrJson(prompted.stdout)?.result) === "blocked") {
-        lastError = `herdr agent ${agentName} is blocked (approval/question UI) — it never produced a signal.`;
-        continue;
-      }
 
-      const read = await runner.exec([
-        "herdr",
-        "agent",
-        "read",
-        agentName,
-        "--source",
-        "recent-unwrapped",
-        "--lines",
-        String(readLines),
-      ]);
-      if (read.exitCode !== 0) {
-        lastError = `herdr agent read failed: ${herdrErrorDetail(read.stderr, read.stdout)}`;
-        continue;
+      // 4. Harvest the transcript until the last JSON object satisfies the
+      // worker contract, the output settles without one, or the deadline
+      // expires. Read failures are transient: poll again until the deadline.
+      const deadline = Date.now() + timeoutMs;
+      let content = "";
+      let previousLength = -1;
+      let stablePolls = 0;
+      let readError: string | null = null;
+      let harvested: string | null = null;
+      while (Date.now() < deadline) {
+        await sleep(pollIntervalMs);
+        const read = await runner.exec([
+          "herdr",
+          "agent",
+          "read",
+          agentName,
+          "--source",
+          "recent-unwrapped",
+          "--lines",
+          String(readLines),
+        ]);
+        if (read.exitCode !== 0) {
+          readError = herdrErrorDetail(read.stderr, read.stdout);
+          continue;
+        }
+        readError = null;
+        content = trimTrailingNewlines(read.stdout);
+        if (isWorkerContract(extractLastJsonObject(content))) {
+          harvested = content;
+          break;
+        }
+        // Settled output that never satisfies the contract (blocked UI,
+        // prose-only transcript): four identical non-empty polls are enough.
+        if (content.length > 0 && content.length === previousLength) stablePolls += 1;
+        else stablePolls = 0;
+        previousLength = content.length;
+        if (stablePolls >= 4) break;
       }
-      return { ok: true, content: trimTrailingNewlines(read.stdout) };
+      if (harvested !== null) return { ok: true, content: harvested };
+
+      // Attempt failure with field diagnostics: captured size and the last
+      // parsed JSON fragment for post-mortems. Blocked-agent detection is
+      // deliberately gone — a blocked UI settles without a contract, and
+      // environment-level "cannot measure" halts at the anchor layer (#145).
+      const lastJson = extractLastJsonObject(content);
+      const fragment = lastJson === null ? "none" : JSON.stringify(lastJson).slice(0, 300);
+      lastError =
+        `herdr agent ${agentName} settled without a valid contract` +
+        (readError !== null ? ` (last read error: ${readError})` : "") +
+        ` (captured ${content.length} chars, last JSON: ${fragment})`;
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error);
     } finally {
@@ -358,6 +385,38 @@ export async function runHerdrWorker(
     }
   }
   return { ok: false, error: `worker ${baseName} failed after ${maxAttempts} attempts: ${lastError}` };
+}
+
+/**
+ * Resolve after ms milliseconds — harvest poll pacing.
+ */
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const isFilled = (value: unknown): value is string => typeof value === "string" && value.length > 0;
+
+/**
+ * The worker contract: the transcript's last JSON object must carry a
+ * resolved answer — a sample contract (sensor / counter-sensor) or a drift
+ * contract (drift-auditor) — with non-placeholder evidence. The echoed prompt
+ * contains the JSON template itself ("improved|held|declined",
+ * "<concise observation>"), so a matching shape alone is not enough (issue
+ * #148).
+ */
+export function isWorkerContract(candidate: Record<string, unknown> | null): boolean {
+  if (candidate === null) return false;
+  const sample = isRecord(candidate.sample) ? candidate.sample : null;
+  // Contract shape: a sample object or a named drift class.
+  if (sample === null && !isFilled(candidate.driftClass)) return false;
+  // The echoed template's sample.value is the "improved|held|declined" menu.
+  const value = sample?.value;
+  if (typeof value === "string" && value.includes("|")) return false;
+  // Evidence must be real prose; "<...>" is the unfilled prompt placeholder.
+  // Drift answers carry it at top level, not under sample.
+  const evidence = sample?.evidence ?? candidate.evidence ?? candidate.driftEvidence;
+  return isFilled(evidence) && !evidence.startsWith("<");
 }
 
 /**
