@@ -8,6 +8,7 @@
 // marked fallback when a spawn fails.
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, mock } from "bun:test";
+import * as realChildProcess from "node:child_process";
 import { EventEmitter } from "node:events";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
@@ -54,22 +55,19 @@ function createFakeChild(stdoutText: string, stderrText: string, code: number): 
   return child;
 }
 
-// The mock replaces the whole module, so every named export imported anywhere
-// in the adapter's dependency graph must exist. `spawn` drives the fake child;
-// callback-style `exec`/`execFile` fail fast (project-brief git probes degrade
-// to an empty brief, and nothing else in this suite invokes them).
+// Only `spawn` is faked (what the adapter uses for Pi agents). Keep real
+// `exec`/`execFile` so a leaked mock cannot brick git/worktree suites that
+// share the same bun test process. Restore after this file's suite.
 mock.module("node:child_process", () => {
-  const exec = (_command: string, _options: unknown, cb: (err: Error | null) => void) => {
-    cb(new Error("exec is mocked out in pi-spawn tests"));
-  };
-  const execFile = (_file: string, _args: string[], _options: unknown, cb: (err: Error | null) => void) => {
-    cb(new Error("execFile is mocked out in pi-spawn tests"));
-  };
   const spawn = (cmd: string, args: string[]) => {
     spawnCalls.push({ cmd, args });
     return createFakeChild(stdoutFactory ? stdoutFactory() : "", spawnExit.stderr, spawnExit.code);
   };
-  return { spawn, exec, execFile, default: { spawn, exec, execFile } };
+  return {
+    ...realChildProcess,
+    spawn,
+    default: { ...realChildProcess, spawn },
+  };
 });
 
 const SPAWNED_OUTPUT_TEMPLATE = (n: number) => `## Suggested Proposal
@@ -124,6 +122,7 @@ describe("pi adapter spawnAgent default-on", () => {
   afterAll(async () => {
     process.chdir(cwdBefore);
     await fs.rm(testRoot, { recursive: true, force: true });
+    mock.restore();
   });
 
   beforeEach(async () => {
