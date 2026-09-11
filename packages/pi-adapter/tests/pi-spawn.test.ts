@@ -59,7 +59,10 @@ function createFakeChild(stdoutText: string, stderrText: string, code: number): 
 // `exec`/`execFile` so a leaked mock cannot brick git/worktree suites that
 // share the same bun test process. Restore after this file's suite.
 mock.module("node:child_process", () => {
-  const spawn = (cmd: string, args: string[]) => {
+  const spawn = (cmd: string, args: string[], options?: Parameters<typeof realChildProcess.spawn>[2]) => {
+    if (cmd !== "pi") {
+      return realChildProcess.spawn(cmd, args, options);
+    }
     spawnCalls.push({ cmd, args });
     return createFakeChild(stdoutFactory ? stdoutFactory() : "", spawnExit.stderr, spawnExit.code);
   };
