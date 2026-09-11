@@ -241,6 +241,14 @@ function clampScore(value: number): number {
   return Math.max(0, Math.min(10, value));
 }
 
+/**
+ * Marker embedded in canned fallback output so simulated content is never
+ * mistaken for real agent work. Round-table parsing keeps it inside the
+ * description (it travels into any proposal created from the suggestion);
+ * deliberation parsing is heading-based and ignores the preamble.
+ */
+const SIMULATED_OUTPUT_NOTICE = "> ⚠️ Simulated fallback output — no real agent spawn (reason in pi-adapter logs).";
+
 function pickRoundTableType(agentId: string): ProposalType {
   switch (agentId) {
     case "architect":
@@ -267,7 +275,7 @@ function generateRoundTableSuggestion(params: SpawnAgentParams): string {
   return `## Suggested Proposal
 **Title:** ${title}
 **Type:** ${suggestionType}
-**Description:** ${description}`;
+**Description:** ${SIMULATED_OUTPUT_NOTICE} ${description}`;
 }
 
 function decideFallbackVote(agentId: string, proposal: Proposal): "for" | "against" | "abstain" {
@@ -321,7 +329,7 @@ function generateDeliberationOutput(params: SpawnAgentParams): string {
         ? "Risk exposure is too high for the current safeguards."
         : "The direction is promising, but execution details need clarification first.";
 
-  return `## Analysis
+  return `${SIMULATED_OUTPUT_NOTICE}\n\n## Analysis
 ${params.agent.name} reviewed proposal #${proposal.id} (${proposal.type}) and assessed implementation tradeoffs, risk profile, and expected impact.
 
 ## Vote
@@ -356,8 +364,12 @@ function createPiHostAdapter(_pi: ExtensionAPI, ctx?: ExtensionCommandContext): 
       const model = params.model;
       const isRoundTable = params.proposal.id === 0 && params.proposal.title === "Round Table Suggestions";
 
-      const piSpawnEnabled = process.env.SWARM_DAO_ENABLE_PI_SPAWN === "1";
-      if (piSpawnEnabled && model && model !== "default") {
+      // Real Pi subprocess spawning is the default so round tables and
+      // deliberations reach actual models. Disable explicitly via
+      // SWARM_DAO_DISABLE_PI_SPAWN=1 (legacy opt-out: SWARM_DAO_ENABLE_PI_SPAWN=0).
+      const spawnDisabled =
+        process.env.SWARM_DAO_DISABLE_PI_SPAWN === "1" || process.env.SWARM_DAO_ENABLE_PI_SPAWN === "0";
+      if (!spawnDisabled && model && model !== "default") {
         const subprocess = await spawnPiSubprocess(params.systemPrompt, model, params.timeoutMs);
         if (subprocess.content) {
           return {
@@ -371,7 +383,15 @@ function createPiHostAdapter(_pi: ExtensionAPI, ctx?: ExtensionCommandContext): 
         await this.log({
           level: "warn",
           service: "pi-adapter",
-          message: `Pi subprocess spawn failed for ${params.agent.id} (${model}): ${subprocess.error ?? "empty output"}; using fallback output`,
+          message: `Pi subprocess spawn failed for ${params.agent.id} (${model}): ${subprocess.error ?? "empty output"}; using simulated fallback output`,
+        });
+      } else {
+        await this.log({
+          level: "warn",
+          service: "pi-adapter",
+          message: spawnDisabled
+            ? `Pi subprocess spawning disabled (SWARM_DAO_DISABLE_PI_SPAWN=1); using simulated fallback output for ${params.agent.id}`
+            : `No resolvable model for ${params.agent.id} (resolved: ${model ?? "undefined"}); using simulated fallback output`,
         });
       }
 

@@ -161,7 +161,14 @@ The adapter implements the `HostAdapter` interface from `@guyghost/swarm-dao-cor
 | `exec` | Uses `node:child_process` |
 | `hasCapability` | Reports `read_file`, `write_file`, `exec`, `log` |
 
-> **Note on `spawnAgent`:** The adapter now returns structured fallback outputs when host-level subprocess spawning is unavailable, so deliberation can still reach quorum and complete end-to-end.
+> **Note on `spawnAgent`:** By default the adapter spawns a real `pi` subprocess per agent, so round-table suggestions and deliberations come from actual models grounded in the project brief. When spawning is disabled or fails, the adapter returns clearly marked **simulated** fallback output (prefixed `⚠️ Simulated fallback output`) so governance flows still complete end-to-end — never mistake it for real agent work.
+>
+> Environment variables:
+>
+> | Variable | Effect |
+> | --- | --- |
+> | `SWARM_DAO_DISABLE_PI_SPAWN=1` | Never spawn; always use simulated fallback output |
+> | `SWARM_DAO_ENABLE_PI_SPAWN=0` | Legacy alias for the above |
 
 ## Configuration
 
