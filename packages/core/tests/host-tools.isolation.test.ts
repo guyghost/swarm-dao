@@ -166,7 +166,7 @@ describe("host tools: execution isolation wiring", () => {
       // Covered critical path → allowed; uncovered critical path → blocked.
       const decision = await handleDaoCheckEdit(ctx, ["src/auth/login.ts", "src/payment/charge.ts"]);
       expect(decision).toContain("src/auth/login.ts");
-      expect(decision).toContain("#" + created.proposal.id);
+      expect(decision).toContain(`#${created.proposal.id}`);
       expect(decision).toContain("Blocked");
       expect(decision).toContain("src/payment/charge.ts");
 

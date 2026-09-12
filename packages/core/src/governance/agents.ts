@@ -7,7 +7,7 @@ import path from "node:path";
 import type { ProjectConfig } from "../config.js";
 import { filterEnabledAgents } from "../config.js";
 import type { DAOAgent } from "../types/index.js";
-import { AGENT_CHARTER, composeSystemPrompt } from "./charter.js";
+import { composeSystemPrompt } from "./charter.js";
 
 export const DEFAULT_AGENTS: DAOAgent[] = [
   {

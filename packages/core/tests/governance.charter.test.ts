@@ -144,7 +144,10 @@ describe("layered default agents", () => {
   });
 
   test("custom agents pass through initializeAgents untouched", () => {
-    const custom = [{ ...initializeAgents()[0]!, id: "custom", systemPrompt: "RAW" }];
+    const first = initializeAgents()[0];
+    expect(first).toBeDefined();
+    if (!first) return;
+    const custom = [{ ...first, id: "custom", systemPrompt: "RAW" }];
     expect(initializeAgents(custom)[0]?.systemPrompt).toBe("RAW");
   });
 });

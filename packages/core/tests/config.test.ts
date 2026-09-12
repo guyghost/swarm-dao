@@ -128,13 +128,13 @@ describe("config", () => {
     const daoRoot = await fs.mkdtemp(path.join(os.tmpdir(), "swarm-config-"));
     try {
       await fs.writeFile(path.join(daoRoot, "config.json"), JSON.stringify({ mode: "typo" }), "utf-8");
-      await expect(loadConfig(daoRoot)).rejects.toThrow('mode');
+      await expect(loadConfig(daoRoot)).rejects.toThrow("mode");
       await fs.writeFile(
         path.join(daoRoot, "config.json"),
         JSON.stringify({ deliberation: { strategy: "nope" } }),
         "utf-8",
       );
-      await expect(loadConfig(daoRoot)).rejects.toThrow('deliberation.strategy');
+      await expect(loadConfig(daoRoot)).rejects.toThrow("deliberation.strategy");
     } finally {
       await fs.rm(daoRoot, { recursive: true, force: true });
     }
@@ -164,13 +164,13 @@ describe("config", () => {
         JSON.stringify({ tmux: { timeoutMs: 999999999 } }),
         "utf-8",
       );
-      await expect(loadConfig(daoRoot)).rejects.toThrow('timeoutMs');
+      await expect(loadConfig(daoRoot)).rejects.toThrow("timeoutMs");
       await fs.writeFile(
         path.join(daoRoot, "config.json"),
         JSON.stringify({ deliberation: { charsPerAgent: 5 } }),
         "utf-8",
       );
-      await expect(loadConfig(daoRoot)).rejects.toThrow('charsPerAgent');
+      await expect(loadConfig(daoRoot)).rejects.toThrow("charsPerAgent");
     } finally {
       await fs.rm(daoRoot, { recursive: true, force: true });
     }
