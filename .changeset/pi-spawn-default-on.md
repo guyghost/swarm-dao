@@ -1,5 +1,5 @@
 ---
-"@guyghost/swarm-dao-pi-adapter": patch
+"@guyghost/swarm-dao-pi-adapter": minor
 ---
 
 pi adapter spawns real agent subprocesses by default; simulated fallback is marked
