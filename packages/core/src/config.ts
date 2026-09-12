@@ -5,7 +5,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { composeSystemPrompt } from "./governance/charter.js";
-import type { DAOAgent, DAOConfig } from "./types/index.js";
+import type { DAOAgent, DAOConfig, DelegationConfig } from "./types/index.js";
 import { redactSensitiveFields } from "./utils/security.js";
 
 export type ActivationMode = "opt-in" | "suggest" | "enforce";
@@ -63,6 +63,8 @@ export interface ProjectConfig {
   execution?: ExecutionConfig;
   deliberation?: DeliberationConfig;
   ship?: ShipConfig;
+  /** Delegated Facet Investigation budget (opt-in, disabled by default). */
+  delegation?: DelegationConfig;
   /** herdr child-session defaults for multi-agent CLI flows
    *  (deliberate, roundtable, implement). */
   herdr?: HerdrConfig;
@@ -140,13 +142,154 @@ export function getConfigPath(daoRoot: string): string {
 
 export async function loadConfig(daoRoot: string): Promise<ProjectConfig> {
   const configPath = getConfigPath(daoRoot);
+  let raw: string;
   try {
-    const data = await fs.readFile(configPath, "utf-8");
-    const parsed = JSON.parse(data);
-    return { ...DEFAULT_PROJECT_CONFIG, ...parsed };
-  } catch {
-    return { ...DEFAULT_PROJECT_CONFIG };
+    raw = await fs.readFile(configPath, "utf-8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { ...DEFAULT_PROJECT_CONFIG };
+    throw error;
   }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    throw new Error(`Invalid JSON in ${configPath}: ${(error as Error).message}`);
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`Invalid config in ${configPath}: expected a JSON object`);
+  }
+  return validateProjectConfig(parsed as Record<string, unknown>, configPath);
+}
+
+function validateProjectConfig(input: Record<string, unknown>, configPath: string): ProjectConfig {
+  const fail = (msg: string): never => {
+    throw new Error(`Invalid config in ${configPath}: ${msg}`);
+  };
+  const out: ProjectConfig = { ...DEFAULT_PROJECT_CONFIG };
+
+  if (input.mode !== undefined) {
+    if (input.mode !== "opt-in" && input.mode !== "suggest" && input.mode !== "enforce") {
+      fail(`"mode" must be one of opt-in|suggest|enforce (got ${JSON.stringify(input.mode)})`);
+    }
+    out.mode = input.mode as ActivationMode;
+  }
+
+  if (input.criticalPaths !== undefined) {
+    if (!Array.isArray(input.criticalPaths) || !input.criticalPaths.every((p) => typeof p === "string")) {
+      fail(`"criticalPaths" must be a string array`);
+    }
+    out.criticalPaths = input.criticalPaths as string[];
+  }
+
+  if (input.agentOverrides !== undefined) {
+    if (
+      typeof input.agentOverrides !== "object" ||
+      input.agentOverrides === null ||
+      Array.isArray(input.agentOverrides)
+    ) {
+      fail(`"agentOverrides" must be an object`);
+    }
+    out.agentOverrides = input.agentOverrides as ProjectConfig["agentOverrides"];
+  }
+
+  if (input.execution !== undefined) {
+    if (typeof input.execution !== "object" || input.execution === null || Array.isArray(input.execution)) {
+      fail(`"execution" must be an object`);
+    }
+    const e = input.execution as Record<string, unknown>;
+    if (
+      e.isolation !== undefined &&
+      e.isolation !== "none" &&
+      e.isolation !== "worktree" &&
+      e.isolation !== "sandbox"
+    ) {
+      fail(`"execution.isolation" must be one of none|worktree|sandbox`);
+    }
+    if (e.worktreeRoot !== undefined && typeof e.worktreeRoot !== "string")
+      fail(`"execution.worktreeRoot" must be a string`);
+    if (e.baseBranch !== undefined && typeof e.baseBranch !== "string") fail(`"execution.baseBranch" must be a string`);
+    out.execution = {
+      ...(typeof e.isolation === "string" ? { isolation: e.isolation as ExecutionConfig["isolation"] } : {}),
+      ...(typeof e.worktreeRoot === "string" ? { worktreeRoot: e.worktreeRoot } : {}),
+      ...(typeof e.baseBranch === "string" ? { baseBranch: e.baseBranch } : {}),
+    };
+  }
+
+  if (input.deliberation !== undefined) {
+    if (typeof input.deliberation !== "object" || input.deliberation === null || Array.isArray(input.deliberation)) {
+      fail(`"deliberation" must be an object`);
+    }
+    const d = input.deliberation as Record<string, unknown>;
+    if (d.strategy !== undefined && d.strategy !== "parallel" && d.strategy !== "sequential") {
+      fail(`"deliberation.strategy" must be one of parallel|sequential`);
+    }
+    if (d.charsPerAgent !== undefined) {
+      if (
+        typeof d.charsPerAgent !== "number" ||
+        !Number.isInteger(d.charsPerAgent) ||
+        d.charsPerAgent < 100 ||
+        d.charsPerAgent > 20000
+      ) {
+        fail(`"deliberation.charsPerAgent" must be an integer in [100, 20000]`);
+      }
+    }
+    out.deliberation = {
+      ...(typeof d.strategy === "string" ? { strategy: d.strategy as DeliberationConfig["strategy"] } : {}),
+      ...(typeof d.charsPerAgent === "number" ? { charsPerAgent: d.charsPerAgent } : {}),
+    };
+  }
+
+  if (input.ship !== undefined) {
+    if (typeof input.ship !== "object" || input.ship === null || Array.isArray(input.ship))
+      fail(`"ship" must be an object`);
+    const s = input.ship as Record<string, unknown>;
+    if (s.auditChallenge !== undefined && typeof s.auditChallenge !== "boolean")
+      fail(`"ship.auditChallenge" must be a boolean`);
+    out.ship = typeof s.auditChallenge === "boolean" ? { auditChallenge: s.auditChallenge } : {};
+  }
+
+  if (input.delegation !== undefined) {
+    if (typeof input.delegation !== "object" || input.delegation === null || Array.isArray(input.delegation)) {
+      fail(`"delegation" must be an object`);
+    }
+    const dg = input.delegation as Record<string, unknown>;
+    if (dg.enabled !== undefined && typeof dg.enabled !== "boolean") fail(`"delegation.enabled" must be a boolean`);
+    for (const k of ["maxDepth", "maxChildrenPerParent", "foldTimeoutMs"] as const) {
+      const v = dg[k];
+      if (v === undefined) continue;
+      if (typeof v !== "number" || !Number.isInteger(v) || v <= 0) fail(`"delegation.${k}" must be a positive integer`);
+    }
+    const md = dg.maxDepth as number | undefined;
+    if (md !== undefined && md !== 1) fail(`"delegation.maxDepth" must be 1 (only one level is supported)`);
+    const mc = dg.maxChildrenPerParent as number | undefined;
+    if (mc !== undefined && (mc < 1 || mc > 10)) fail(`"delegation.maxChildrenPerParent" must be in [1, 10]`);
+    const ft = dg.foldTimeoutMs as number | undefined;
+    if (ft !== undefined && (ft < 1000 || ft > 300000)) fail(`"delegation.foldTimeoutMs" must be in [1000, 300000]`);
+    out.delegation = {
+      enabled: typeof dg.enabled === "boolean" ? dg.enabled : false,
+      maxDepth: 1,
+      maxChildrenPerParent: typeof mc === "number" ? mc : 3,
+      foldTimeoutMs: typeof ft === "number" ? ft : 30000,
+    };
+  }
+
+  for (const key of ["github", "gitlab", "bitbucket", "herdr", "tmux"] as const) {
+    const v = input[key];
+    if (v === undefined) continue;
+    if (typeof v !== "object" || v === null || Array.isArray(v)) fail(`"${key}" must be an object`);
+    const rec = v as Record<string, unknown>;
+    if ((key === "herdr" || key === "tmux") && rec.timeoutMs !== undefined) {
+      const t = rec.timeoutMs;
+      if (typeof t !== "number" || !Number.isInteger(t) || t <= 0 || t > 300000) {
+        fail(`"${key}.timeoutMs" must be an integer in (0, 300000]`);
+      }
+    }
+    (out as unknown as Record<string, unknown>)[key] = { ...rec };
+  }
+
+  // Unknown top-level keys are ignored to stay forward-compatible
+  // with newer config writers.
+  return out;
 }
 
 export async function saveConfig(daoRoot: string, config: ProjectConfig): Promise<void> {
