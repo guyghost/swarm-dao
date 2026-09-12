@@ -89,6 +89,14 @@ Quick checklist:
 5. Commit with clear messages
 6. Open a PR with description of changes
 
+## Versioning (Changesets, independent)
+
+- Root `swarm-dao@0.1.4` is `private:true` and never published — orchestrator only.
+- Each `packages/*/package.json` versions independently (`.changeset/config.json`
+  has empty `fixed`/`linked`). The gap `root 0.1.4` vs `core 0.16.x` is expected.
+- Any PR touching `packages/*/src/**` must include a `.changeset/*.md` declaring
+  the affected package (`bunx changeset`). Enforced by `bun run check:changesets`.
+
 ## Reporting Issues
 
 Please include:
