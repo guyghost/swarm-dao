@@ -106,4 +106,73 @@ describe("config", () => {
       await fs.rm(daoRoot, { recursive: true, force: true });
     }
   });
+
+  it("loadConfig throws on invalid JSON with path", async () => {
+    const daoRoot = await fs.mkdtemp(path.join(os.tmpdir(), "swarm-config-"));
+    try {
+      await fs.writeFile(path.join(daoRoot, "config.json"), "{invalid", "utf-8");
+      let threw = false;
+      try {
+        await loadConfig(daoRoot);
+      } catch (error) {
+        threw = true;
+        expect((error as Error).message).toContain("Invalid JSON");
+      }
+      expect(threw).toBe(true);
+    } finally {
+      await fs.rm(daoRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("loadConfig throws on invalid mode and strategy", async () => {
+    const daoRoot = await fs.mkdtemp(path.join(os.tmpdir(), "swarm-config-"));
+    try {
+      await fs.writeFile(path.join(daoRoot, "config.json"), JSON.stringify({ mode: "typo" }), "utf-8");
+      await expect(loadConfig(daoRoot)).rejects.toThrow('mode');
+      await fs.writeFile(
+        path.join(daoRoot, "config.json"),
+        JSON.stringify({ deliberation: { strategy: "nope" } }),
+        "utf-8",
+      );
+      await expect(loadConfig(daoRoot)).rejects.toThrow('deliberation.strategy');
+    } finally {
+      await fs.rm(daoRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("loadConfig deep-merges nested execution config", async () => {
+    const daoRoot = await fs.mkdtemp(path.join(os.tmpdir(), "swarm-config-"));
+    try {
+      await fs.writeFile(
+        path.join(daoRoot, "config.json"),
+        JSON.stringify({ execution: { isolation: "worktree" } }),
+        "utf-8",
+      );
+      const loaded = await loadConfig(daoRoot);
+      expect(loaded.execution?.isolation).toBe("worktree");
+      expect(loaded.mode).toBe("opt-in");
+    } finally {
+      await fs.rm(daoRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("loadConfig validates timeout and chars bounds", async () => {
+    const daoRoot = await fs.mkdtemp(path.join(os.tmpdir(), "swarm-config-"));
+    try {
+      await fs.writeFile(
+        path.join(daoRoot, "config.json"),
+        JSON.stringify({ tmux: { timeoutMs: 999999999 } }),
+        "utf-8",
+      );
+      await expect(loadConfig(daoRoot)).rejects.toThrow('timeoutMs');
+      await fs.writeFile(
+        path.join(daoRoot, "config.json"),
+        JSON.stringify({ deliberation: { charsPerAgent: 5 } }),
+        "utf-8",
+      );
+      await expect(loadConfig(daoRoot)).rejects.toThrow('charsPerAgent');
+    } finally {
+      await fs.rm(daoRoot, { recursive: true, force: true });
+    }
+  });
 });
