@@ -31,6 +31,7 @@ function repairState(value: Partial<DAOState>, daoRoot: string): DAOState {
 /** Instance-owned filesystem adapter. No process-global DAO state or write cache. */
 export class FileDaoStateRepository implements DaoStateRepositoryPort {
   private readonly writeCache = new Map<string, string>();
+  private writeQueue: Promise<void> = Promise.resolve();
 
   private constructor(
     private readonly state: DAOState,
@@ -56,9 +57,14 @@ export class FileDaoStateRepository implements DaoStateRepositoryPort {
   }
 
   public async persist(): Promise<void> {
-    await fs.mkdir(this.daoRoot, { recursive: true });
-    await this.writeIfChanged(path.join(this.daoRoot, "state.json"), this.state);
-    await this.persistDecisions();
+    const task = async (): Promise<void> => {
+      await fs.mkdir(this.daoRoot, { recursive: true });
+      await this.writeIfChanged(path.join(this.daoRoot, "state.json"), this.state);
+      await this.persistDecisions();
+    };
+    const queued = this.writeQueue.then(task, task);
+    this.writeQueue = queued.catch(() => {});
+    await queued;
   }
 
   private async persistDecisions(): Promise<void> {
@@ -89,7 +95,26 @@ export class FileDaoStateRepository implements DaoStateRepositoryPort {
   private async writeIfChanged(filePath: string, value: unknown): Promise<void> {
     const serialized = formatJson(value);
     if (this.writeCache.get(filePath) === serialized) return;
-    await fs.writeFile(filePath, serialized, "utf8");
+    await writeAtomic(filePath, serialized);
     this.writeCache.set(filePath, serialized);
+  }
+}
+
+async function writeAtomic(filePath: string, content: string): Promise<void> {
+  const tmpPath = `${filePath}.tmp-${process.pid}-${Math.random().toString(36).slice(2, 10)}`;
+  try {
+    await fs.writeFile(tmpPath, content, "utf8");
+    await fs.rename(tmpPath, filePath);
+  } catch (error) {
+    await safeUnlink(tmpPath);
+    throw error;
+  }
+}
+
+async function safeUnlink(p: string): Promise<void> {
+  try {
+    await fs.unlink(p);
+  } catch {
+    // Ignore — file may not exist or may already be gone.
   }
 }
