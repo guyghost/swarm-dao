@@ -59,12 +59,48 @@ export class FileDaoStateRepository implements DaoStateRepositoryPort {
   public async persist(): Promise<void> {
     const task = async (): Promise<void> => {
       await fs.mkdir(this.daoRoot, { recursive: true });
-      await this.writeIfChanged(path.join(this.daoRoot, "state.json"), this.state);
-      await this.persistDecisions();
+      await withFileLock(this.daoRoot, async () => {
+        await this.checkNoConcurrentModification();
+        await this.writeIfChanged(path.join(this.daoRoot, "state.json"), this.state);
+        await this.persistDecisions();
+      });
     };
     const queued = this.writeQueue.then(task, task);
     this.writeQueue = queued.catch(() => {});
     await queued;
+  }
+
+  /**
+   * Fail-fast optimistic concurrency: if another process persisted a state
+   * with proposals/ids we don't know about, refuse to overwrite it instead
+   * of silently dropping votes/proposals (last-writer-wins).
+   */
+  private async checkNoConcurrentModification(): Promise<void> {
+    let onDisk: Partial<DAOState> | null = null;
+    try {
+      onDisk = JSON.parse(await fs.readFile(path.join(this.daoRoot, "state.json"), "utf8")) as Partial<DAOState>;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw error;
+    }
+    if (!onDisk || !Array.isArray(onDisk.proposals)) return;
+    const diskIds = new Set(onDisk.proposals.map((p) => (p as { id?: unknown }).id));
+    const memIds = new Set(this.state.proposals.map((p) => p.id));
+    for (const id of diskIds) {
+      if (!memIds.has(id as number)) {
+        throw new Error(
+          `Concurrent modification detected in ${path.join(this.daoRoot, "state.json")}: ` +
+            `proposal #${String(id)} exists on disk but not in memory. Reopen the repository and retry.`,
+        );
+      }
+    }
+    const diskNext = typeof onDisk.nextProposalId === "number" ? onDisk.nextProposalId : 1;
+    if (diskNext > this.state.nextProposalId) {
+      throw new Error(
+        `Concurrent modification detected in ${path.join(this.daoRoot, "state.json")}: ` +
+          `disk nextProposalId (${diskNext}) is ahead of memory (${this.state.nextProposalId}). Reopen and retry.`,
+      );
+    }
   }
 
   private async persistDecisions(): Promise<void> {
@@ -116,5 +152,55 @@ async function safeUnlink(p: string): Promise<void> {
     await fs.unlink(p);
   } catch {
     // Ignore — file may not exist or may already be gone.
+  }
+}
+
+const LOCK_FILE = "state.lock";
+const LOCK_TIMEOUT_MS = 5000;
+const LOCK_RETRY_MS = 25;
+const LOCK_STALE_MS = 10000;
+
+async function withFileLock<T>(daoRoot: string, fn: () => Promise<T>): Promise<T> {
+  const lockPath = path.join(daoRoot, LOCK_FILE);
+  await fs.mkdir(daoRoot, { recursive: true });
+  const deadline = Date.now() + LOCK_TIMEOUT_MS;
+  for (;;) {
+    try {
+      await fs.writeFile(lockPath, JSON.stringify({ pid: process.pid, ts: Date.now() }), {
+        flag: "wx",
+      });
+      break;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      if (await isLockStale(lockPath)) {
+        await safeUnlink(lockPath);
+        continue;
+      }
+      if (Date.now() >= deadline) {
+        throw new Error(`Timed out acquiring DAO lock at ${lockPath} (another writer holds it)`);
+      }
+      await new Promise((r) => setTimeout(r, LOCK_RETRY_MS));
+    }
+  }
+  try {
+    return await fn();
+  } finally {
+    await safeUnlink(lockPath);
+  }
+}
+
+async function isLockStale(lockPath: string): Promise<boolean> {
+  try {
+    const raw = await fs.readFile(lockPath, "utf8");
+    const parsed = JSON.parse(raw) as { ts?: unknown };
+    return typeof parsed.ts === "number" && Date.now() - parsed.ts > LOCK_STALE_MS;
+  } catch {
+    // Unreadable lock: treat missing as not-stale (retry), corrupt as stale.
+    try {
+      await fs.stat(lockPath);
+    } catch {
+      return false;
+    }
+    return true;
   }
 }
