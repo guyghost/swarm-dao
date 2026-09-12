@@ -8,7 +8,7 @@ import { exec } from "node:child_process";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
-import { collectAttention, FsAttentionStore, loadConfig } from "@guyghost/swarm-dao-core";
+import { collectAttention, FsAttentionStore, getDaoRoot, loadConfig } from "@guyghost/swarm-dao-core";
 import { loadProjectImprovementConfig } from "@guyghost/swarm-dao-improvement";
 import { c, GLYPH } from "./render.js";
 
@@ -84,9 +84,35 @@ export async function cmdDoctor(cwd: string): Promise<number> {
         },
   );
 
+  // Project config — strict validation surfaces typos instead of fail-open.
+  try {
+    const config = await loadConfig(getDaoRoot(cwd));
+    const enforceEmpty = config.mode === "enforce" && (!config.criticalPaths || config.criticalPaths.length === 0);
+    checks.push(
+      enforceEmpty
+        ? {
+            name: "project config",
+            level: "warn" as Level,
+            detail: 'mode "enforce" with no criticalPaths allows everything',
+            hint: 'set criticalPaths in .dao/config.json or use mode "suggest"',
+          }
+        : {
+            name: "project config",
+            level: "ok" as Level,
+            detail: `mode "${config.mode}" valid`,
+          },
+    );
+  } catch (error) {
+    checks.push({
+      name: "project config",
+      level: "fail" as Level,
+      detail: (error as Error).message,
+      hint: "fix .dao/config.json (see models/CHOICE.md and README Configuration)",
+    });
+  }
+
   // DAO storage + agents.
   try {
-    loadConfig(cwd);
     const state = await fs.readFile(path.join(cwd, ".dao", "state.json"), "utf8");
     const agents = (JSON.parse(state) as { agents?: unknown[] }).agents?.length ?? 0;
     checks.push({
