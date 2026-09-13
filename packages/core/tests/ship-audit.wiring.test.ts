@@ -1,6 +1,6 @@
 // Wiring contract: the ship handler must gate dao_ship behind the audit
 // challenge exactly as the approved model specifies (models/ship-audit.md).
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -235,6 +235,27 @@ describe("ship-audit wiring", () => {
     const claim = await store.claim(proposalId);
     expect(claim.acquired).toBe(false);
     await fs.rm(lockPath, { force: true });
+  });
+
+  test("an EPERM liveness probe (live process, another user) is NOT treated as dead (review)", async () => {
+    const store = new FsShipAuditStore(path.dirname(daoRoot));
+    const lockPath = path.join(daoRoot, "ship-audits", `${proposalId}.lock`);
+    await fs.mkdir(path.dirname(lockPath), { recursive: true });
+    await fs.writeFile(lockPath, `${JSON.stringify({ pid: 999999999, ts: Date.now() })}\n`, "utf8");
+    const killSpy = spyOn(process, "kill").mockImplementation(() => {
+      const eperm = new Error("Operation not permitted") as NodeJS.ErrnoException;
+      eperm.code = "EPERM";
+      throw eperm;
+    });
+    try {
+      // EPERM means the process EXISTS (another user): the claim must stay
+      // honoured instead of being reclaimed.
+      const claim = await store.claim(proposalId);
+      expect(claim.acquired).toBe(false);
+    } finally {
+      killSpy.mockRestore();
+      await fs.rm(lockPath, { force: true });
+    }
   });
 
   test("a force bypass fails closed when its record cannot persist", async () => {

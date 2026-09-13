@@ -91,8 +91,12 @@ export class FsShipAuditStore implements ShipAuditStorePort {
         try {
           process.kill(pid, 0); // liveness probe — throws if the process is gone
           // Alive: only age can make the claim abandonable.
-        } catch {
-          return true; // owning process is gone
+        } catch (error) {
+          // POSIX (review): EPERM means the process EXISTS but is owned by
+          // another user — reclaiming on EPERM would break mutual exclusion.
+          // Only ESRCH ("no such process") proves the owner is gone.
+          if ((error as NodeJS.ErrnoException).code === "ESRCH") return true;
+          // Any other probe error: fall through to the age check.
         }
       }
       if (ts !== undefined && Date.now() - ts > FsShipAuditStore.#CLAIM_STALE_MS) return true;
