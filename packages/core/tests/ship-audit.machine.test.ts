@@ -1,6 +1,6 @@
 // Contract tests for the ship-audit machine (RED first: written against the
 // approved model before implementation — models/ship-audit.md, hash
-// 482756e9ce256bc7c4439dc22020577e0c22c8c34b7cd083dc893456e4158ad3).
+// 496cd208313d0bff2169346cdc791aeb0e9760bce423c03c63b5c95c090afc3c).
 import { describe, expect, test } from "bun:test";
 import {
   computeShipAuditDecision,

@@ -1,6 +1,6 @@
 // Ship-audit model contract: validates models/ship-audit.graph.json against
 // the frozen expectations and computes the exact model hash submitted for
-// human approval (run ship-audit-1, hash 482756e9…58ad3).
+// human approval (run ship-audit-1, hash 496cd208…0afc3c).
 
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";

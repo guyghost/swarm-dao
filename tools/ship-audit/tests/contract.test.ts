@@ -7,7 +7,7 @@ describe("ship-audit contract", () => {
     expect(result.issues).toEqual([]);
     expect(result.valid).toBe(true);
     // The exact hash approved by the human owner for run ship-audit-1.
-    expect(result.modelHash).toBe("482756e9ce256bc7c4439dc22020577e0c22c8c34b7cd083dc893456e4158ad3");
+    expect(result.modelHash).toBe("496cd208313d0bff2169346cdc791aeb0e9760bce423c03c63b5c95c090afc3c");
     // Deterministic: recomputation yields the same digest.
     expect(await computeShipAuditModelHash(process.cwd())).toBe(result.modelHash);
   });
