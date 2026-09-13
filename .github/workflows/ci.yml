@@ -59,40 +59,42 @@ jobs:
         run: bun run typecheck
 
       - name: Test
-        # TEMPORARY (test-hang diagnosis): bun's stdout is block-buffered when
-        # piped, so the visible tail of a hung run may lag the real freeze
-        # point. Run under a PTY (script) for unbuffered output, and dump
-        # thread diagnostics from a watchdog WHILE bun is still alive (a
-        # post-timeout dump is useless: SIGTERM has already killed the
-        # process). Also print the runner's readdir order (find, unsorted).
+        # TEMPORARY (test-hang diagnosis): the freeze happens at a constant
+        # WALL-CLOCK point (~2.5s in, right after dry-run.test.ts) on 4/4
+        # fresh runners, while bun spins at 100% CPU with zero allocation.
+        # Discriminating experiments, each under its own timeout:
+        #   A: full readdir order WITHOUT dry-run.test.ts  -> hang follows the
+        #      file, or just the clock?
+        #   B: only the first 10 files (dry-run included)  -> is the short
+        #      sequence enough?
+        #   C: only the first 9 files (no dry-run)         -> baseline.
+        # The step fails if any experiment hangs, but runs them all first.
         run: |
-          echo "readdir order:"; find packages -name '*.test.ts' | sed 's/^/  /'
-          ( while :; do sleep 30; echo "[heartbeat] bun test still running $(date -u +%H:%M:%SZ)"; done ) &
-          wd=$!
-          dump() {
-            echo "=== alive-dump $1 $(date -u +%H:%M:%SZ) ==="
-            ps auxww --forest || true
-            for p in $(pgrep -f "bun test" || true); do
-              echo "--- pid $p ---"
-              tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null; echo
-              grep -E "State|Threads|VmRSS" "/proc/$p/status" 2>/dev/null || true
-              echo "fds:"; ls -l "/proc/$p/fd" 2>/dev/null || true
-              for t in /proc/$p/task/*; do
-                echo "thread $(basename "$t"): wchan=$(cat "$t/wchan" 2>/dev/null || echo '?') $(grep State "$t/status" 2>/dev/null || true)"
-              done
-            done
+          mapfile -t ALL < <(find packages -name '*.test.ts')
+          echo "total files: ${#ALL[@]}"
+          DRY=packages/core/tests/dry-run.test.ts
+          di=-1
+          for i in "${!ALL[@]}"; do [ "${ALL[$i]}" = "$DRY" ] && di=$i; done
+          echo "dry-run index: $di"
+          A=(); for f in "${ALL[@]}"; do [ "$f" != "$DRY" ] && A+=("$f"); done
+          B=("${ALL[@]:0:di+1}")
+          C=("${ALL[@]:0:di}")
+          hang=0
+          exp() {
+            name=$1; shift
+            echo ""
+            echo "===== EXPERIMENT $name: $# files ====="
+            printf '  %s\n' "$@"
+            echo "===== begin $name $(date -u +%H:%M:%S.%3NZ) ====="
+            rc=0
+            TERM=dumb script -qec "timeout 150 bun test $*" /dev/null || rc=$?
+            echo "===== end $name rc=$rc $(date -u +%H:%M:%S.%3NZ) ====="
+            [ "$rc" = "124" ] && { echo ">>> $name HUNG <<<"; hang=1; }
           }
-          ( sleep 90;  dump T90   ) &
-          d90=$!
-          ( sleep 300; dump T300 ) &
-          d300=$!
-          rc=0
-          TERM=dumb script -qec "timeout 420 bun test" /dev/null || rc=$?
-          kill $wd $d90 $d300 2>/dev/null || true
-          if [ "$rc" = "124" ]; then
-            echo "bun test TIMED OUT after 420s (unbuffered PTY output above shows the true freeze point)"
-          fi
-          exit $rc
+          exp B "${B[@]}"
+          exp C "${C[@]}"
+          exp A "${A[@]}"
+          [ "$hang" = "0" ] || exit 99
 
       - name: Integration tests
         run: bun run test:integration
