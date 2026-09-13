@@ -6,12 +6,19 @@ export interface ProposalContext {
   errorMessage?: string;
   lastTransitionTime: string;
   transitionTime: string;
+  /** Recomputed guard decisions (issue #158), populated from machine input. */
+  expectedApprove?: boolean;
+  expectedGatesPass?: boolean;
 }
 
 export interface ProposalMachineInput {
   proposal: Proposal;
   transitionTime: string;
   lastTransitionTime?: string;
+  /** Recomputed by dispatchProposalEvent from live proposal state — guards
+   *  never trust the event payload (issue #158). */
+  expectedApprove?: boolean;
+  expectedGatesPass?: boolean;
 }
 
 export type ProposalEvent =
@@ -42,9 +49,11 @@ const proposalSetup = setup({
     events: {} as ProposalEvent,
   },
   guards: {
-    tallyApproved: ({ event }) => event.type === "APPROVE" && event.tally.approved === true,
-    gatesPassed: ({ event }) =>
-      event.type === "CONTROL_PASS" && event.result.allGatesPassed === true && event.result.blockerCount === 0,
+    // Decision guards recompute from context (populated by
+    // dispatchProposalEvent from the proposal's actual votes / gate replay),
+    // never from the tally/result carried by the event (issue #158).
+    tallyApproved: ({ context }) => context.expectedApprove === true,
+    gatesPassed: ({ context }) => context.expectedGatesPass === true,
   },
   actions: {
     recordTransition: assign({ lastTransitionTime: ({ context }) => context.transitionTime }),
@@ -68,6 +77,8 @@ export function createProposalMachine(initial: ProposalStatus = "open") {
       proposal: input.proposal,
       transitionTime: input.transitionTime,
       lastTransitionTime: input.lastTransitionTime ?? input.transitionTime,
+      expectedApprove: input.expectedApprove,
+      expectedGatesPass: input.expectedGatesPass,
     }),
     states: {
       open: { on: { DELIBERATE: { target: "deliberating", actions: "recordTransition" }, ...escapeHatches } },

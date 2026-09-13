@@ -3,11 +3,21 @@
 // ============================================================
 
 import { allCoordinatorsClosed } from "../governance/delegation.utils.js";
-import { resolveTypeThresholds, tallyVotes } from "../governance/voting.js";
+import { type Electorate, resolveTypeThresholds, tallyVotes } from "../governance/voting.js";
 import type { ChecklistItem, ControlCheckResult, DAOConfig, GateResult, Proposal } from "../types/index.js";
 import { PROPOSAL_TYPE, TYPE_QUORUM } from "../types/index.js";
 
 // ── Gate Definitions ─────────────────────────────────────────
+
+/** Ambient context gates may consult; everything is optional so gates
+ *  degrade gracefully when the caller cannot supply it. */
+export interface GateContext {
+  allProposals?: readonly Proposal[];
+  /** Configured council (state.agents): grounds the quorum denominator. */
+  electorate?: Electorate;
+  /** DAO root: lets gates consult on-disk state (e.g. delegation markers). */
+  daoRoot?: string;
+}
 
 interface GateDefinition {
   id: string;
@@ -16,7 +26,7 @@ interface GateDefinition {
   check: (
     proposal: Proposal,
     config: DAOConfig,
-    allProposals?: readonly Proposal[],
+    context: GateContext,
   ) => { passed: boolean; message: string; details?: Record<string, unknown> };
 }
 
@@ -25,8 +35,8 @@ const GATES: GateDefinition[] = [
     id: "quorum-quality",
     name: "Quorum Quality",
     severity: "blocker",
-    check: (proposal, config) => {
-      const tally = tallyVotes(proposal, config);
+    check: (proposal, config, context) => {
+      const tally = tallyVotes(proposal, config, context.electorate);
       const required = resolveTypeThresholds(proposal, config).quorumPercent;
       return {
         passed: tally.quorumMet,
@@ -112,12 +122,13 @@ const GATES: GateDefinition[] = [
     id: "dependency-readiness",
     name: "Dependency Readiness",
     severity: "info",
-    check: (proposal, _config, allProposals) => {
+    check: (proposal, _config, context) => {
       const dependsOn = proposal.dependsOn;
       if (!dependsOn || dependsOn.length === 0) {
         return { passed: true, message: "No inter-proposal dependencies" };
       }
 
+      const allProposals = context.allProposals;
       if (!allProposals) {
         return {
           passed: true,
@@ -157,13 +168,14 @@ const GATES: GateDefinition[] = [
     id: "dependency-conflict",
     name: "Dependency Conflict",
     severity: "warning",
-    check: (proposal, _config, allProposals) => {
+    check: (proposal, _config, context) => {
       const mine = new Set(
         (proposal.affectedPaths ?? []).map((entry) => entry.trim().replace(/\\/g, "/")).filter(Boolean),
       );
       if (mine.size === 0) {
         return { passed: true, message: "No affected paths declared" };
       }
+      const allProposals = context.allProposals;
       if (!allProposals) {
         return {
           passed: true,
@@ -212,11 +224,15 @@ const GATES: GateDefinition[] = [
     id: "type-specific-quality",
     name: "Type-Specific Quality",
     severity: "blocker",
-    check: (proposal, config) => {
+    check: (proposal, config, context) => {
       const typeQuorum = config.typeQuorum[proposal.type] ?? TYPE_QUORUM[proposal.type];
       if (!typeQuorum) return { passed: true, message: "No type-specific requirements" };
-      const tally = tallyVotes(proposal, config);
-      const passed = tally.quorumMet && tally.approvalScore >= typeQuorum.approvalPercent;
+      const tally = tallyVotes(proposal, config, context.electorate);
+      // tally.quorumMet already applies this type's quorum threshold
+      // (resolveTypeThresholds); approval is compared as an exact fraction.
+      const decisiveWeight = tally.weightedFor + tally.weightedAgainst;
+      const passed =
+        tally.quorumMet && decisiveWeight > 0 && tally.weightedFor * 100 >= typeQuorum.approvalPercent * decisiveWeight;
       return {
         passed,
         message: passed
@@ -305,7 +321,7 @@ function generateChecklist(proposal: Proposal): ChecklistItem[] {
 export function runGates(
   proposal: Proposal,
   config: DAOConfig,
-  options: { allProposals?: readonly Proposal[]; now?: string } = {},
+  options: GateContext & { now?: string } = {},
 ): ControlCheckResult {
   const gates: GateResult[] = [];
   let blockerCount = 0;
@@ -315,7 +331,7 @@ export function runGates(
     // Skip gates not in required list
     if (!config.requiredGates.includes(gateDef.id)) continue;
 
-    const result = gateDef.check(proposal, config, options.allProposals);
+    const result = gateDef.check(proposal, config, options);
     const gate: GateResult = {
       gateId: gateDef.id,
       name: gateDef.name,

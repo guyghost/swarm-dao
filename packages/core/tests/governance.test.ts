@@ -149,6 +149,139 @@ describe("governance/voting", () => {
     expect(Number.isFinite(tally.quorumPercent)).toBe(true);
     expect(tally.weightedAgainst).toBe(0);
   });
+
+  it("silent council members carry their configured weight, not weight 1 (issue #155a)", () => {
+    const proposal = {
+      id: 10,
+      title: "Weighted electorate",
+      type: "technical-change" as const,
+      description: "d",
+      proposedBy: "test",
+      status: "deliberating" as const,
+      votes: [{ agentId: "strategist", agentName: "S", position: "for" as const, reasoning: "ok", weight: 3 }],
+      agentOutputs: [],
+      createdAt: new Date().toISOString(),
+    };
+    // strategist(3) voted; architect(3) and critic(3) silent → denominator 9.
+    const electorate = [
+      { id: "strategist", weight: 3 },
+      { id: "architect", weight: 3 },
+      { id: "critic", weight: 3 },
+    ];
+    const tally = tallyVotes(proposal, DEFAULT_CONFIG, electorate);
+    expect(tally.quorumPercent).toBe(33); // 3/9, not 60
+    expect(tally.quorumMet).toBe(false);
+  });
+
+  it("the denominator never undercuts the votes cast, even with many outsider votes (issue #155b)", () => {
+    const votes = ["h1", "h2", "h3", "h4", "h5"].map((agentId) => ({
+      agentId,
+      agentName: agentId,
+      position: "for" as const,
+      reasoning: "ok",
+      weight: 1,
+    }));
+    const proposal = {
+      id: 11,
+      title: "Outsiders",
+      type: "technical-change" as const,
+      description: "d",
+      proposedBy: "test",
+      status: "deliberating" as const,
+      votes,
+      agentOutputs: [
+        { agentId: "a", agentName: "A", role: "r", content: "", durationMs: 1 },
+        { agentId: "b", agentName: "B", role: "r", content: "", durationMs: 1 },
+      ],
+      createdAt: new Date().toISOString(),
+    };
+    const tally = tallyVotes(proposal, DEFAULT_CONFIG);
+    expect(tally.quorumPercent).toBeLessThanOrEqual(100);
+    expect(tally.quorumMet).toBe(true); // everyone visible voted
+  });
+
+  it("a single human vote cannot reach quorum against the configured council (issue #155c)", () => {
+    const proposal = {
+      id: 12,
+      title: "Lone CLI vote",
+      type: "technical-change" as const,
+      description: "d",
+      proposedBy: "cli",
+      status: "deliberating" as const,
+      votes: [{ agentId: "cli-user", agentName: "cli-user", position: "for" as const, reasoning: "ok", weight: 1 }],
+      agentOutputs: [],
+      createdAt: new Date().toISOString(),
+    };
+    const electorate = initializeAgents();
+    const tally = tallyVotes(proposal, DEFAULT_CONFIG, electorate);
+    expect(tally.quorumMet).toBe(false);
+    expect(tally.approved).toBe(false);
+  });
+
+  it("compares approval as an exact fraction — rounding must not clear the bar (issue #156)", () => {
+    const votes = [
+      { agentId: "a", agentName: "A", position: "for" as const, reasoning: "ok", weight: 1 },
+      { agentId: "b", agentName: "B", position: "for" as const, reasoning: "ok", weight: 1 },
+      { agentId: "c", agentName: "C", position: "against" as const, reasoning: "no", weight: 1 },
+    ];
+    const make = (): Proposal => ({
+      id: 13,
+      title: "Rounding",
+      type: "governance-change" as const,
+      description: "d",
+      proposedBy: "test",
+      status: "deliberating" as const,
+      votes: [...votes],
+      agentOutputs: [],
+      createdAt: new Date().toISOString(),
+    });
+    const config = {
+      ...DEFAULT_CONFIG,
+      quorumPercent: 0,
+      approvalThreshold: 67,
+      typeQuorum: {
+        ...DEFAULT_CONFIG.typeQuorum,
+        "governance-change": { quorumPercent: 0, approvalPercent: 67, description: "test" },
+      },
+    };
+
+    // 2/1 = 66.67% — Math.round would report 67 and clear the 67% bar.
+    const under = tallyVotes(make(), config);
+    expect(under.approvalScore).toBe(67); // display rounding
+    expect(under.approved).toBe(false); // but the decision uses the exact fraction
+
+    // 3/1 = 75% clears it.
+    const over = tallyVotes({ ...make(), votes: [...votes, { ...votes[0], agentId: "d", agentName: "D" }] }, config);
+    expect(over.approved).toBe(true);
+  });
+
+  it("applies the quorum threshold as an exact fraction too (issue #156)", () => {
+    // 2 of 3 weight voted = 66.67% — must not clear a 67% quorum bar.
+    const proposal = {
+      id: 14,
+      title: "Quorum rounding",
+      type: "governance-change" as const,
+      description: "d",
+      proposedBy: "test",
+      status: "deliberating" as const,
+      votes: [
+        { agentId: "a", agentName: "A", position: "for" as const, reasoning: "ok", weight: 1 },
+        { agentId: "b", agentName: "B", position: "abstain" as const, reasoning: "meh", weight: 1 },
+      ],
+      agentOutputs: [],
+      createdAt: new Date().toISOString(),
+    };
+    const electorate = [
+      { id: "a", weight: 1 },
+      { id: "b", weight: 1 },
+      { id: "c", weight: 1 },
+    ];
+    const config = { ...DEFAULT_CONFIG, quorumPercent: 67, approvalThreshold: 51 };
+    const tally = tallyVotes(proposal, config, electorate);
+    expect(tally.quorumPercent).toBe(67); // display rounding of 66.67
+    expect(tally.quorumMet).toBe(false);
+    expect(tally.approved).toBe(false);
+  });
 });
 
 // ── Scoring ─────────────────────────────────────────────────
@@ -252,7 +385,10 @@ describe("governance/lifecycle", () => {
       description: "Test",
       proposedBy: "test",
       status: "open" as const,
-      votes: [],
+      votes: [
+        { agentId: "a", agentName: "A", position: "for" as const, reasoning: "ok", weight: 1 },
+        { agentId: "b", agentName: "B", position: "for" as const, reasoning: "ok", weight: 1 },
+      ],
       agentOutputs: [],
       createdAt: new Date().toISOString(),
     };
@@ -261,22 +397,28 @@ describe("governance/lifecycle", () => {
     expect(r1.ok).toBe(true);
     expect(proposal.status).toBe("deliberating");
 
-    const r2 = dispatchProposalEvent(proposal, {
-      type: "APPROVE",
-      tally: {
-        proposalId: 1,
-        approved: true,
-        quorumMet: true,
-        totalAgents: 5,
-        votingAgents: 5,
-        quorumPercent: 100,
-        weightedFor: 10,
-        weightedAgainst: 0,
-        totalVotingWeight: 10,
-        approvalScore: 100,
-        votes: [],
+    // Guarded events recompute the decision (issue #158): config is required,
+    // and the proposal's real votes must genuinely pass.
+    const r2 = dispatchProposalEvent(
+      proposal,
+      {
+        type: "APPROVE",
+        tally: {
+          proposalId: 1,
+          approved: true,
+          quorumMet: true,
+          totalAgents: 5,
+          votingAgents: 5,
+          quorumPercent: 100,
+          weightedFor: 10,
+          weightedAgainst: 0,
+          totalVotingWeight: 10,
+          approvalScore: 100,
+          votes: [],
+        },
       },
-    });
+      { config: DEFAULT_CONFIG },
+    );
     expect(r2.ok).toBe(true);
     expect(proposal.status).toBe("approved");
   });

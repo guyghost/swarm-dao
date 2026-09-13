@@ -36,7 +36,12 @@ export class ControlProposalUseCase {
     }
 
     const now = this.dependencies.clock.now();
-    const control = runGates(proposal, state.config, { allProposals: state.proposals, now });
+    const control = runGates(proposal, state.config, {
+      allProposals: state.proposals,
+      electorate: state.agents,
+      daoRoot: state.daoRoot,
+      now,
+    });
     state.controlResults[proposal.id] = control;
     if (control.allGatesPassed) {
       const transition = dispatchProposalEvent(
@@ -44,6 +49,9 @@ export class ControlProposalUseCase {
         { type: "CONTROL_PASS", result: control },
         {
           clock: this.dependencies.clock,
+          config: state.config,
+          electorate: state.agents,
+          allProposals: state.proposals,
         },
       );
       if (!transition.ok) return transition;

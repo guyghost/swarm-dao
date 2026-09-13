@@ -736,10 +736,11 @@ async function cmdVote(cwd: string, positional: string[], flags: Record<string, 
   const p = getProposal(id);
   if (!p) err(`proposal #${id} not found`);
 
-  await addVote(id, { agentId: agent, agentName: agent, position, reasoning, weight });
+  const result = await addVote(id, { agentId: agent, agentName: agent, position, reasoning, weight });
+  if (!result.ok) err(result.error);
   await recordAudit(id, "governance", "vote-cast", agent, `${position} (w=${weight}): ${reasoning}`);
   await saveState();
-  info(`✓ Vote recorded for #${id}: ${positionRaw} by ${agent}`);
+  info(`✓ Vote ${result.replaced ? "updated" : "recorded"} for #${id}: ${positionRaw} by ${agent}`);
   info(c.dim(`  → next: swarm-dao show ${id} · ship when votes settle: swarm-dao ship ${id}`));
 }
 

@@ -186,38 +186,51 @@ describe("CLI E2E", () => {
         setState(s);
       }
 
-      const { createProposal, dispatchProposalEvent } = await import("@guyghost/swarm-dao-core");
+      const { createProposal, dispatchProposalEvent, DEFAULT_CONFIG } = await import("@guyghost/swarm-dao-core");
       const p = await createProposal(title, "product-feature", "desc", "test");
       if (dependsOn) p.dependsOn = dependsOn;
+      // Guarded events recompute the decision (issue #158): real votes + config.
+      p.votes = [
+        { agentId: "a", agentName: "A", position: "for", reasoning: "ok", weight: 1 },
+        { agentId: "b", agentName: "B", position: "for", reasoning: "ok", weight: 1 },
+      ];
       dispatchProposalEvent(p, { type: "DELIBERATE" });
-      dispatchProposalEvent(p, {
-        type: "APPROVE",
-        tally: {
-          proposalId: p.id,
-          approved: true,
-          quorumMet: true,
-          totalAgents: 5,
-          votingAgents: 5,
-          quorumPercent: 100,
-          weightedFor: 10,
-          weightedAgainst: 0,
-          totalVotingWeight: 10,
-          approvalScore: 100,
-          votes: [],
+      dispatchProposalEvent(
+        p,
+        {
+          type: "APPROVE",
+          tally: {
+            proposalId: p.id,
+            approved: true,
+            quorumMet: true,
+            totalAgents: 5,
+            votingAgents: 5,
+            quorumPercent: 100,
+            weightedFor: 10,
+            weightedAgainst: 0,
+            totalVotingWeight: 10,
+            approvalScore: 100,
+            votes: [],
+          },
         },
-      });
-      dispatchProposalEvent(p, {
-        type: "CONTROL_PASS",
-        result: {
-          proposalId: p.id,
-          timestamp: new Date().toISOString(),
-          allGatesPassed: true,
-          blockerCount: 0,
-          warningCount: 0,
-          gates: [],
-          checklist: [],
+        { config: DEFAULT_CONFIG },
+      );
+      dispatchProposalEvent(
+        p,
+        {
+          type: "CONTROL_PASS",
+          result: {
+            proposalId: p.id,
+            timestamp: new Date().toISOString(),
+            allGatesPassed: true,
+            blockerCount: 0,
+            warningCount: 0,
+            gates: [],
+            checklist: [],
+          },
         },
-      });
+        { config: DEFAULT_CONFIG },
+      );
       await saveState();
       return p.id;
     }

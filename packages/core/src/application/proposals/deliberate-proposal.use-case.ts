@@ -93,12 +93,18 @@ export class DeliberateProposalUseCase {
     proposal.agentOutputs = outputs;
     const compositeScore = calculateCompositeScore(outputs);
     proposal.compositeScore = compositeScore;
-    const tally = tallyVotes(proposal, state.config);
+    // Ground the quorum in the configured council (issue #155) and have the
+    // APPROVE guard recompute the tally instead of trusting this one (#158).
+    const tally = tallyVotes(proposal, state.config, agents);
     const synthesisText = synthesize(proposal, agents, outputs, tally);
     proposal.synthesis = synthesisText;
 
     const decision = tally.approved
-      ? dispatchProposalEvent(proposal, { type: "APPROVE", tally }, { clock: this.dependencies.clock })
+      ? dispatchProposalEvent(
+          proposal,
+          { type: "APPROVE", tally },
+          { clock: this.dependencies.clock, config: state.config, electorate: agents },
+        )
       : dispatchProposalEvent(proposal, { type: "REJECT" }, { clock: this.dependencies.clock });
     if (!decision.ok) return decision;
     this.audit(

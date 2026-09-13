@@ -10,6 +10,8 @@
 // ============================================================
 
 import { createActor } from "xstate";
+import { runGates } from "../control/gates.js";
+import { type Electorate, tallyVotes } from "../governance/voting.js";
 import {
   createProposalMachine,
   isProposalFinal,
@@ -18,7 +20,7 @@ import {
 } from "../models/proposal.machine.js";
 import type { ClockPort } from "../ports/clock.js";
 import { systemClock } from "../ports/clock.js";
-import type { Proposal, ProposalStatus } from "../types/index.js";
+import type { DAOConfig, Proposal, ProposalStatus } from "../types/index.js";
 
 export type DispatchResult = { ok: true; status: ProposalStatus } | { ok: false; error: string };
 
@@ -34,7 +36,15 @@ export type DispatchResult = { ok: true; status: ProposalStatus } | { ok: false;
 export function dispatchProposalEvent(
   proposal: Proposal,
   event: ProposalEvent,
-  options: { clock?: ClockPort } = {},
+  options: {
+    clock?: ClockPort;
+    /** Required for guarded events (APPROVE, CONTROL_PASS): the guard
+     *  decision is recomputed from the proposal's real votes/gates, the
+     *  event payload is never trusted (issue #158). */
+    config?: DAOConfig;
+    electorate?: Electorate;
+    allProposals?: readonly Proposal[];
+  } = {},
 ): DispatchResult {
   // Terminal states are final: no event may leave them. This guard
   // makes the invariant explicit rather than relying on the actor's
@@ -48,14 +58,33 @@ export function dispatchProposalEvent(
   }
 
   const transitionTime = (options.clock ?? systemClock).now();
+
+  const machineInput: ProposalMachineInput = {
+    proposal,
+    transitionTime,
+    lastTransitionTime: transitionTime,
+  };
+  if (event.type === "APPROVE") {
+    if (!options.config) {
+      return {
+        ok: false,
+        error: 'Event "APPROVE" requires config so the tally can be recomputed from the proposal\'s votes.',
+      };
+    }
+    machineInput.expectedApprove = tallyVotes(proposal, options.config, options.electorate).approved;
+  } else if (event.type === "CONTROL_PASS") {
+    if (!options.config) {
+      return {
+        ok: false,
+        error: 'Event "CONTROL_PASS" requires config so the gates can be replayed against the proposal.',
+      };
+    }
+    const replay = runGates(proposal, options.config, { allProposals: options.allProposals });
+    machineInput.expectedGatesPass = replay.allGatesPassed && replay.blockerCount === 0;
+  }
+
   const machine = createProposalMachine(proposal.status);
-  const actor = createActor(machine, {
-    input: {
-      proposal,
-      transitionTime,
-      lastTransitionTime: transitionTime,
-    } satisfies ProposalMachineInput,
-  });
+  const actor = createActor(machine, { input: machineInput });
   actor.start();
 
   const before = actor.getSnapshot();

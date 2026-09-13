@@ -340,6 +340,9 @@ export interface DAOConfig {
   requiredGates: string[];
   typeQuorum: Partial<Record<ProposalType, TypeQuorumConfig>>;
   quorumFloor: number;
+  /** Upper bound for a single vote's weight (CLI/MCP addVote). Default 3,
+   *  matching the heaviest default council agent. */
+  maxVoteWeight?: number;
   staleThresholdHours?: number;
   healthWeights?: HealthWeights;
   /**

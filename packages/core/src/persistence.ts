@@ -660,14 +660,43 @@ export function listProposals(): Proposal[] {
   return getState().proposals;
 }
 
-export async function addVote(proposalId: number, vote: Vote): Promise<boolean> {
+/** Default cap for a single vote's weight (issue #154): matches the heaviest
+ *  default council agent weight. Configurable via `config.maxVoteWeight`. */
+const DEFAULT_MAX_VOTE_WEIGHT = 3;
+
+export type AddVoteResult = { ok: true; replaced: boolean } | { ok: false; error: string };
+
+/**
+ * Record a vote on a proposal (issue #154):
+ * - a vote REPLACES any prior vote from the same agentId (same semantics as
+ *   `mergeVotes` — one identity, one vote),
+ * - votes are only accepted while the proposal is open or deliberating,
+ * - the weight is bounded by `config.maxVoteWeight` (default 3).
+ */
+export async function addVote(proposalId: number, vote: Vote): Promise<AddVoteResult> {
   const s = getState();
   const proposal = s.proposals.find((p) => p.id === proposalId);
-  if (!proposal) return false;
-  proposal.votes.push(vote);
+  if (!proposal) return { ok: false, error: `Proposal #${proposalId} not found.` };
+  if (proposal.status !== "open" && proposal.status !== "deliberating") {
+    return {
+      ok: false,
+      error: `Proposal #${proposalId} is "${proposal.status}"; votes are only accepted while open or deliberating.`,
+    };
+  }
+  const maxWeight = s.config.maxVoteWeight ?? DEFAULT_MAX_VOTE_WEIGHT;
+  if (!Number.isFinite(vote.weight) || vote.weight <= 0) {
+    return { ok: false, error: `Vote weight must be a positive number (got ${vote.weight}).` };
+  }
+  if (vote.weight > maxWeight) {
+    return { ok: false, error: `Vote weight ${vote.weight} exceeds the maximum allowed weight (${maxWeight}).` };
+  }
+  const existingIndex = proposal.votes.findIndex((v) => v.agentId === vote.agentId);
+  const replaced = existingIndex >= 0;
+  if (replaced) proposal.votes[existingIndex] = vote;
+  else proposal.votes.push(vote);
   recordVoteCast(vote.agentId, vote.position, vote.weight);
   await saveState();
-  return true;
+  return { ok: true, replaced };
 }
 
 export async function storeAgentOutput(proposalId: number, output: AgentOutput): Promise<boolean> {
