@@ -349,7 +349,7 @@ ${voteReasoning}
 ${riskScore}`;
 }
 
-function createPiHostAdapter(_pi: ExtensionAPI, ctx?: ExtensionCommandContext): HostAdapter {
+export function createPiHostAdapter(_pi: ExtensionAPI, ctx?: ExtensionCommandContext): HostAdapter {
   const parentSessionModel = detectParentSessionModel(ctx);
 
   return {
@@ -363,6 +363,20 @@ function createPiHostAdapter(_pi: ExtensionAPI, ctx?: ExtensionCommandContext): 
       const startTime = Date.now();
       const model = params.model;
       const isRoundTable = params.proposal.id === 0 && params.proposal.title === "Round Table Suggestions";
+
+      // E-host (models/agent-runtime.md): the pi host can only run the pi
+      // harness. A resolved harness that is not "pi" is a typed per-agent
+      // failure — never a spawn attempt, never a throw.
+      if (params.harness && params.harness !== "pi") {
+        return {
+          agentId: params.agent.id,
+          agentName: params.agent.name,
+          role: params.agent.role,
+          content: "",
+          durationMs: Date.now() - startTime,
+          error: `harness '${params.harness}' cannot run on the pi host: this host only runs the pi harness (E-host)`,
+        };
+      }
 
       // Real Pi subprocess spawning is the default so round tables and
       // deliberations reach actual models. Disable explicitly via
@@ -1089,6 +1103,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
             deliberationMode: "auto",
             controlToolName: "dao_check",
             failOnGateFailure: true,
+            hostDefaultHarness: "pi",
             repository,
             onDeliberationProgress: (update) => {
               if (onUpdate) {

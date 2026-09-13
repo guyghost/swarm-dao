@@ -14,6 +14,7 @@
 import type { AgentWorkerPort } from "../ports/host.js";
 import type { AgentOutput, DAOAgent, Proposal } from "../types/index.js";
 import type { ModelResolutionContext } from "./model.js";
+import { type RuntimeResolutionContext, resolveAgentRuntime } from "./runtime.js";
 import { buildDispatchInstructions } from "./swarm.js";
 
 /**
@@ -60,6 +61,8 @@ export interface SequentialDispatchOptions extends PriorAnalysesOptions {
   onUpdate?: (update: { agentId: string; agentName: string; phase: "started" | "completed" | "error" }) => void;
   /** Shared project brief injected into every participant's prompt. */
   projectBrief?: string;
+  /** Runtime resolution context (models/agent-runtime.md). */
+  runtime?: RuntimeResolutionContext;
 }
 
 /**
@@ -78,6 +81,7 @@ export async function dispatchSequentialSwarm(
 ): Promise<AgentOutput[]> {
   const instructions = buildDispatchInstructions(proposal, [...agents], modelContext, {
     projectBrief: options.projectBrief,
+    runtime: options.runtime,
   });
   const agentById = new Map(agents.map((agent) => [agent.id, agent]));
   const outputs: AgentOutput[] = [];
@@ -92,12 +96,40 @@ export async function dispatchSequentialSwarm(
     const prompt = priorSection ? `${instruction.prompt}\n\n${priorSection}` : instruction.prompt;
 
     let output: AgentOutput;
+    // Runtime resolution (models/agent-runtime.md): typed failure ⇒ error
+    // output for this agent only; the pipeline continues.
+    let harness: string | undefined;
+    if (options.runtime) {
+      const resolution = resolveAgentRuntime(agent, instruction.model, options.runtime);
+      if (!resolution.ok) {
+        output = {
+          agentId: instruction.agentId,
+          agentName: instruction.agentName,
+          role: agent.role,
+          content: "",
+          durationMs: 0,
+          error: resolution.message,
+        };
+        outputs.push(output);
+        options.onUpdate?.({
+          agentId: instruction.agentId,
+          agentName: instruction.agentName,
+          phase: "error",
+        });
+        continue;
+      }
+      harness = resolution.runtime.harness;
+    } else {
+      harness = agent.harness;
+    }
+
     try {
       output = await adapter.spawnAgent({
         agent,
         proposal,
         systemPrompt: prompt,
         model: instruction.model,
+        harness,
         timeoutMs: instruction.timeoutMs,
       });
     } catch (err: unknown) {

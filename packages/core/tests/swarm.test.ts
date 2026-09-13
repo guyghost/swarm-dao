@@ -8,6 +8,7 @@ import {
   setState,
 } from "@guyghost/swarm-dao-core";
 import { buildModelResolutionContext } from "../src/intelligence/model.js";
+import { buildRuntimeResolutionContext } from "../src/intelligence/runtime.js";
 import { buildDispatchInstructions, dispatchSwarm, formatDispatchPlan } from "../src/intelligence/swarm.js";
 import type { AgentOutput, DAOAgent, HostAdapter, Proposal } from "../src/types/index.js";
 
@@ -208,5 +209,115 @@ describe("handleDaoRoundtable — batched audit writes (task 8)", () => {
       setState(null);
       await fs.rm(daoRoot, { recursive: true, force: true }).catch(() => {});
     }
+  });
+});
+
+describe("intelligence/swarm.ts harness runtime (models/agent-runtime.md)", () => {
+  const harnessProposal: Proposal = {
+    id: 11,
+    title: "Harness test",
+    type: "product-feature",
+    description: "desc",
+    proposedBy: "user",
+    status: "deliberating",
+    votes: [],
+    agentOutputs: [],
+    createdAt: new Date().toISOString(),
+  };
+
+  it("renders a Harness line per agent when a runtime context resolves one (§8.4 MCP plan)", () => {
+    const agents: DAOAgent[] = [
+      { ...briefAgent, id: "architect", harness: "codex", model: "gpt-5.4" },
+      { ...briefAgent, id: "critic", harness: "claude" },
+    ];
+    const modelContext = buildModelResolutionContext("dao-default", {});
+    const runtimeContext = buildRuntimeResolutionContext({
+      projectRuntime: { defaultHarness: "claude" },
+      hostDefaultHarness: "pi",
+    });
+    const instructions = buildDispatchInstructions(harnessProposal, agents, modelContext, {
+      runtime: runtimeContext,
+    });
+    expect(instructions[0]?.harness).toBe("codex");
+    expect(instructions[1]?.harness).toBe("claude");
+
+    const plan = formatDispatchPlan(harnessProposal, instructions);
+    expect(plan).toMatch(/- Harness: codex \(agent override\)/);
+    expect(plan).toMatch(/- Harness: claude \(agent override\)/);
+  });
+
+  it("renders a warning line instead of throwing when runtime resolution fails (I1 totality)", () => {
+    const agents: DAOAgent[] = [{ ...briefAgent, id: "critic", harness: "BAD ID" }];
+    const modelContext = buildModelResolutionContext("dao-default", {});
+    const instructions = buildDispatchInstructions(harnessProposal, agents, modelContext, {
+      runtime: buildRuntimeResolutionContext({}),
+    });
+    expect(instructions[0]?.harness).toBeUndefined();
+    const plan = formatDispatchPlan(harnessProposal, instructions);
+    expect(plan).toContain("⚠️");
+    expect(plan).toContain("critic");
+  });
+
+  it("omits the Harness line entirely when no runtime context is provided", () => {
+    const modelContext = buildModelResolutionContext("dao-default", {});
+    const instructions = buildDispatchInstructions(harnessProposal, [briefAgent], modelContext);
+    const plan = formatDispatchPlan(harnessProposal, instructions);
+    expect(plan).not.toContain("Harness:");
+  });
+
+  it("dispatchSwarm passes harness per spawn and converts E-failures into error outputs (§8.6)", async () => {
+    const spawnCalls: Array<Record<string, unknown>> = [];
+    const fakeHost: HostAdapter = {
+      hostId: "herdr",
+      getSessionModel: () => undefined,
+      spawnAgent: async (params) => {
+        spawnCalls.push({ ...params });
+        return {
+          agentId: params.agent.id,
+          content: "ok",
+          model: "test",
+          error: undefined,
+        };
+      },
+    };
+    const agents: DAOAgent[] = [
+      { ...briefAgent, id: "critic", harness: "codex", model: "gpt-5.4" },
+      { ...briefAgent, id: "broken", harness: "BAD ID" },
+    ];
+    const outputs = await dispatchSwarm(
+      harnessProposal,
+      agents,
+      fakeHost,
+      4,
+      buildModelResolutionContext("dao-default", {}),
+      undefined,
+      undefined,
+      {
+        runtime: buildRuntimeResolutionContext({}),
+      },
+    );
+
+    expect(spawnCalls).toHaveLength(1); // only the resolvable agent reaches the host
+    expect(spawnCalls[0]?.harness).toBe("codex");
+    expect(spawnCalls[0]?.model).toBe("gpt-5.4");
+
+    const broken = outputs.find((o) => o.agentId === "broken");
+    expect(broken?.error).toContain("harness");
+    expect(outputs.find((o) => o.agentId === "critic")?.error).toBeUndefined();
+  });
+
+  it("passes agent.harness even without a runtime context (D1 row 1)", async () => {
+    const spawnCalls: Array<Record<string, unknown>> = [];
+    const fakeHost: HostAdapter = {
+      hostId: "herdr",
+      getSessionModel: () => undefined,
+      spawnAgent: async (params) => {
+        spawnCalls.push({ ...params });
+        return { agentId: params.agent.id, content: "ok", model: "test" };
+      },
+    };
+    const agents: DAOAgent[] = [{ ...briefAgent, id: "critic", harness: "claude" }];
+    await dispatchSwarm(harnessProposal, agents, fakeHost, 4, buildModelResolutionContext("dao-default", {}));
+    expect(spawnCalls[0]?.harness).toBe("claude");
   });
 });

@@ -41,6 +41,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import type { AgentOutput, DAOAgent, HostAdapter, Proposal } from "@guyghost/swarm-dao-core";
+import { HARNESS_MODEL_FLAGS, isValidModelId } from "@guyghost/swarm-dao-core";
 /** Minimal command surface the adapter needs (node:child_process-backed by default).
  *
  * Commands are passed as ARGV — never as shell strings. The default runner
@@ -164,6 +165,11 @@ export interface HerdrAdapterOptions {
   /** herdr agent kind: pi, claude, codex, gemini, cursor, grok, opencode…
    * Required for deliberation — the kind's executable must be installed. */
   kind?: string;
+  /** Project-level runtime.defaultHarness — used when a spawn carries no
+   * explicit harness (D1 fallback, overrides the legacy kind). */
+  defaultHarness?: string;
+  /** Per-harness model flag overrides (runtime.harnessModelFlag). */
+  harnessModelFlag?: Record<string, string>;
   /** Extra arguments passed to the agent executable (after herdr's --). */
   agentArgs?: readonly string[];
   /** Per-agent prompt timeout in ms (default 5 min; herdr max 300000). */
@@ -524,6 +530,7 @@ export function createHerdrHostAdapter(options: HerdrAdapterOptions): HostAdapte
     prompt: string,
     timeoutMs: number,
     startedAt: number,
+    runtime?: { model?: string; harness?: string },
   ): Promise<AgentOutput> => {
     // Duration is stamped at RETURN time — base carries only identity.
     const base = (): Omit<AgentOutput, "durationMs"> => ({
@@ -539,15 +546,36 @@ export function createHerdrHostAdapter(options: HerdrAdapterOptions): HostAdapte
       durationMs: Date.now() - startedAt,
     });
 
-    if (!options.kind || options.kind.trim().length === 0) {
+    // Harness resolution (models/agent-runtime.md D1): explicit per-spawn
+    // harness → project runtime.defaultHarness → legacy herdr.kind.
+    const kind = runtime?.harness ?? options.defaultHarness ?? options.kind;
+    if (!kind || kind.trim().length === 0) {
       return finish({
         error:
-          'herdr.kind is not configured: set { "herdr": { "kind": "pi" } } in .dao/config.json (a supported herdr agent kind whose executable is installed).',
+          'herdr.kind is not configured: set { "herdr": { "kind": "pi" } } or { "runtime": { "defaultHarness": "pi" } } in .dao/config.json (a supported herdr agent kind whose executable is installed).',
       });
     }
-    if (!SAFE_KIND.test(options.kind)) {
+    if (!SAFE_KIND.test(kind)) {
       // Never interpolate an arbitrary value into the shell command line.
-      return finish({ error: `herdr.kind '${options.kind}' is not a valid agent kind identifier.` });
+      return finish({ error: `herdr.kind '${kind}' is not a valid agent kind identifier.` });
+    }
+
+    // Model flag resolution (models/agent-runtime.md D3): a non-default model
+    // is forwarded as [flag, model] after herdr's --, using the per-harness
+    // flag table (runtime.harnessModelFlag override first, frozen core table
+    // second). Unknown harness + no override ⇒ typed E4 failure, no spawn.
+    let modelFlagArgs: string[] = [];
+    if (runtime?.model && runtime.model !== "default") {
+      if (!isValidModelId(runtime.model)) {
+        return finish({ error: `invalid model id '${runtime.model}' (E3)` });
+      }
+      const flag = options.harnessModelFlag?.[kind] ?? HARNESS_MODEL_FLAGS[kind];
+      if (!flag) {
+        return finish({
+          error: `no model flag configured for harness '${kind}': set runtime.harnessModelFlag["${kind}"] to the flag its executable accepts (E4, harnessModelFlag).`,
+        });
+      }
+      modelFlagArgs = [flag, runtime.model];
     }
 
     const name = herdrAgentName(prefix, proposal.id, agent.id);
@@ -574,15 +602,15 @@ export function createHerdrHostAdapter(options: HerdrAdapterOptions): HostAdapte
       // same-pane retries while the fresh pane is still busy).
       const started = await startAgentUntilReady(runner, {
         agentName: name,
-        kind: options.kind,
+        kind,
         paneId,
         timeoutMs: startTimeoutMs,
-        agentArgs,
+        agentArgs: [...agentArgs, ...modelFlagArgs],
         retryDelayMs,
       });
       if (started.exitCode !== 0) {
         return finish({
-          error: `herdr agent start (${options.kind}) failed: ${herdrErrorDetail(started.stderr, started.stdout)}`,
+          error: `herdr agent start (${kind}) failed: ${herdrErrorDetail(started.stderr, started.stdout)}`,
         });
       }
 
@@ -635,15 +663,22 @@ export function createHerdrHostAdapter(options: HerdrAdapterOptions): HostAdapte
 
   return {
     hostId: "herdr",
-    spawnAgent: async ({ agent, proposal, systemPrompt, timeoutMs }) =>
-      harvest(proposal, agent, systemPrompt, Math.min(timeoutMs ?? defaultTimeoutMs, 300_000), Date.now()),
+    spawnAgent: async ({ agent, proposal, systemPrompt, timeoutMs, model, harness }) =>
+      harvest(proposal, agent, systemPrompt, Math.min(timeoutMs ?? defaultTimeoutMs, 300_000), Date.now(), {
+        model,
+        harness,
+      }),
     spawnAgents: async ({ agents, proposal, maxConcurrent }) => {
       const outputs: AgentOutput[] = [];
       for (let i = 0; i < agents.length; i += Math.max(1, maxConcurrent)) {
         const batch = agents.slice(i, i + Math.max(1, maxConcurrent));
         const startedAt = Date.now();
         const results = await Promise.all(
-          batch.map((agent) => harvest(proposal, agent, agent.systemPrompt, defaultTimeoutMs, startedAt)),
+          batch.map((agent) =>
+            harvest(proposal, agent, agent.systemPrompt, defaultTimeoutMs, startedAt, {
+              harness: agent.harness,
+            }),
+          ),
         );
         outputs.push(...results);
       }

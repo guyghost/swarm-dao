@@ -1643,3 +1643,81 @@ describe("swarmDaoExtension", () => {
     });
   });
 });
+
+describe("pi adapter harness boundary (models/agent-runtime.md E-host)", () => {
+  it("rejects a non-pi harness with a typed error instead of spawning", async () => {
+    const previous = process.env.SWARM_DAO_DISABLE_PI_SPAWN;
+    process.env.SWARM_DAO_DISABLE_PI_SPAWN = "1";
+    try {
+      const { createPiHostAdapter } = await import("../src/index.js");
+      const adapter = createPiHostAdapter({} as never, undefined);
+      const output = await adapter.spawnAgent({
+        agent: {
+          id: "critic",
+          name: "Critic",
+          role: "Security",
+          description: "d",
+          systemPrompt: "sp",
+          weight: 2,
+          harness: "codex",
+        },
+        proposal: {
+          id: 1,
+          title: "T",
+          type: "product-feature",
+          description: "d",
+          proposedBy: "user",
+          status: "deliberating",
+          votes: [],
+          agentOutputs: [],
+          createdAt: new Date().toISOString(),
+        },
+        systemPrompt: "P",
+        model: "gpt-5.4",
+        harness: "codex",
+      });
+      expect(output.error).toBeDefined();
+      expect(output.error).toContain("pi");
+      expect(output.error).toContain("harness");
+    } finally {
+      if (previous === undefined) delete process.env.SWARM_DAO_DISABLE_PI_SPAWN;
+      else process.env.SWARM_DAO_DISABLE_PI_SPAWN = previous;
+    }
+  });
+
+  it('accepts harness "pi" without erroring on the boundary check', async () => {
+    const previous = process.env.SWARM_DAO_DISABLE_PI_SPAWN;
+    process.env.SWARM_DAO_DISABLE_PI_SPAWN = "1";
+    try {
+      const { createPiHostAdapter } = await import("../src/index.js");
+      const adapter = createPiHostAdapter({} as never, undefined);
+      const output = await adapter.spawnAgent({
+        agent: {
+          id: "critic",
+          name: "Critic",
+          role: "Security",
+          description: "d",
+          systemPrompt: "sp",
+          weight: 2,
+        },
+        proposal: {
+          id: 1,
+          title: "T",
+          type: "product-feature",
+          description: "d",
+          proposedBy: "user",
+          status: "deliberating",
+          votes: [],
+          agentOutputs: [],
+          createdAt: new Date().toISOString(),
+        },
+        systemPrompt: "P",
+        harness: "pi",
+      });
+      expect(output.error === undefined || !output.error.includes("harness")).toBe(true);
+    } finally {
+      if (previous === undefined) delete process.env.SWARM_DAO_DISABLE_PI_SPAWN;
+      else process.env.SWARM_DAO_DISABLE_PI_SPAWN = previous;
+    }
+  });
+});

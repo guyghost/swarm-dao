@@ -194,13 +194,18 @@ interface ChildSessionOptions {
   timeoutMs?: number;
   /** Operator-owned tmux agent command (required for the tmux host). */
   tmuxCommand?: string;
+  /** tmux only: per-agent command overrides (tmux.agentCommands). */
+  tmuxAgentCommands?: Record<string, string>;
+  /** herdr only: per-harness model flag overrides (runtime.harnessModelFlag). */
+  harnessModelFlag?: Record<string, string>;
 }
 
 function childSessionOptionsFrom(
   flags: Record<string, string | true>,
   projectConfig: {
     herdr?: { kind?: string; keepPanes?: boolean; timeoutMs?: number };
-    tmux?: { command?: string; keepSessions?: boolean; timeoutMs?: number };
+    tmux?: { command?: string; keepSessions?: boolean; timeoutMs?: number; agentCommands?: Record<string, string> };
+    runtime?: { defaultHarness?: string; harnessModelFlag?: Record<string, string> };
   },
 ): ChildSessionOptions {
   const hostFlag = flags.host;
@@ -224,7 +229,12 @@ function childSessionOptionsFrom(
     if (kindFlag !== undefined && (typeof kindFlag !== "string" || kindFlag.trim().length === 0)) {
       err("--kind requires a value (a herdr agent kind, e.g. pi, codex, claude)");
     }
-    const kind = (typeof kindFlag === "string" ? kindFlag.trim() : undefined) ?? herdrConfig.kind ?? "pi";
+    // Fallback chain: --kind flag → herdr.kind → runtime.defaultHarness → pi.
+    const kind =
+      (typeof kindFlag === "string" ? kindFlag.trim() : undefined) ??
+      herdrConfig.kind ??
+      projectConfig.runtime?.defaultHarness ??
+      "pi";
     if (!SAFE_HERDR_KIND.test(kind)) {
       err(`herdr kind '${kind}' is invalid — use a supported herdr agent kind (e.g. pi, codex, claude)`);
     }
@@ -234,6 +244,7 @@ function childSessionOptionsFrom(
       kind,
       keepPanes: keepPanes || herdrConfig.keepPanes === true,
       ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+      ...(projectConfig.runtime?.harnessModelFlag ? { harnessModelFlag: projectConfig.runtime.harnessModelFlag } : {}),
     };
   }
 
@@ -253,6 +264,7 @@ function childSessionOptionsFrom(
     keepPanes: keepPanes || tmuxConfig.keepSessions === true,
     ...(timeoutMs !== undefined ? { timeoutMs } : {}),
     tmuxCommand,
+    ...(tmuxConfig.agentCommands ? { tmuxAgentCommands: tmuxConfig.agentCommands } : {}),
   };
 }
 
@@ -276,6 +288,7 @@ function childAdapter(child: ChildSessionOptions, workDir: string): HostAdapter 
     return createTmuxHostAdapter({
       workDir,
       command: child.tmuxCommand ?? "",
+      ...(child.tmuxAgentCommands ? { agentCommands: child.tmuxAgentCommands } : {}),
       keepSessions: child.keepPanes,
       ...(child.timeoutMs !== undefined ? { timeoutMs: child.timeoutMs } : {}),
     });
@@ -285,6 +298,7 @@ function childAdapter(child: ChildSessionOptions, workDir: string): HostAdapter 
     kind: child.kind,
     keepPanes: child.keepPanes,
     prefix: "swarm-dao",
+    ...(child.harnessModelFlag ? { harnessModelFlag: child.harnessModelFlag } : {}),
     ...(child.timeoutMs !== undefined ? { timeoutMs: child.timeoutMs } : {}),
   });
 }
@@ -539,6 +553,7 @@ async function cmdDeliberate(cwd: string, positional: string[], flags: Record<st
       workDir: cwd,
       deliberationMode: "auto",
       controlToolName: "dao_check",
+      hostDefaultHarness: child.host === "herdr" ? child.kind : undefined,
       repository,
       onDeliberationProgress: ({ agentName, phase }) => info(c.dim(`  [${phase}] ${agentName}`)),
     },

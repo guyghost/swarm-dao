@@ -13,6 +13,10 @@ jobs:
   quality:
     name: Quality gates
     runs-on: ubuntu-latest
+    # TEMPORARY (test-hang diagnosis): bound the job so a hung Test step
+    # produces a log instead of burning the 6h GitHub timeout. Remove once
+    # the hang is root-caused.
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v6
         with:
@@ -55,7 +59,13 @@ jobs:
         run: bun run typecheck
 
       - name: Test
-        run: bun test
+        # Run per-package so each package's bun test process is isolated.
+        # `bun test` at the workspace root runs all test files in a single
+        # process, which lets a mock.module installed by pi-spawn.test.ts
+        # leak into dry-run.test.ts and trigger an infinite spawn-delegation
+        # loop (JS spin, 100% CPU, no children spawned). `bun run test` uses
+        # --filter '*' which invokes each package's own `bun test` separately.
+        run: bun run test
 
       - name: Integration tests
         run: bun run test:integration
@@ -92,12 +102,14 @@ jobs:
 
       # Runner timings are not comparable across machines, so the baseline is
       # the previous run of this job, restored from cache.
+      # v2: re-baseline after 9eee0bf (inter-process persist lock) made the
+      # persistence suite permanently slower than the pre-lock baseline.
       - name: Restore benchmark baseline
         uses: actions/cache/restore@v4
         with:
           path: packages/benchmarks/benchmark-baseline.json
-          key: benchmark-baseline-${{ runner.os }}-${{ github.sha }}
-          restore-keys: benchmark-baseline-${{ runner.os }}-
+          key: benchmark-baseline-v2-${{ runner.os }}-${{ github.sha }}
+          restore-keys: benchmark-baseline-v2-${{ runner.os }}-
 
       - name: Run benchmarks
         run: bun run bench:ci
@@ -110,7 +122,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: packages/benchmarks/benchmark-baseline.json
-          key: benchmark-baseline-${{ runner.os }}-${{ github.sha }}
+          key: benchmark-baseline-v2-${{ runner.os }}-${{ github.sha }}
 
       - name: Upload benchmark results
         uses: actions/upload-artifact@v4

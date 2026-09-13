@@ -1,6 +1,7 @@
 import { dispatchProposalEvent } from "../../governance/proposal.utils.js";
 import { calculateCompositeScore } from "../../governance/scoring.js";
 import { mergeVotes, parseVoteFromOutput, tallyVotes } from "../../governance/voting.js";
+import type { RuntimeResolutionContext } from "../../intelligence/runtime.js";
 import { dispatchSequentialSwarm } from "../../intelligence/sequential.js";
 import type { SwarmProgressUpdate } from "../../intelligence/swarm.js";
 import { createDispatchModelContext, dispatchSwarm } from "../../intelligence/swarm.js";
@@ -35,6 +36,9 @@ export class DeliberateProposalUseCase {
     charsPerAgent?: number;
     /** Shared project brief injected into every participant's prompt. */
     projectBrief?: string;
+    /** Runtime resolution context (models/agent-runtime.md): harness
+     * defaults, per-harness model flags. */
+    runtime?: RuntimeResolutionContext;
   }): Promise<DeliberateProposalResult> {
     const state = this.dependencies.repository.get();
     if (!state.initialized) return { ok: false, error: "DAO not initialized. Run dao_setup first." };
@@ -56,6 +60,7 @@ export class DeliberateProposalUseCase {
             onUpdate: command.onUpdate,
             charsPerAgent: command.charsPerAgent,
             projectBrief: command.projectBrief,
+            runtime: command.runtime,
           })
         : await dispatchSwarm(
             proposal,
@@ -65,7 +70,7 @@ export class DeliberateProposalUseCase {
             modelContext,
             command.onUpdate,
             undefined,
-            { projectBrief: command.projectBrief },
+            { projectBrief: command.projectBrief, runtime: command.runtime },
           );
     const agentById = new Map(agents.map((agent) => [agent.id, agent]));
     const votes: Vote[] = [];

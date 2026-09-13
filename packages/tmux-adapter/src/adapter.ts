@@ -92,6 +92,11 @@ export interface TmuxAdapterOptions {
    * deliberation prompt; stdout streams into the pane and is harvested via
    * capture-pane. Operator-only configuration (see security notes). */
   command?: string;
+  /** Per-agent command overrides keyed by agent id (tmux.agentCommands):
+   * when a non-empty entry exists for the agent, it replaces tmux.command
+   * for that spawn — how one DAO mixes harnesses (pi, claude, codex…)
+   * under the tmux host. Same trust level as tmux.command. */
+  agentCommands?: Record<string, string>;
   /** Per-agent timeout in ms (default 5 min). */
   timeoutMs?: number;
   /** Session name prefix (default "swarm-dao"). */
@@ -220,7 +225,11 @@ export function createTmuxHostAdapter(options: TmuxAdapterOptions): HostAdapter 
       durationMs: Date.now() - startedAt,
     };
 
-    if (!options.command || options.command.trim().length === 0) {
+    // Per-agent command override (tmux.agentCommands) — a non-empty entry
+    // replaces tmux.command for this spawn; harness/model live inside the
+    // operator's command line ($PROMPT still carries the prompt).
+    const command = options.agentCommands?.[agent.id]?.trim() || options.command;
+    if (!command || command.trim().length === 0) {
       return {
         ...base,
         error:
@@ -230,7 +239,7 @@ export function createTmuxHostAdapter(options: TmuxAdapterOptions): HostAdapter 
 
     const run = await prepare(proposal, agent, prompt);
     try {
-      await startSession(run, options.command);
+      await startSession(run, command);
       const { exitCode, timedOut } = await waitForDone(run, timeoutMs);
 
       if (timedOut) {

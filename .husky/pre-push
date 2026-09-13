@@ -2,4 +2,10 @@ if [ -n "$CI" ] || [ "$HUSKY" = "0" ]; then
   exit 0
 fi
 
+# Git exports GIT_DIR (and friends) to hooks. Without scrubbing them, test
+# suites that create throwaway git repos inherit this repository's gitdir and
+# corrupt it — observed as core.bare=true and a dao-test user written into the
+# main repo config during a pre-push run.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
+
 bun run ci

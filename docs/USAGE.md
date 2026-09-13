@@ -9,6 +9,7 @@
 - [Installation in Pi](#installation-in-pi)
 - [Installation in OpenCode](#installation-in-opencode)
 - [Common Workflows](#common-workflows)
+- [Configuring Agent Runtimes (Model & Harness)](#configuring-agent-runtimes-model--harness)
 - [Pi vs OpenCode Differences](#pi-vs-opencode-differences)
 - [Troubleshooting](#troubleshooting)
 
@@ -353,6 +354,66 @@ opencode
 # ✅ Pull Request Opened
 # PR: #42
 # URL: https://github.com/myorg/myrepo/pull/42
+```
+
+---
+
+## Configuring Agent Runtimes (Model & Harness)
+
+Each agent can run with its own LLM **model** and **harness** (the CLI runtime that spawns it: `pi`, `claude`, `codex`, `copilot`, `opencode`). Resolution is deterministic — see [`models/agent-runtime.md`](../models/agent-runtime.md) for the full contract.
+
+### Project defaults — `.dao/config.json`
+
+```json
+{
+  "runtime": {
+    "defaultHarness": "claude",
+    "harnessModelFlag": {
+      "my-custom-harness": "--model"
+    }
+  }
+}
+```
+
+- `runtime.defaultHarness` — fallback harness for every agent without an explicit one.
+- `runtime.harnessModelFlag` — maps a harness to its model flag. Known harnesses (`pi`, `claude`, `codex`, `copilot`, `opencode`) default to `--model`; untabled harnesses need an explicit entry before a per-agent model can be passed.
+
+### Per-agent override — agent frontmatter
+
+In `.dao/agents/*.md`:
+
+```yaml
+---
+name: Critic
+harness: codex
+model: gpt-5
+---
+```
+
+### Resolution order (D1)
+
+`agent.harness` → `runtime.defaultHarness` → host default. If the chain is exhausted while a runtime context is active, the agent fails with a typed error (`E_NO_HARNESS`) instead of silently falling back. Hosts that never configured runtime keep the legacy behavior (no harness passed).
+
+### Host defaults
+
+| Host | Default harness |
+|------|-----------------|
+| Pi extension | `pi` (only `pi` is accepted — `E_HOST_BOUNDARY`) |
+| OpenCode plugin | `opencode` |
+| MCP server | `mcp` (manual mode; renders the dispatch plan) |
+| CLI `dao child --host herdr` | `--kind` flag → `herdr.kind` → `runtime.defaultHarness` → `pi` |
+| CLI `dao child --host tmux` | none — use per-agent `tmux.agentCommands` |
+
+### tmux per-agent commands
+
+```json
+{
+  "tmux": {
+    "agentCommands": {
+      "critic": "codex exec --full-auto -q"
+    }
+  }
+}
 ```
 
 ---
