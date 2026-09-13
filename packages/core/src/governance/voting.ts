@@ -4,6 +4,7 @@
 
 import type {
   AgentOutput,
+  DAOAgent,
   DAOConfig,
   Proposal,
   TallyResult,
@@ -104,20 +105,24 @@ export function mergeVotes(existing: Vote[] | undefined, incoming: Vote[]): Vote
   return [...preserved, ...incoming];
 }
 
-export function tallyVotes(proposal: Proposal, config: DAOConfig): TallyResult {
+/**
+ * The voting electorate: configured council members and their weights.
+ * Callers that know the DAO's agent roster pass it explicitly; tallyVotes
+ * never guesses an electorate from agentOutputs alone (issue #155).
+ */
+export type Electorate = ReadonlyArray<Pick<DAOAgent, "id" | "weight">>;
+
+export function tallyVotes(proposal: Proposal, config: DAOConfig, electorate?: Electorate): TallyResult {
   const votes = proposal.votes || [];
-  const totalAgents = proposal.agentOutputs?.length || votes.length;
 
   // Single pass over votes: accumulate weighted totals + voting-agent count.
   let weightedFor = 0;
   let weightedAgainst = 0;
   let weightedAbstain = 0;
-  let totalObservedWeight = 0;
   let votingAgents = 0;
 
   for (const v of votes) {
     const w = normalizeVoteWeight(v.weight);
-    totalObservedWeight += w;
     if (v.position === "for") {
       weightedFor += w;
       votingAgents++;
@@ -131,21 +136,42 @@ export function tallyVotes(proposal: Proposal, config: DAOConfig): TallyResult {
 
   const totalVotingWeight = weightedFor + weightedAgainst + weightedAbstain;
 
-  // Quorum check: % of total agent weight that participated.
-  // Unobserved agents (totalAgents - votes.length) each contribute default weight 1.
-  const totalPossibleWeight =
-    totalAgents > 0 ? totalObservedWeight + (totalAgents - votes.length) * 1 : totalVotingWeight;
+  // Quorum denominator: the full configured electorate's weight, plus the
+  // weight of votes cast from outside the electorate (e.g. human votes).
+  // Silent (non-voting) council members carry their CONFIGURED weight, not a
+  // flat 1 (issue #155a). When no electorate is known, fall back to the
+  // distinct voting agent ids at weight 1 — best effort only.
+  let totalPossibleWeight: number;
+  let totalAgents: number;
+  if (electorate && electorate.length > 0) {
+    const electorIds = new Set(electorate.map((agent) => agent.id));
+    totalAgents = electorate.length;
+    const electorateWeight = electorate.reduce((sum, agent) => sum + normalizeVoteWeight(agent.weight), 0);
+    let outsideWeight = 0;
+    for (const v of votes) {
+      if (!electorIds.has(v.agentId)) outsideWeight += normalizeVoteWeight(v.weight);
+    }
+    totalPossibleWeight = electorateWeight + outsideWeight;
+  } else {
+    totalAgents = proposal.agentOutputs?.length || new Set(votes.map((v) => v.agentId)).size;
+    totalPossibleWeight = totalVotingWeight;
+  }
+  // By construction the denominator can never undercut the votes actually cast.
+  totalPossibleWeight = Math.max(totalPossibleWeight, totalVotingWeight);
 
+  // Exact fraction comparisons (issue #156): rounding happens only for the
+  // reported percentages, never for the decision. Math.round(66.67) = 67
+  // must not clear a 67% bar.
   const quorumPercent = totalPossibleWeight > 0 ? Math.round((totalVotingWeight / totalPossibleWeight) * 100) : 0;
 
   const thresholds = resolveTypeThresholds(proposal, config);
-  const quorumMet = quorumPercent >= thresholds.quorumPercent;
+  const quorumMet = totalVotingWeight * 100 >= thresholds.quorumPercent * totalPossibleWeight;
 
   // Approval: % of non-abstain weight that voted for
   const decisiveWeight = weightedFor + weightedAgainst;
   const approvalScore = decisiveWeight > 0 ? Math.round((weightedFor / decisiveWeight) * 100) : 0;
 
-  const approved = quorumMet && approvalScore >= thresholds.approvalPercent;
+  const approved = quorumMet && decisiveWeight > 0 && weightedFor * 100 >= thresholds.approvalPercent * decisiveWeight;
 
   return {
     proposalId: proposal.id,

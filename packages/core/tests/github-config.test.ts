@@ -51,4 +51,39 @@ describe("host-tools/github-config.ts", () => {
       await fs.rm(daoRoot, { recursive: true, force: true });
     }
   });
+
+  it("rejects invalid owner/repo BEFORE persisting (issue #166)", async () => {
+    const daoRoot = await fs.mkdtemp(path.join(tmpdir(), "swarm-dao-ghcfg-"));
+    try {
+      await expect(saveGitHubConfigToDaoRoot(daoRoot, { owner: "foo/bar", repo: "app" })).rejects.toThrow(
+        /owner.*must match|must not|Invalid/,
+      );
+      await expect(saveGitHubConfigToDaoRoot(daoRoot, { owner: "acme", repo: "../../etc" })).rejects.toThrow(
+        /repo.*must match|must not|Invalid/,
+      );
+      await expect(saveGitHubConfigToDaoRoot(daoRoot, { owner: "bad\0null", repo: "app" })).rejects.toThrow();
+      // Nothing was persisted.
+      const entries = await fs.readdir(daoRoot).catch(() => []);
+      expect(entries).not.toContain("config.json");
+    } finally {
+      await fs.rm(daoRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses to configure from a hand-edited config.json with an invalid owner (issue #166)", async () => {
+    // Reset module state: other tests may have left the integration enabled.
+    configureGitHub({ enabled: false, owner: undefined, repo: undefined });
+    const daoRoot = await fs.mkdtemp(path.join(tmpdir(), "swarm-dao-ghcfg-"));
+    try {
+      await fs.writeFile(
+        path.join(daoRoot, "config.json"),
+        JSON.stringify({ github: { owner: "../escape", repo: "app", enabled: true } }),
+      );
+      expect(await loadGitHubConfigFromDaoRoot(daoRoot)).toBe(false);
+      expect(isGitHubEnabled()).toBe(false);
+    } finally {
+      await fs.rm(daoRoot, { recursive: true, force: true });
+      configureGitHub({ enabled: false, owner: undefined, repo: undefined });
+    }
+  });
 });

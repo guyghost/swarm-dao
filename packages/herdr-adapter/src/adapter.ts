@@ -36,12 +36,11 @@
 // Prerequisites: the herdr server must be running (`herdr` once) and the
 // chosen kind's executable installed and authenticated.
 
-import { exec as execCallback, execFile } from "node:child_process";
+import { execFile } from "node:child_process";
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { promisify } from "node:util";
 import type { AgentOutput, DAOAgent, HostAdapter, Proposal } from "@guyghost/swarm-dao-core";
-import { HARNESS_MODEL_FLAGS, isValidModelId } from "@guyghost/swarm-dao-core";
+import { execCommand, HARNESS_MODEL_FLAGS, isValidModelId } from "@guyghost/swarm-dao-core";
 /** Minimal command surface the adapter needs (node:child_process-backed by default).
  *
  * Commands are passed as ARGV — never as shell strings. The default runner
@@ -53,8 +52,6 @@ export interface HerdrRunner {
     options?: { cwd?: string; timeout?: number },
   ): Promise<{ stdout: string; stderr: string; exitCode: number }>;
 }
-
-const execAsync = promisify(execCallback);
 
 /** execFile with utf8 strings, promise-shaped. Failures reject with the child
  * error carrying .code/.stdout/.stderr (same shape the exec-based runner had). */
@@ -306,6 +303,35 @@ function agentState(result: HerdrJson["result"]): string | null {
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
+/** Resolve adapter file access against workDir, contained (like other hosts).
+ * Symlinks are resolved: a repo symlink cannot escape the root. Returns the
+ * RESOLVED path — the lexical path could be re-symlinked between this check
+ * and the actual read/write (TOCTOU symlink escape, issue #162). */
+export async function resolveHerdrContainedPath(workDir: string, file: string): Promise<string> {
+  const root = await fs.realpath(path.resolve(workDir)).catch(() => path.resolve(workDir));
+  // Deepest EXISTING ancestor's realpath, then rejoin the rest — containment
+  // must hold even for files that do not exist yet.
+  const realPathOf = async (target: string): Promise<string> => {
+    let current = target;
+    const tail: string[] = [];
+    for (;;) {
+      const real = await fs.realpath(current).catch(() => null);
+      if (real !== null) {
+        return tail.length === 0 ? real : path.join(real, ...[...tail].reverse());
+      }
+      const parent = path.dirname(current);
+      if (parent === current) return target;
+      tail.push(path.basename(current));
+      current = parent;
+    }
+  };
+  const resolved = await realPathOf(path.resolve(root, file));
+  if (resolved !== root && !resolved.startsWith(`${root}${path.sep}`)) {
+    throw new Error(`path escapes the working directory: ${file}`);
+  }
+  return resolved;
+}
+
 /** herdr machine-readable error code from a failed command response, if any. */
 export function herdrErrorCode(stderr: string, stdout: string): string | null {
   const parsed = parseHerdrJson(stderr.trim()) ?? parseHerdrJson(stdout.trim());
@@ -496,33 +522,7 @@ export function createHerdrHostAdapter(options: HerdrAdapterOptions): HostAdapte
   const parentWorkspaceId = options.parentWorkspaceId ?? herdrParentWorkspaceId();
   const agentArgs = options.agentArgs ?? [];
 
-  /** Resolve the deepest EXISTING ancestor's realpath, then rejoin the rest —
-   * containment must hold even for files that do not exist yet. */
-  const realPathOf = async (target: string): Promise<string> => {
-    let current = target;
-    const tail: string[] = [];
-    for (;;) {
-      const real = await fs.realpath(current).catch(() => null);
-      if (real !== null) {
-        return tail.length === 0 ? real : path.join(real, ...[...tail].reverse());
-      }
-      const parent = path.dirname(current);
-      if (parent === current) return target;
-      tail.push(path.basename(current));
-      current = parent;
-    }
-  };
-
-  /** Resolve adapter file access against workDir, contained (like other hosts).
-   * Symlinks are resolved: a repo symlink cannot escape the root. */
-  const containedPath = async (file: string): Promise<string> => {
-    const root = await fs.realpath(path.resolve(options.workDir)).catch(() => path.resolve(options.workDir));
-    const resolved = await realPathOf(path.resolve(root, file));
-    if (resolved !== root && !resolved.startsWith(`${root}${path.sep}`)) {
-      throw new Error(`path escapes the working directory: ${file}`);
-    }
-    return path.resolve(root, file);
-  };
+  const containedPath = (file: string): Promise<string> => resolveHerdrContainedPath(options.workDir, file);
 
   const harvest = async (
     proposal: Proposal,
@@ -691,17 +691,10 @@ export function createHerdrHostAdapter(options: HerdrAdapterOptions): HostAdapte
     getWorkingDirectory: () => options.workDir,
     readFile: async (file) => fs.readFile(await containedPath(file), "utf8"),
     writeFile: async (file, content) => fs.writeFile(await containedPath(file), content, "utf8"),
-    exec: (command, execOptions) =>
-      execAsync(command, { cwd: execOptions?.cwd, timeout: execOptions?.timeout })
-        .then(({ stdout, stderr }) => ({ stdout: String(stdout), stderr: String(stderr), exitCode: 0 }))
-        .catch((error: unknown) => {
-          const failure = error as { stdout?: string; stderr?: string; message?: string; code?: number };
-          return {
-            stdout: failure.stdout ?? "",
-            stderr: failure.stderr ?? failure.message ?? "command failed",
-            exitCode: failure.code ?? 1,
-          };
-        }),
+    // Same shell-free surface as MCP/Pi/OpenCode (issue #165): execCommand
+    // rejects metacharacters and spawns with shell: false. The adapter's own
+    // herdr calls already used argv via HerdrRunner.
+    exec: (command, execOptions) => execCommand(command, { cwd: execOptions?.cwd, timeout: execOptions?.timeout }),
     hasCapability: (capability) => capability === "parallel-spawn",
   };
 }

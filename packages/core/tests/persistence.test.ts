@@ -8,6 +8,7 @@ import {
   createInitialState,
   createProposal,
   createProposalsBatch,
+  DEFAULT_CONFIG,
   dispatchProposalEvent,
   getAgent,
   getAuditLog,
@@ -30,36 +31,50 @@ import {
 
 // Drive a proposal through the sanctioned dispatch path to "executed".
 // Replaces the deleted updateProposalStatus() backdoor in fixtures.
+// Guarded events recompute the decision (issue #158): the proposal carries
+// real votes and config is supplied so the recompute succeeds.
 function resolveToExecuted(proposal: Proposal) {
+  proposal.votes = [
+    { agentId: "a", agentName: "A", position: "for", reasoning: "ok", weight: 1 },
+    { agentId: "b", agentName: "B", position: "for", reasoning: "ok", weight: 1 },
+  ];
   dispatchProposalEvent(proposal, { type: "DELIBERATE" });
-  dispatchProposalEvent(proposal, {
-    type: "APPROVE",
-    tally: {
-      proposalId: proposal.id,
-      approved: true,
-      quorumMet: true,
-      totalAgents: 5,
-      votingAgents: 5,
-      quorumPercent: 100,
-      weightedFor: 10,
-      weightedAgainst: 0,
-      totalVotingWeight: 10,
-      approvalScore: 100,
-      votes: [],
+  dispatchProposalEvent(
+    proposal,
+    {
+      type: "APPROVE",
+      tally: {
+        proposalId: proposal.id,
+        approved: true,
+        quorumMet: true,
+        totalAgents: 5,
+        votingAgents: 5,
+        quorumPercent: 100,
+        weightedFor: 10,
+        weightedAgainst: 0,
+        totalVotingWeight: 10,
+        approvalScore: 100,
+        votes: [],
+      },
     },
-  });
-  dispatchProposalEvent(proposal, {
-    type: "CONTROL_PASS",
-    result: {
-      proposalId: proposal.id,
-      timestamp: new Date().toISOString(),
-      allGatesPassed: true,
-      blockerCount: 0,
-      warningCount: 0,
-      gates: [],
-      checklist: [],
+    { config: DEFAULT_CONFIG },
+  );
+  dispatchProposalEvent(
+    proposal,
+    {
+      type: "CONTROL_PASS",
+      result: {
+        proposalId: proposal.id,
+        timestamp: new Date().toISOString(),
+        allGatesPassed: true,
+        blockerCount: 0,
+        warningCount: 0,
+        gates: [],
+        checklist: [],
+      },
     },
-  });
+    { config: DEFAULT_CONFIG },
+  );
   dispatchProposalEvent(proposal, { type: "EXECUTE_SUCCESS" });
 }
 
@@ -104,8 +119,55 @@ describe("persistence", () => {
 
   it("adds votes", async () => {
     const p = await createProposal("Vote test", "product-feature", "Test", "user");
-    await addVote(p.id, { agentId: "a", agentName: "A", position: "for", reasoning: "Yes", weight: 3 });
+    const added = await addVote(p.id, { agentId: "a", agentName: "A", position: "for", reasoning: "Yes", weight: 3 });
+    expect(added).toEqual({ ok: true, replaced: false });
     expect(getProposal(p.id)?.votes.length).toBe(1);
+  });
+
+  it("addVote replaces the same agent's prior vote instead of stacking (issue #154)", async () => {
+    const p = await createProposal("Dedupe test", "product-feature", "Test", "user");
+    await addVote(p.id, { agentId: "cli-user", agentName: "cli-user", position: "for", reasoning: "yes", weight: 1 });
+    const second = await addVote(p.id, {
+      agentId: "cli-user",
+      agentName: "cli-user",
+      position: "against",
+      reasoning: "changed my mind",
+      weight: 2,
+    });
+    expect(second).toEqual({ ok: true, replaced: true });
+    const votes = getProposal(p.id)?.votes ?? [];
+    expect(votes.length).toBe(1);
+    expect(votes[0]?.position).toBe("against");
+  });
+
+  it("addVote refuses votes on proposals that are no longer open (issue #154)", async () => {
+    const p = await createProposal("Closed vote test", "product-feature", "Test", "user");
+    dispatchProposalEvent(p, { type: "DELIBERATE" });
+    dispatchProposalEvent(p, { type: "REJECT" });
+    const result = await addVote(p.id, { agentId: "a", agentName: "A", position: "for", reasoning: "late", weight: 1 });
+    expect(result.ok).toBe(false);
+    expect(getProposal(p.id)?.votes.length).toBe(0);
+  });
+
+  it("addVote bounds the vote weight (issue #154)", async () => {
+    const p = await createProposal("Weight bound test", "product-feature", "Test", "user");
+    const over = await addVote(p.id, {
+      agentId: "cli-user",
+      agentName: "cli-user",
+      position: "for",
+      reasoning: "heavy",
+      weight: 999,
+    });
+    expect(over.ok).toBe(false);
+    expect(getProposal(p.id)?.votes.length).toBe(0);
+    const invalid = await addVote(p.id, {
+      agentId: "cli-user",
+      agentName: "cli-user",
+      position: "for",
+      reasoning: "zero",
+      weight: 0,
+    });
+    expect(invalid.ok).toBe(false);
   });
 
   it("advances proposal status through the sanctioned dispatch path", async () => {

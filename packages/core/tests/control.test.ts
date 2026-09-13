@@ -85,7 +85,14 @@ describe("control/gates", () => {
       },
     };
 
-    const result = runGates(proposal, config);
+    const result = runGates(proposal, config, {
+      // Council of 10: the five voters (weight 1) + five silent members →
+      // 5/10 = 50% participation against the 40% override.
+      electorate: [
+        ...Array.from({ length: 5 }, (_, i) => ({ id: `v${i}`, weight: 1 })),
+        ...Array.from({ length: 5 }, (_, i) => ({ id: `s${i}`, weight: 1 })),
+      ],
+    });
     const quorumGate = result.gates.find((g) => g.gateId === "quorum-quality");
     expect(quorumGate).toBeDefined();
     expect(quorumGate?.passed).toBe(true);

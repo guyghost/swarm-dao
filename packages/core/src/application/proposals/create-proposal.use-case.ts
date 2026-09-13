@@ -1,3 +1,4 @@
+import { resolveDependencyOrder } from "../../delivery/dependencies.js";
 import { classifyRiskZone } from "../../governance/lifecycle.js";
 import type { ClockPort } from "../../ports/clock.js";
 import type { DaoStateRepositoryPort } from "../../ports/repository.js";
@@ -39,6 +40,28 @@ export class CreateProposalUseCase {
     );
     if (missingDependency !== undefined) {
       return { ok: false, error: `Unknown proposal dependency #${missingDependency}.` };
+    }
+
+    // Pre-build the proposal to validate the dependency graph BEFORE any id
+    // is burned or state mutated (issue #168.3): a cycle A→B→A must be
+    // rejected at creation instead of surfacing as a ship-time deadlock.
+    if (command.dependsOn && command.dependsOn.length > 0) {
+      const draft: Proposal = {
+        id: state.nextProposalId,
+        title: command.title,
+        type: command.type,
+        description: command.description,
+        proposedBy: command.proposedBy,
+        status: "open",
+        votes: [],
+        agentOutputs: [],
+        dependsOn: command.dependsOn,
+        createdAt: this.dependencies.clock.now(),
+      };
+      const resolution = resolveDependencyOrder(draft.id, [...state.proposals, draft]);
+      if (resolution.error) {
+        return { ok: false, error: `Invalid dependency graph: ${resolution.error}` };
+      }
     }
 
     const proposal: Proposal = {

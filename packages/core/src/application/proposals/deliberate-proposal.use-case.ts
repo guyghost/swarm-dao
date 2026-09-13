@@ -50,28 +50,47 @@ export class DeliberateProposalUseCase {
     this.audit(state, proposal.id, "governance", "deliberation_started", "system", `Deliberation on #${proposal.id}`);
 
     const agents = command.agents ?? state.agents;
-    const modelContext = createDispatchModelContext(state.config.defaultModel, this.dependencies.worker, {
-      parentSessionModel: command.parentSessionModel,
-      hostDefaultModel: command.hostDefaultModel,
-    });
-    const outputs =
-      command.strategy === "sequential"
-        ? await dispatchSequentialSwarm(proposal, agents, this.dependencies.worker, modelContext, {
-            onUpdate: command.onUpdate,
-            charsPerAgent: command.charsPerAgent,
-            projectBrief: command.projectBrief,
-            runtime: command.runtime,
-          })
-        : await dispatchSwarm(
-            proposal,
-            agents,
-            this.dependencies.worker,
-            state.config.maxConcurrent,
-            modelContext,
-            command.onUpdate,
-            undefined,
-            { projectBrief: command.projectBrief, runtime: command.runtime },
-          );
+    let outputs: Awaited<ReturnType<typeof dispatchSwarm>>;
+    try {
+      // Everything after the DELIBERATE commit is inside the rollback guard:
+      // model resolution, swarm dispatch, delegation drain — any throw here
+      // would otherwise strand the proposal in `deliberating` (issue #160).
+      const modelContext = createDispatchModelContext(state.config.defaultModel, this.dependencies.worker, {
+        parentSessionModel: command.parentSessionModel,
+        hostDefaultModel: command.hostDefaultModel,
+      });
+      outputs =
+        command.strategy === "sequential"
+          ? await dispatchSequentialSwarm(proposal, agents, this.dependencies.worker, modelContext, {
+              onUpdate: command.onUpdate,
+              charsPerAgent: command.charsPerAgent,
+              projectBrief: command.projectBrief,
+              runtime: command.runtime,
+            })
+          : await dispatchSwarm(
+              proposal,
+              agents,
+              this.dependencies.worker,
+              state.config.maxConcurrent,
+              modelContext,
+              command.onUpdate,
+              state.config.delegation?.enabled ? { config: state.config, daoRoot: state.daoRoot } : undefined,
+              { projectBrief: command.projectBrief, runtime: command.runtime },
+            );
+    } catch (error) {
+      // Rollback (issue #160): without this, a worker/host failure left the
+      // proposal stuck in `deliberating` with no recovery path — DELIBERATE is
+      // not accepted again from there, and only terminal DISCARD/ERROR remain.
+      const message = error instanceof Error ? error.message : String(error);
+      dispatchProposalEvent(
+        proposal,
+        { type: "ERROR", message: `Deliberation failed: ${message}` },
+        { clock: this.dependencies.clock },
+      );
+      this.audit(state, proposal.id, "intelligence", "deliberation_failed", "system", message);
+      await this.dependencies.repository.persist();
+      return { ok: false, error: `Deliberation failed: ${message}` };
+    }
     const agentById = new Map(agents.map((agent) => [agent.id, agent]));
     const votes: Vote[] = [];
     for (const output of outputs) {
@@ -93,12 +112,18 @@ export class DeliberateProposalUseCase {
     proposal.agentOutputs = outputs;
     const compositeScore = calculateCompositeScore(outputs);
     proposal.compositeScore = compositeScore;
-    const tally = tallyVotes(proposal, state.config);
+    // Ground the quorum in the configured council (issue #155) and have the
+    // APPROVE guard recompute the tally instead of trusting this one (#158).
+    const tally = tallyVotes(proposal, state.config, agents);
     const synthesisText = synthesize(proposal, agents, outputs, tally);
     proposal.synthesis = synthesisText;
 
     const decision = tally.approved
-      ? dispatchProposalEvent(proposal, { type: "APPROVE", tally }, { clock: this.dependencies.clock })
+      ? dispatchProposalEvent(
+          proposal,
+          { type: "APPROVE", tally },
+          { clock: this.dependencies.clock, config: state.config, electorate: agents },
+        )
       : dispatchProposalEvent(proposal, { type: "REJECT" }, { clock: this.dependencies.clock });
     if (!decision.ok) return decision;
     this.audit(

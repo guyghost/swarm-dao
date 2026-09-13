@@ -340,6 +340,9 @@ export interface DAOConfig {
   requiredGates: string[];
   typeQuorum: Partial<Record<ProposalType, TypeQuorumConfig>>;
   quorumFloor: number;
+  /** Upper bound for a single vote's weight (CLI/MCP addVote). Default 3,
+   *  matching the heaviest default council agent. */
+  maxVoteWeight?: number;
   staleThresholdHours?: number;
   healthWeights?: HealthWeights;
   /**
@@ -458,6 +461,10 @@ export interface Proposal {
   // Dry-Run
   dryRunAt?: string;
   dryRunCanProceed?: boolean;
+
+  /** Set when the proposal enters `deliberating`; lets operators detect
+   *  deliberations stalled by a dead worker/host (issue #160). */
+  deliberationStartedAt?: string;
 
   createdAt: string;
   resolvedAt?: string;
@@ -740,6 +747,10 @@ export interface DAOState {
   initialized: boolean;
   auditLog: AuditEntry[];
   nextAuditId: number;
+  /** Monotonic write counter (issue #153): bumped on every persist under the
+   *  lock and compared on write, so a stale in-memory copy can never silently
+   *  overwrite votes/proposals persisted by another process. */
+  stateRevision: number;
   controlResults: Record<number, ControlCheckResult>;
   deliveryPlans: Record<number, DeliveryPlan>;
   artefacts: Record<number, DAOArtefacts>;
@@ -989,6 +1000,7 @@ export function createInitialState(daoRoot: string): DAOState {
     initialized: false,
     auditLog: [],
     nextAuditId: 1,
+    stateRevision: 0,
     controlResults: {},
     deliveryPlans: {},
     artefacts: {},

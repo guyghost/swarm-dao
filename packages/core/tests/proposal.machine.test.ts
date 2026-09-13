@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, it } from "bun:test";
-import type { ControlCheckResult, Proposal, TallyResult } from "@guyghost/swarm-dao-core";
-import { dispatchProposalEvent, isProposalFinal, PROPOSAL_FINAL_STATUSES } from "@guyghost/swarm-dao-core";
+import type { ControlCheckResult, DAOConfig, Proposal, TallyResult } from "@guyghost/swarm-dao-core";
+import {
+  DEFAULT_CONFIG,
+  dispatchProposalEvent,
+  isProposalFinal,
+  PROPOSAL_FINAL_STATUSES,
+} from "@guyghost/swarm-dao-core";
 
 // ── Test fixtures ────────────────────────────────────────────
 
@@ -46,6 +51,20 @@ function makeControl(passed: boolean, blockers = 0): ControlCheckResult {
   };
 }
 
+/** Config for guard recomputation (issue #158): guarded events recompute the
+ *  decision from the proposal's actual votes/gates. */
+const guardConfig: DAOConfig = DEFAULT_CONFIG;
+
+/** Give the proposal votes that genuinely pass the default thresholds, so an
+ *  APPROVE/CONTROL_PASS recompute succeeds. */
+function approveable(proposal: Proposal): Proposal {
+  proposal.votes = [
+    { agentId: "a", agentName: "A", position: "for", reasoning: "ok", weight: 3 },
+    { agentId: "b", agentName: "B", position: "for", reasoning: "ok", weight: 3 },
+  ];
+  return proposal;
+}
+
 // ── Tests ────────────────────────────────────────────────────
 
 describe("proposal state machine — invariants", () => {
@@ -77,16 +96,14 @@ describe("proposal state machine — nominal transitions", () => {
     expect(dispatchProposalEvent(proposal, { type: "DELIBERATE" })).toMatchObject({ ok: true, status: "deliberating" });
     expect(proposal.status).toBe("deliberating");
 
-    expect(dispatchProposalEvent(proposal, { type: "APPROVE", tally: makeTally(true) })).toMatchObject({
-      ok: true,
-      status: "approved",
-    });
+    expect(
+      dispatchProposalEvent(proposal, { type: "APPROVE", tally: makeTally(true) }, { config: guardConfig }),
+    ).toMatchObject({ ok: true, status: "approved" });
     expect(proposal.status).toBe("approved");
 
-    expect(dispatchProposalEvent(proposal, { type: "CONTROL_PASS", result: makeControl(true) })).toMatchObject({
-      ok: true,
-      status: "controlled",
-    });
+    expect(
+      dispatchProposalEvent(proposal, { type: "CONTROL_PASS", result: makeControl(true) }, { config: guardConfig }),
+    ).toMatchObject({ ok: true, status: "controlled" });
     expect(proposal.status).toBe("controlled");
 
     expect(dispatchProposalEvent(proposal, { type: "EXECUTE_SUCCESS" })).toMatchObject({
@@ -95,6 +112,10 @@ describe("proposal state machine — nominal transitions", () => {
     });
     expect(proposal.status).toBe("executed");
     expect(proposal.resolvedAt).toBeDefined();
+  });
+
+  beforeEach(() => {
+    proposal = approveable(makeProposal());
   });
 
   it("uses the injected clock for transition and resolution timestamps", () => {
@@ -108,10 +129,16 @@ describe("proposal state machine — nominal transitions", () => {
     const clock = { now: () => transitionTimes[index++] };
 
     expect(dispatchProposalEvent(proposal, { type: "DELIBERATE" }, { clock }).ok).toBe(true);
-    expect(dispatchProposalEvent(proposal, { type: "APPROVE", tally: makeTally(true) }, { clock }).ok).toBe(true);
-    expect(dispatchProposalEvent(proposal, { type: "CONTROL_PASS", result: makeControl(true) }, { clock }).ok).toBe(
-      true,
-    );
+    expect(
+      dispatchProposalEvent(proposal, { type: "APPROVE", tally: makeTally(true) }, { clock, config: guardConfig }).ok,
+    ).toBe(true);
+    expect(
+      dispatchProposalEvent(
+        proposal,
+        { type: "CONTROL_PASS", result: makeControl(true) },
+        { clock, config: guardConfig },
+      ).ok,
+    ).toBe(true);
     expect(dispatchProposalEvent(proposal, { type: "EXECUTE_SUCCESS" }, { clock }).ok).toBe(true);
 
     expect(proposal.resolvedAt).toBe("2030-01-01T10:03:00.000Z");
@@ -126,28 +153,29 @@ describe("proposal state machine — nominal transitions", () => {
 
   it("fails on control failure from approved", () => {
     dispatchProposalEvent(proposal, { type: "DELIBERATE" });
-    dispatchProposalEvent(proposal, { type: "APPROVE", tally: makeTally(true) });
+    dispatchProposalEvent(proposal, { type: "APPROVE", tally: makeTally(true) }, { config: guardConfig });
     expect(dispatchProposalEvent(proposal, { type: "CONTROL_FAIL" }).ok).toBe(true);
     expect(proposal.status).toBe("failed");
   });
 
   it("allows REJECT from failed as an auditable closure (issue #141)", () => {
     dispatchProposalEvent(proposal, { type: "DELIBERATE" });
-    dispatchProposalEvent(proposal, { type: "APPROVE", tally: makeTally(true) });
+    dispatchProposalEvent(proposal, { type: "APPROVE", tally: makeTally(true) }, { config: guardConfig });
     dispatchProposalEvent(proposal, { type: "CONTROL_FAIL" });
     expect(dispatchProposalEvent(proposal, { type: "REJECT" }).ok).toBe(true);
     expect(proposal.status).toBe("rejected");
   });
 
   it("fails on execution failure from controlled", () => {
+    approveable(proposal);
     proposal.status = "approved";
-    dispatchProposalEvent(proposal, { type: "CONTROL_PASS", result: makeControl(true) });
+    dispatchProposalEvent(proposal, { type: "CONTROL_PASS", result: makeControl(true) }, { config: guardConfig });
     expect(dispatchProposalEvent(proposal, { type: "FAIL" }).ok).toBe(true);
     expect(proposal.status).toBe("failed");
   });
 });
 
-describe("proposal state machine — guards (permissions)", () => {
+describe("proposal state machine — guards recompute, never trust the payload (issue #158)", () => {
   let proposal: Proposal;
 
   beforeEach(() => {
@@ -155,25 +183,68 @@ describe("proposal state machine — guards (permissions)", () => {
     dispatchProposalEvent(proposal, { type: "DELIBERATE" });
   });
 
-  it("blocks APPROVE when the tally is not approved", () => {
-    const result = dispatchProposalEvent(proposal, { type: "APPROVE", tally: makeTally(false) });
+  it("blocks a forged APPROVE carrying tally.approved=true when no votes exist", () => {
+    const result = dispatchProposalEvent(
+      proposal,
+      { type: "APPROVE", tally: makeTally(true) },
+      { config: guardConfig },
+    );
     expect(result.ok).toBe(false);
     expect(proposal.status).toBe("deliberating");
   });
 
-  it("blocks CONTROL_PASS when gates did not all pass", () => {
-    dispatchProposalEvent(proposal, { type: "APPROVE", tally: makeTally(true) });
-    const result = dispatchProposalEvent(proposal, { type: "CONTROL_PASS", result: makeControl(false) });
+  it("APPROVE recomputes: a legitimate tally passes even if the event claims otherwise", () => {
+    approveable(proposal);
+    const result = dispatchProposalEvent(
+      proposal,
+      { type: "APPROVE", tally: makeTally(false) },
+      { config: guardConfig },
+    );
+    expect(result.ok).toBe(true);
+    expect(proposal.status).toBe("approved");
+  });
+
+  it("refuses APPROVE without config instead of trusting the event", () => {
+    const result = dispatchProposalEvent(proposal, { type: "APPROVE", tally: makeTally(true) });
+    expect(result.ok).toBe(false);
+    expect(proposal.status).toBe("deliberating");
+  });
+
+  it("blocks a forged CONTROL_PASS (allGatesPassed=true) when a gate blocker actually fails", () => {
+    approveable(proposal);
+    dispatchProposalEvent(proposal, { type: "APPROVE", tally: makeTally(true) }, { config: guardConfig });
+    // Empty votes in a controlled proposal would pass gates; make a real
+    // blocker fail instead: red zone without a dry-run fails mandatory-dry-run.
+    proposal.riskZone = "red";
+    const result = dispatchProposalEvent(
+      proposal,
+      { type: "CONTROL_PASS", result: makeControl(true) },
+      { config: guardConfig },
+    );
     expect(result.ok).toBe(false);
     expect(proposal.status).toBe("approved");
   });
 
-  it("blocks CONTROL_PASS when there are blockers", () => {
-    dispatchProposalEvent(proposal, { type: "APPROVE", tally: makeTally(true) });
-    const result = dispatchProposalEvent(proposal, {
-      type: "CONTROL_PASS",
-      result: makeControl(true, 1),
-    });
+  it("refuses CONTROL_PASS without config instead of trusting the event", () => {
+    approveable(proposal);
+    dispatchProposalEvent(proposal, { type: "APPROVE", tally: makeTally(true) }, { config: guardConfig });
+    const result = dispatchProposalEvent(proposal, { type: "CONTROL_PASS", result: makeControl(true) });
+    expect(result.ok).toBe(false);
+    expect(proposal.status).toBe("approved");
+  });
+
+  it("CONTROL_PASS replay uses the electorate — a forged pass fails when real gates would (review)", () => {
+    approveable(proposal);
+    dispatchProposalEvent(proposal, { type: "APPROVE", tally: makeTally(true) }, { config: guardConfig });
+    // Real context: a council of 10×1 members — the 2 cast votes are 20%
+    // participation, below the 60% quorum bar. Without the electorate in the
+    // replay the fallback denominator (votes cast) would pass the guard.
+    const electorate = Array.from({ length: 10 }, (_, i) => ({ id: `agent-${i}`, weight: 1 }));
+    const result = dispatchProposalEvent(
+      proposal,
+      { type: "CONTROL_PASS", result: makeControl(true) },
+      { config: guardConfig, electorate },
+    );
     expect(result.ok).toBe(false);
     expect(proposal.status).toBe("approved");
   });
@@ -194,13 +265,17 @@ describe("proposal state machine — forbidden transitions", () => {
 
   it("blocks APPROVE from open (must deliberate first)", () => {
     const proposal = makeProposal("open");
-    expect(dispatchProposalEvent(proposal, { type: "APPROVE", tally: makeTally(true) }).ok).toBe(false);
+    expect(
+      dispatchProposalEvent(proposal, { type: "APPROVE", tally: makeTally(true) }, { config: guardConfig }).ok,
+    ).toBe(false);
     expect(proposal.status).toBe("open");
   });
 
   it("blocks CONTROL_PASS from deliberating (must be approved)", () => {
     const proposal = makeProposal("deliberating");
-    expect(dispatchProposalEvent(proposal, { type: "CONTROL_PASS", result: makeControl(true) }).ok).toBe(false);
+    expect(
+      dispatchProposalEvent(proposal, { type: "CONTROL_PASS", result: makeControl(true) }, { config: guardConfig }).ok,
+    ).toBe(false);
     expect(proposal.status).toBe("deliberating");
   });
 });

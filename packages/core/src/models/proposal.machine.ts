@@ -6,12 +6,19 @@ export interface ProposalContext {
   errorMessage?: string;
   lastTransitionTime: string;
   transitionTime: string;
+  /** Recomputed guard decisions (issue #158), populated from machine input. */
+  expectedApprove?: boolean;
+  expectedGatesPass?: boolean;
 }
 
 export interface ProposalMachineInput {
   proposal: Proposal;
   transitionTime: string;
   lastTransitionTime?: string;
+  /** Recomputed by dispatchProposalEvent from live proposal state — guards
+   *  never trust the event payload (issue #158). */
+  expectedApprove?: boolean;
+  expectedGatesPass?: boolean;
 }
 
 export type ProposalEvent =
@@ -23,6 +30,7 @@ export type ProposalEvent =
   | { type: "EXECUTE_SUCCESS" }
   | { type: "FAIL" }
   | { type: "DISCARD" }
+  | { type: "ABORT_DELIBERATION" }
   | { type: "ERROR"; message: string };
 
 // `failed` is deliberately NOT final (issue #141): a gate failure is by
@@ -42,9 +50,11 @@ const proposalSetup = setup({
     events: {} as ProposalEvent,
   },
   guards: {
-    tallyApproved: ({ event }) => event.type === "APPROVE" && event.tally.approved === true,
-    gatesPassed: ({ event }) =>
-      event.type === "CONTROL_PASS" && event.result.allGatesPassed === true && event.result.blockerCount === 0,
+    // Decision guards recompute from context (populated by
+    // dispatchProposalEvent from the proposal's actual votes / gate replay),
+    // never from the tally/result carried by the event (issue #158).
+    tallyApproved: ({ context }) => context.expectedApprove === true,
+    gatesPassed: ({ context }) => context.expectedGatesPass === true,
   },
   actions: {
     recordTransition: assign({ lastTransitionTime: ({ context }) => context.transitionTime }),
@@ -68,13 +78,21 @@ export function createProposalMachine(initial: ProposalStatus = "open") {
       proposal: input.proposal,
       transitionTime: input.transitionTime,
       lastTransitionTime: input.lastTransitionTime ?? input.transitionTime,
+      expectedApprove: input.expectedApprove,
+      expectedGatesPass: input.expectedGatesPass,
     }),
     states: {
-      open: { on: { DELIBERATE: { target: "deliberating", actions: "recordTransition" }, ...escapeHatches } },
+      open: {
+        on: { DELIBERATE: { target: "deliberating", actions: "recordTransition" }, ...escapeHatches },
+      },
       deliberating: {
         on: {
           APPROVE: { target: "approved", guard: "tallyApproved", actions: "recordTransition" },
           REJECT: { target: "rejected", actions: "recordTransition" },
+          // Deliberation interrupted (worker failure, dead host, Ctrl-C):
+          // return to open so the proposal can be re-deliberated instead of
+          // forcing a terminal DISCARD/ERROR (issue #160).
+          ABORT_DELIBERATION: { target: "open", actions: "recordTransition" },
           ...escapeHatches,
         },
       },

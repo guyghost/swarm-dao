@@ -12,6 +12,7 @@ import {
   createHerdrHostAdapter,
   herdrAgentName,
   herdrParentWorkspaceId,
+  resolveHerdrContainedPath,
   sanitizeHerdrName,
   stripEchoedVoteTemplates,
 } from "../src/adapter.js";
@@ -863,5 +864,35 @@ describe("herdr adapter per-agent harness + model (models/agent-runtime.md D3/E-
 
     expect(output.error).toBeDefined();
     expect(fake.calls.length).toBe(0);
+  });
+
+  test("contained path resolution returns the RESOLVED path, not the lexical one (issue #162)", async () => {
+    // workDir may itself be reached through a symlinked tmpdir — compare
+    // against its real path.
+    const real = path.join(await fs.realpath(workDir), "real-target");
+    await fs.mkdir(real, { recursive: true });
+    await fs.symlink(real, path.join(workDir, "link"));
+    try {
+      const resolved = await resolveHerdrContainedPath(workDir, "link/nested/file.txt");
+      // Must route through the real target directory: a symlink swapped in
+      // after validation can no longer redirect the actual read/write.
+      expect(resolved.startsWith(real)).toBe(true);
+      expect(resolved.includes("/link/")).toBe(false);
+      expect(resolved).toBe(path.join(real, "nested/file.txt"));
+    } finally {
+      await fs.rm(path.join(workDir, "link"), { force: true });
+    }
+  });
+
+  test("HostAdapter.exec is shell-free: metacharacters never run as shell (issue #165)", async () => {
+    const fake = fakeHerdr([{ exitCode: 0 }]);
+    const adapter = createHerdrHostAdapter({ workDir, runner: fake.runner, kind: "pi" });
+    // With the old exec()-based implementation this ran TWO commands via
+    // /bin/sh. execCommand must refuse the metacharacter instead.
+    const result = await adapter.exec("echo a; echo b");
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stdout).not.toContain("a");
+    expect(result.stdout).not.toContain("b");
+    expect(result.stderr).toMatch(/metacharacters|Unsafe/i);
   });
 });

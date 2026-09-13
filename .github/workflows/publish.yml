@@ -24,6 +24,8 @@ jobs:
   publish:
     name: Version packages / publish to npm
     runs-on: ubuntu-latest
+    # A hung test step must produce a log, not burn the 6h GitHub timeout.
+    timeout-minutes: 35
     env:
       HUSKY: "0"
     permissions:
@@ -53,6 +55,11 @@ jobs:
       - name: Setup runtime stubs for optional peer dependencies
         run: bun run setup-stubs
 
+      - name: Build
+        # Before tests: they import the built dist of workspace packages, and
+        # `prepare` no longer builds on install (issue #169.4).
+        run: bun run build
+
       - name: Lint
         run: bun run lint
 
@@ -60,10 +67,21 @@ jobs:
         run: bun run typecheck
 
       - name: Test
-        run: bun test
+        # Same command as ci.yml: per-package isolation. A root `bun test`
+        # runs every test file in one process, letting a pi-spawn.test.ts
+        # mock.module leak into dry-run.test.ts and hang the job (JS spin).
+        run: bun run test
 
-      - name: Build
-        run: bun run build
+      - name: Integration tests
+        # The release path must clear the same bar as PRs: inter-package
+        # contracts are covered by the integration suite only.
+        run: bun run test:integration
+
+      - name: Type check tools
+        run: bun run typecheck:tools
+
+      - name: Test tools
+        run: bun run test:tools
 
       - name: Validate Pi extension npm package
         run: bun run pack:pi

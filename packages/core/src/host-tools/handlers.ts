@@ -21,6 +21,7 @@ import { UpdateProposalUseCase } from "../application/proposals/update-proposal.
 import { loadConfig } from "../config.js";
 import { formatAuditTrail } from "../control/audit.js";
 import { formatAllArtefacts, generateAllArtefacts } from "../delivery/artefacts.js";
+import { validateGitRef } from "../delivery/execution-isolation.js";
 import { formatPlan, getPlan } from "../delivery/plans.js";
 import { evaluateShipAuditChallenge } from "../delivery/ship-audit.js";
 import { formatAgentsTable, initializeAgents, loadAgentDefinitions } from "../governance/agents.js";
@@ -627,6 +628,10 @@ export async function handleDaoGithubOpenPr(
   const proposal = repository.get().proposals.find((candidate) => candidate.id === proposalId);
   if (!proposal) return `Proposal #${proposalId} not found.`;
   if (!headBranch) return "headBranch is required";
+  // Validate before any gh call (issue #166): a manipulable head ref would
+  // open the PR from an unintended branch under the user's credentials.
+  const headError = validateGitRef(headBranch);
+  if (headError) return `❌ headBranch: ${headError.replace("baseBranch", "headBranch")}`;
   const configured = await loadGitHubConfigFromDaoRoot(repository.get().daoRoot);
   if (!configured || !isGitHubEnabled()) {
     return "GitHub not configured. Run `dao_config_github` with owner and repo (authentication is handled by the `gh` CLI).";

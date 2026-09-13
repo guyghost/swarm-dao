@@ -46,8 +46,9 @@ export class FsShipAuditStore implements ShipAuditStorePort {
     await fs.mkdir(this.#directory, { recursive: true });
     try {
       // O_EXCL ('wx'): exactly one concurrent caller across processes wins.
+      const payload = `${JSON.stringify({ pid: process.pid, ts: Date.now() })}\n`;
       const handle = await fs.open(lock, "wx");
-      await handle.write(`${process.pid}\n`);
+      await handle.write(payload);
       await handle.close();
       return {
         acquired: true,
@@ -56,7 +57,52 @@ export class FsShipAuditStore implements ShipAuditStorePort {
         },
       };
     } catch {
+      // EEXIST: a claim already exists. If its writer is provably gone
+      // (dead pid) or it is old enough, reclaim it instead of failing ships
+      // forever until manual cleanup (issue #167.5).
+      if (await this.#claimIsAbandoned(lock)) {
+        await fs.rm(lock, { force: true }).catch(() => undefined);
+        return this.claim(proposalId);
+      }
       return { acquired: false, release: async () => undefined };
+    }
+  }
+
+  /** A claim is abandoned when the owning pid no longer exists, or when it
+   *  is older than the staleness window (crash without cleanup, cross-machine
+   *  writers where the pid check cannot apply). */
+  static readonly #CLAIM_STALE_MS = 30 * 60 * 1000;
+
+  async #claimIsAbandoned(lock: string): Promise<boolean> {
+    try {
+      const raw = await fs.readFile(lock, "utf8");
+      let pid: number | undefined;
+      let ts: number | undefined;
+      try {
+        const parsed = JSON.parse(raw) as { pid?: unknown; ts?: unknown };
+        if (typeof parsed.pid === "number") pid = parsed.pid;
+        if (typeof parsed.ts === "number") ts = parsed.ts;
+      } catch {
+        // Legacy format: a bare pid line.
+        const parsedPid = Number.parseInt(raw.trim(), 10);
+        if (Number.isInteger(parsedPid)) pid = parsedPid;
+      }
+      if (pid !== undefined && Number.isInteger(pid) && pid > 0) {
+        try {
+          process.kill(pid, 0); // liveness probe — throws if the process is gone
+          // Alive: only age can make the claim abandonable.
+        } catch (error) {
+          // POSIX (review): EPERM means the process EXISTS but is owned by
+          // another user — reclaiming on EPERM would break mutual exclusion.
+          // Only ESRCH ("no such process") proves the owner is gone.
+          if ((error as NodeJS.ErrnoException).code === "ESRCH") return true;
+          // Any other probe error: fall through to the age check.
+        }
+      }
+      if (ts !== undefined && Date.now() - ts > FsShipAuditStore.#CLAIM_STALE_MS) return true;
+      return false;
+    } catch {
+      return false; // unreadable claim: keep failing closed
     }
   }
 

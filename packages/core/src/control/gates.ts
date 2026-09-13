@@ -2,12 +2,23 @@
 // Swarm DAO Core — Quality Control Gates
 // ============================================================
 
-import { allCoordinatorsClosed } from "../governance/delegation.utils.js";
-import { resolveTypeThresholds, tallyVotes } from "../governance/voting.js";
+import { getUnexecutedDependencies } from "../delivery/dependencies.js";
+import { allCoordinatorsClosed, isDelegationInFlightOnDisk } from "../governance/delegation.utils.js";
+import { type Electorate, resolveTypeThresholds, tallyVotes } from "../governance/voting.js";
 import type { ChecklistItem, ControlCheckResult, DAOConfig, GateResult, Proposal } from "../types/index.js";
 import { PROPOSAL_TYPE, TYPE_QUORUM } from "../types/index.js";
 
 // ── Gate Definitions ─────────────────────────────────────────
+
+/** Ambient context gates may consult; everything is optional so gates
+ *  degrade gracefully when the caller cannot supply it. */
+export interface GateContext {
+  allProposals?: readonly Proposal[];
+  /** Configured council (state.agents): grounds the quorum denominator. */
+  electorate?: Electorate;
+  /** DAO root: lets gates consult on-disk state (e.g. delegation markers). */
+  daoRoot?: string;
+}
 
 interface GateDefinition {
   id: string;
@@ -16,7 +27,7 @@ interface GateDefinition {
   check: (
     proposal: Proposal,
     config: DAOConfig,
-    allProposals?: readonly Proposal[],
+    context: GateContext,
   ) => { passed: boolean; message: string; details?: Record<string, unknown> };
 }
 
@@ -25,8 +36,8 @@ const GATES: GateDefinition[] = [
     id: "quorum-quality",
     name: "Quorum Quality",
     severity: "blocker",
-    check: (proposal, config) => {
-      const tally = tallyVotes(proposal, config);
+    check: (proposal, config, context) => {
+      const tally = tallyVotes(proposal, config, context.electorate);
       const required = resolveTypeThresholds(proposal, config).quorumPercent;
       return {
         passed: tally.quorumMet,
@@ -50,12 +61,23 @@ const GATES: GateDefinition[] = [
     check: (proposal, config) => {
       // Parse risk scores from agent outputs
       const riskScores: number[] = [];
-      for (const output of proposal.agentOutputs || []) {
+      for (const output of proposal.agentOutputs ?? []) {
         const match = output.content?.match(/##\s*Risk Score \(1-10\)\s*\n\s*(\d+)/i) ?? null;
         if (match) riskScores.push(parseInt(match[1] ?? "0", 10));
       }
 
-      const avgRisk = riskScores.length > 0 ? riskScores.reduce((a, b) => a + b, 0) / riskScores.length : 0;
+      // Fail closed (issue #168.1): "no scores produced" is NOT "zero risk".
+      // Agents in error, drifted response formats or partial deliberations
+      // must not silently pass the risk gate.
+      if (riskScores.length === 0) {
+        return {
+          passed: false,
+          message: `No risk scores produced by agent outputs — cannot verify risk threshold ${config.riskThreshold}`,
+          details: { avgRisk: null, riskScores },
+        };
+      }
+
+      const avgRisk = riskScores.reduce((a, b) => a + b, 0) / riskScores.length;
 
       const passed = avgRisk <= config.riskThreshold;
       return {
@@ -112,12 +134,13 @@ const GATES: GateDefinition[] = [
     id: "dependency-readiness",
     name: "Dependency Readiness",
     severity: "info",
-    check: (proposal, _config, allProposals) => {
+    check: (proposal, _config, context) => {
       const dependsOn = proposal.dependsOn;
       if (!dependsOn || dependsOn.length === 0) {
         return { passed: true, message: "No inter-proposal dependencies" };
       }
 
+      const allProposals = context.allProposals;
       if (!allProposals) {
         return {
           passed: true,
@@ -126,18 +149,20 @@ const GATES: GateDefinition[] = [
         };
       }
 
-      const proposalMap = new Map<number, Proposal>(allProposals.map((p) => [p.id, p]));
-      const missing: number[] = [];
-      const unexecuted: number[] = [];
-
-      for (const id of dependsOn) {
-        const dep = proposalMap.get(id);
-        if (!dep) {
-          missing.push(id);
-        } else if (dep.status !== "executed") {
-          unexecuted.push(id);
-        }
+      // Same transitive semantics as the ship path (issue #168.4): a chain
+      // C→B→A with unexecuted A must fail here, not only at dao_ship.
+      const resolution = getUnexecutedDependencies(proposal.id, [...allProposals]);
+      if (resolution.error) {
+        return {
+          passed: false,
+          message: resolution.error,
+          details: { error: resolution.error },
+        };
       }
+      const unexecuted = resolution.order ?? [];
+
+      const proposalMap = new Map<number, Proposal>(allProposals.map((p) => [p.id, p]));
+      const missing = dependsOn.filter((id) => !proposalMap.has(id));
 
       if (missing.length > 0 || unexecuted.length > 0) {
         const parts: string[] = [];
@@ -157,13 +182,14 @@ const GATES: GateDefinition[] = [
     id: "dependency-conflict",
     name: "Dependency Conflict",
     severity: "warning",
-    check: (proposal, _config, allProposals) => {
+    check: (proposal, _config, context) => {
       const mine = new Set(
         (proposal.affectedPaths ?? []).map((entry) => entry.trim().replace(/\\/g, "/")).filter(Boolean),
       );
       if (mine.size === 0) {
         return { passed: true, message: "No affected paths declared" };
       }
+      const allProposals = context.allProposals;
       if (!allProposals) {
         return {
           passed: true,
@@ -212,11 +238,15 @@ const GATES: GateDefinition[] = [
     id: "type-specific-quality",
     name: "Type-Specific Quality",
     severity: "blocker",
-    check: (proposal, config) => {
+    check: (proposal, config, context) => {
       const typeQuorum = config.typeQuorum[proposal.type] ?? TYPE_QUORUM[proposal.type];
       if (!typeQuorum) return { passed: true, message: "No type-specific requirements" };
-      const tally = tallyVotes(proposal, config);
-      const passed = tally.quorumMet && tally.approvalScore >= typeQuorum.approvalPercent;
+      const tally = tallyVotes(proposal, config, context.electorate);
+      // tally.quorumMet already applies this type's quorum threshold
+      // (resolveTypeThresholds); approval is compared as an exact fraction.
+      const decisiveWeight = tally.weightedFor + tally.weightedAgainst;
+      const passed =
+        tally.quorumMet && decisiveWeight > 0 && tally.weightedFor * 100 >= typeQuorum.approvalPercent * decisiveWeight;
       return {
         passed,
         message: passed
@@ -233,14 +263,18 @@ const GATES: GateDefinition[] = [
   },
   {
     // INV-8 (ordering): no APPROVE while a delegation is in flight. Opt-in via
-    // `config.requiredGates` (NOT in DEFAULT_CONFIG.requiredGates). The
-    // deliberation orchestrator registers live coordinator states for the
-    // proposal; this gate refuses to pass until every coordinator is closed.
+    // `config.requiredGates` (NOT in DEFAULT_CONFIG.requiredGates).
+    // Two observation layers (issue #159): the in-process coordinator
+    // registry, AND a persisted in-flight marker written by the deliberation
+    // orchestrator — the registry alone can never block because it is
+    // process-local and cleared before dao_control runs.
     id: "delegation-closed",
     name: "Delegation Closed",
     severity: "blocker",
-    check: (proposal, _config) => {
-      const closed = allCoordinatorsClosed(proposal.id);
+    check: (proposal, _config, context) => {
+      const closed =
+        allCoordinatorsClosed(proposal.id) &&
+        !(context.daoRoot && isDelegationInFlightOnDisk(context.daoRoot, proposal.id));
       return {
         passed: closed,
         message: closed ? "All delegation coordinators closed" : "Delegation in flight — tally must wait",
@@ -279,7 +313,7 @@ function generateChecklist(proposal: Proposal): ChecklistItem[] {
       id: "architecture-reviewed",
       category: "quality",
       label: "Architecture reviewed",
-      checked: proposal.agentOutputs.some((o) => o.agentId === "architect"),
+      checked: (proposal.agentOutputs ?? []).some((o) => o.agentId === "architect"),
       autoChecked: true,
     },
     {
@@ -305,7 +339,7 @@ function generateChecklist(proposal: Proposal): ChecklistItem[] {
 export function runGates(
   proposal: Proposal,
   config: DAOConfig,
-  options: { allProposals?: readonly Proposal[]; now?: string } = {},
+  options: GateContext & { now?: string } = {},
 ): ControlCheckResult {
   const gates: GateResult[] = [];
   let blockerCount = 0;
@@ -315,7 +349,7 @@ export function runGates(
     // Skip gates not in required list
     if (!config.requiredGates.includes(gateDef.id)) continue;
 
-    const result = gateDef.check(proposal, config, options.allProposals);
+    const result = gateDef.check(proposal, config, options);
     const gate: GateResult = {
       gateId: gateDef.id,
       name: gateDef.name,

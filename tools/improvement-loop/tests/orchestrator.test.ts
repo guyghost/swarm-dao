@@ -601,7 +601,9 @@ describe("improvement-orchestrator wiring — concurrent runners (issue #139)", 
       const journal = await readFile(join(evidenceRoot, "series-duel", "journal.ndjson"), "utf8");
       const lines = journal.split("\n").filter((line) => line.trim().length > 0);
       expect(lines.length).toBe(2);
-      expect(JSON.parse(lines[1])).toMatchObject({ sequence: 2 });
+      const secondLine: string | undefined = lines[1];
+      expect(secondLine).toBeDefined();
+      expect(JSON.parse(secondLine ?? "")).toMatchObject({ sequence: 2 });
     } finally {
       await rm(evidenceRoot, { recursive: true, force: true });
     }
@@ -671,7 +673,7 @@ describe("improvement-orchestrator wiring — infra-failed anchors (issue #145)"
         runWorker: fakeWorker(),
         runCommand: async () => ({ ok: false, detail: "sandbox could not be launched", infra: true }),
       };
-      let step;
+      let step: Awaited<ReturnType<OrchestratorRunner["once"]>> | undefined;
       for (let index = 0; index < 8; index++) step = await runner.once(deps);
 
       expect(runner.snapshot().state).toBe("halted"); // human restart gate
@@ -680,7 +682,7 @@ describe("improvement-orchestrator wiring — infra-failed anchors (issue #145)"
       expect(cycleSnapshot.state).toBe("blocked");
       const anchors = cycleSnapshot.context.anchors as Record<string, { status: string }>;
       expect(anchors.regression).toMatchObject({ status: "blocked" });
-      expect(step.event).toBe("CYCLE_BLOCKED");
+      expect(step?.event).toBe("CYCLE_BLOCKED");
     } finally {
       await rm(evidenceRoot, { recursive: true, force: true });
       await rm(cycleRoot, { recursive: true, force: true });
@@ -702,9 +704,9 @@ describe("improvement-orchestrator wiring — infra-failed anchors (issue #145)"
         runCommand: async () => ({ ok: false, detail: "regression exited 1" }),
       };
       // grounding step only: the anchors are recorded as failed (measured).
-      let step;
+      let step: Awaited<ReturnType<OrchestratorRunner["once"]>> | undefined;
       for (let index = 0; index < 6; index++) step = await runner.once(deps);
-      expect(step.event).toBe("ANCHORS_SUBMITTED");
+      expect(step?.event).toBe("ANCHORS_SUBMITTED");
       const cycleId = runner.snapshot().context.improvementCycleId as string;
       const cycleSnapshot = JSON.parse(await readFile(join(cycleRoot, cycleId, "snapshot.json"), "utf8"));
       const anchors = cycleSnapshot.context.anchors as Record<string, { status: string }>;

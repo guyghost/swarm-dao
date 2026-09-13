@@ -47,6 +47,7 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { resolveContainedRoot } from "./contained-root.js";
 import { createMcpHostAdapter, resolveDaoRoot } from "./host-adapter.js";
+import { createToolInputSchemas, validateToolArgs } from "./tool-schemas.js";
 
 type TextResult = { content: Array<{ type: "text"; text: string }>; isError?: boolean };
 
@@ -124,321 +125,193 @@ export function createSwarmDaoMcpServer(workDir = resolveDaoRoot(), repository?:
   const ctx = createToolContext(workDir, repository);
   const controlTool = "dao_control";
 
+  // Single source of truth (issue #161): these schemas are published via
+  // ListTools AND enforced on every CallTool request.
+  const toolInputSchemas = createToolInputSchemas({
+    proposalTypes: [...PROPOSAL_TYPES],
+    graphAiEvents: GRAPH_AI_EVENT_ENUM,
+    productAiEvents: PRODUCT_AI_EVENT_ENUM,
+    attentionSources: ATTENTION_SOURCES,
+  });
+
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: [
       {
         name: "dao_help",
         description: "Show onboarding and available DAO tools",
-        inputSchema: { type: "object", properties: {} },
+        inputSchema: toolInputSchemas.dao_help,
       },
       {
         name: "dao_setup",
         description: "Initialize the DAO with default 8 product agents",
-        inputSchema: { type: "object", properties: { useDefaults: { type: "boolean" } } },
+        inputSchema: toolInputSchemas.dao_setup,
       },
       {
         name: "dao_propose",
         description: "Create a new DAO proposal",
-        inputSchema: {
-          type: "object",
-          required: ["title", "type", "description"],
-          properties: {
-            title: { type: "string" },
-            type: { type: "string", enum: [...PROPOSAL_TYPES] },
-            description: { type: "string" },
-            context: { type: "string" },
-            problemStatement: { type: "string" },
-            acceptanceCriteria: { type: "array", items: { type: "string" } },
-            successMetrics: { type: "array", items: { type: "string" } },
-            rollbackConditions: { type: "array", items: { type: "string" } },
-            affectedPaths: { type: "array", items: { type: "string" } },
-          },
-        },
+        inputSchema: toolInputSchemas.dao_propose,
       },
       {
         name: "dao_deliberate",
         description: "Build a swarm dispatch plan for manual sub-agent execution",
-        inputSchema: { type: "object", required: ["proposalId"], properties: { proposalId: { type: "number" } } },
+        inputSchema: toolInputSchemas.dao_deliberate,
       },
       {
         name: "dao_record_outputs",
         description: "Record sub-agent outputs and finalize deliberation",
-        inputSchema: {
-          type: "object",
-          required: ["proposalId", "outputs"],
-          properties: {
-            proposalId: { type: "number" },
-            outputs: {
-              type: "array",
-              items: {
-                type: "object",
-                required: ["agentId", "content"],
-                properties: {
-                  agentId: { type: "string" },
-                  content: { type: "string" },
-                  durationMs: { type: "number" },
-                  error: { type: "string" },
-                },
-              },
-            },
-          },
-        },
+        inputSchema: toolInputSchemas.dao_record_outputs,
       },
       {
         name: "dao_control",
         description: "Run quality control gates",
-        inputSchema: { type: "object", required: ["proposalId"], properties: { proposalId: { type: "number" } } },
+        inputSchema: toolInputSchemas.dao_control,
       },
       {
         name: "dao_execute",
         description: "Execute an approved or controlled proposal",
-        inputSchema: { type: "object", required: ["proposalId"], properties: { proposalId: { type: "number" } } },
+        inputSchema: toolInputSchemas.dao_execute,
       },
       {
         name: "dao_ship",
         description: "Ship a controlled proposal (optionally cascade dependencies)",
-        inputSchema: {
-          type: "object",
-          required: ["proposalId"],
-          properties: { proposalId: { type: "number" }, cascade: { type: "boolean" }, force: { type: "boolean" } },
-        },
+        inputSchema: toolInputSchemas.dao_ship,
       },
-      { name: "dao_list", description: "List all DAO proposals", inputSchema: { type: "object", properties: {} } },
-      { name: "dao_agents", description: "List all DAO agents", inputSchema: { type: "object", properties: {} } },
+      { name: "dao_list", description: "List all DAO proposals", inputSchema: toolInputSchemas.dao_list },
+      { name: "dao_agents", description: "List all DAO agents", inputSchema: toolInputSchemas.dao_agents },
       {
         name: "dao_plan",
         description: "Get delivery plan",
-        inputSchema: { type: "object", required: ["proposalId"], properties: { proposalId: { type: "number" } } },
+        inputSchema: toolInputSchemas.dao_plan,
       },
       {
         name: "dao_artefacts",
         description: "View auto-generated artefacts for a proposal",
-        inputSchema: { type: "object", required: ["proposalId"], properties: { proposalId: { type: "number" } } },
+        inputSchema: toolInputSchemas.dao_artefacts,
       },
       {
         name: "dao_dry_run",
         description: "Preview execution without applying changes",
-        inputSchema: { type: "object", required: ["proposalId"], properties: { proposalId: { type: "number" } } },
+        inputSchema: toolInputSchemas.dao_dry_run,
       },
       {
         name: "dao_rollback",
         description: "Revert proposal execution to pre-execution snapshot",
-        inputSchema: { type: "object", required: ["proposalId"], properties: { proposalId: { type: "number" } } },
+        inputSchema: toolInputSchemas.dao_rollback,
       },
       {
         name: "dao_reject",
         description: "Reject (or discard) a proposal with an auditable human reason",
-        inputSchema: {
-          type: "object",
-          required: ["proposalId", "reason"],
-          properties: { proposalId: { type: "number" }, reason: { type: "string" } },
-        },
+        inputSchema: toolInputSchemas.dao_reject,
       },
       {
         name: "dao_dashboard",
         description: "View outcome tracking dashboard",
-        inputSchema: { type: "object", properties: {} },
+        inputSchema: toolInputSchemas.dao_dashboard,
       },
       {
         name: "dao_roundtable",
         description: "Ask every agent to suggest a proposal idea",
-        inputSchema: { type: "object", properties: {} },
+        inputSchema: toolInputSchemas.dao_roundtable,
       },
       {
         name: "dao_audit",
         description: "View audit trail",
-        inputSchema: { type: "object", properties: { proposalId: { type: "number" } } },
+        inputSchema: toolInputSchemas.dao_audit,
       },
       {
         name: "dao_rate",
         description: "Rate a proposal outcome post-execution (1-5 stars)",
-        inputSchema: {
-          type: "object",
-          required: ["proposalId", "score", "comment"],
-          properties: {
-            proposalId: { type: "number" },
-            score: { type: "number", minimum: 1, maximum: 5 },
-            comment: { type: "string" },
-          },
-        },
+        inputSchema: toolInputSchemas.dao_rate,
       },
       {
         name: "dao_update_proposal",
         description: "Update structured fields on an open proposal",
-        inputSchema: {
-          type: "object",
-          required: ["proposalId"],
-          properties: {
-            proposalId: { type: "number" },
-            problemStatement: { type: "string" },
-            acceptanceCriteria: { type: "array", items: { type: "string" } },
-            successMetrics: { type: "array", items: { type: "string" } },
-            rollbackConditions: { type: "array", items: { type: "string" } },
-          },
-        },
+        inputSchema: toolInputSchemas.dao_update_proposal,
       },
       {
         name: "dao_propose_amendment",
         description: "Propose an amendment to the DAO",
-        inputSchema: {
-          type: "object",
-          required: ["title", "description", "amendmentType"],
-          properties: {
-            title: { type: "string" },
-            description: { type: "string" },
-            amendmentType: {
-              type: "string",
-              enum: ["agent-update", "agent-add", "agent-remove", "config-update", "quorum-update", "gate-update"],
-            },
-            agentId: { type: "string" },
-            agentChanges: { type: "string" },
-            newAgentId: { type: "string" },
-            newAgentName: { type: "string" },
-            newAgentRole: { type: "string" },
-            newAgentWeight: { type: "number" },
-            configChanges: { type: "string" },
-            quorumChanges: { type: "string" },
-            addGates: { type: "array", items: { type: "string" } },
-            removeGates: { type: "array", items: { type: "string" } },
-          },
-        },
+        inputSchema: toolInputSchemas.dao_propose_amendment,
       },
       {
         name: "dao_check_edit",
         description:
           "Check whether paths may be edited under the configured mode (opt-in/suggest/enforce) before touching files",
-        inputSchema: {
-          type: "object",
-          required: ["paths"],
-          properties: { paths: { type: "array", items: { type: "string" } } },
-        },
+        inputSchema: toolInputSchemas.dao_check_edit,
       },
       {
         name: "dao_config_github",
         description:
           "Configure GitHub integration (owner, repo, issue tracking). Authentication is delegated to the gh CLI (`gh auth login`).",
-        inputSchema: {
-          type: "object",
-          required: ["owner", "repo"],
-          properties: {
-            owner: { type: "string" },
-            repo: { type: "string" },
-            issues: { type: "boolean", description: "Track proposal modifications as GitHub issues" },
-          },
-        },
+        inputSchema: toolInputSchemas.dao_config_github,
       },
       {
         name: "dao_github_create_branch",
         description: "Create a GitHub branch for a proposal",
-        inputSchema: { type: "object", required: ["proposalId"], properties: { proposalId: { type: "number" } } },
+        inputSchema: toolInputSchemas.dao_github_create_branch,
       },
       {
         name: "dao_github_open_pr",
         description: "Open a GitHub pull request for a proposal",
-        inputSchema: {
-          type: "object",
-          required: ["proposalId", "headBranch"],
-          properties: { proposalId: { type: "number" }, headBranch: { type: "string" } },
-        },
+        inputSchema: toolInputSchemas.dao_github_open_pr,
       },
       {
         name: "dao_attention",
         description:
           "List pending human gates across Graph Engineering runs, improvement cycles and series, and product loops (read-only projection of persisted snapshots)",
-        inputSchema: {
-          type: "object",
-          properties: {
-            sources: { type: "array", items: { type: "string", enum: [...ATTENTION_SOURCES] } },
-          },
-        },
+        inputSchema: toolInputSchemas.dao_attention,
       },
       {
         name: "dao_improve_status",
         description:
           "Read an improvement series snapshot (read-only): state, scope, cooldown, pending reason. Evidence root defaults to .dao/improvement-series under the workspace.",
-        inputSchema: {
-          type: "object",
-          required: ["seriesId"],
-          properties: { seriesId: { type: "string" }, evidenceRoot: { type: "string" } },
-        },
+        inputSchema: toolInputSchemas.dao_improve_status,
       },
       {
         name: "dao_improve_once",
         description:
           "Advance an improvement series by exactly one state-authorized effect (deterministic executor). Runs workers/anchors from the persisted .dao/improvement.json configuration inside the per-series worktree — the caller supplies no execution options. No-op when the series waits on a human decision, has failed workers, is halted, or is terminal. Can be long-running (spawns worker agents): worker phases take minutes — raise the host request timeout accordingly.",
-        inputSchema: {
-          type: "object",
-          required: ["seriesId"],
-          properties: {
-            seriesId: { type: "string" },
-            evidenceRoot: { type: "string" },
-            cycleRoot: { type: "string" },
-          },
-        },
+        inputSchema: toolInputSchemas.dao_improve_once,
       },
       {
         name: "dao_graph_status",
         description:
           "Read a Graph Engineering run snapshot (read-only). Evidence root defaults to .dao/graph-runs under the workspace.",
-        inputSchema: {
-          type: "object",
-          required: ["runId"],
-          properties: { runId: { type: "string" }, evidenceRoot: { type: "string" } },
-        },
+        inputSchema: toolInputSchemas.dao_graph_status,
       },
       {
         name: "dao_graph_submit",
         description:
           "Submit an AI-source signal to a Graph Engineering run (MODEL_DRAFTED, IMPLEMENTATION_READY, IMPLEMENTATION_FAILED). " +
           "The host sets source=ai; human events (MODEL_APPROVED, MODEL_REJECTED, RETRY_AUTHORIZED, CANCEL) belong to the swarm-dao CLI human channel.",
-        inputSchema: {
-          type: "object",
-          required: ["runId", "type", "producer", "payload", "evidence"],
-          properties: {
-            runId: { type: "string" },
-            type: { type: "string", enum: [...GRAPH_AI_EVENT_ENUM] },
-            producer: { type: "string" },
-            payload: { type: "object" },
-            evidence: { type: "array", items: { type: "string" } },
-            evidenceRoot: { type: "string" },
-          },
-        },
+        inputSchema: toolInputSchemas.dao_graph_submit,
       },
       {
         name: "dao_product_status",
         description:
           "Read a product-loop run snapshot (read-only). Evidence root defaults to .dao/product-loops under the workspace.",
-        inputSchema: {
-          type: "object",
-          required: ["runId"],
-          properties: { runId: { type: "string" }, evidenceRoot: { type: "string" } },
-        },
+        inputSchema: toolInputSchemas.dao_product_status,
       },
       {
         name: "dao_product_submit",
         description:
           "Submit an AI-source signal to a product-loop run (AGENT_SIGNAL, FEEDBACK_AGGREGATED, PROPOSAL_DRAFTED from a declared AI producer). " +
           "The host sets source=ai; human events (REVIEW_RESOLVED, RETRY_VERIFICATION_AUTHORIZED, CONTACT_RELAY_AUTHORIZED, CANCEL) belong to the swarm-dao CLI human channel.",
-        inputSchema: {
-          type: "object",
-          required: ["runId", "type", "producer", "payload", "evidence"],
-          properties: {
-            runId: { type: "string" },
-            type: { type: "string", enum: [...PRODUCT_AI_EVENT_ENUM] },
-            producer: { type: "string" },
-            payload: { type: "object" },
-            evidence: { type: "array", items: { type: "string" } },
-            evidenceRoot: { type: "string" },
-          },
-        },
+        inputSchema: toolInputSchemas.dao_product_submit,
       },
     ],
   }));
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    const args = (request.params.arguments ?? {}) as Record<string, unknown>;
+    const rawArgs = request.params.arguments;
     const name = request.params.name;
     try {
+      // Runtime validation against the SAME schema published in ListTools
+      // (issue #161): bad types, NaN/float ids, out-of-range scores, forged
+      // event enums and malformed argument shapes are rejected before any
+      // handler runs.
+      validateToolArgs(name, toolInputSchemas[name], rawArgs);
+      const args = (rawArgs ?? {}) as Record<string, unknown>;
       switch (name) {
         case "dao_help": {
           const state = getState();

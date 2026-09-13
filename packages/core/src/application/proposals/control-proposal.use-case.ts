@@ -3,9 +3,11 @@ import { generateDeliveryPlan } from "../../delivery/plans.js";
 import { dispatchProposalEvent } from "../../governance/proposal.utils.js";
 import type { ClockPort } from "../../ports/clock.js";
 import type { DaoStateRepositoryPort } from "../../ports/repository.js";
-import type { AuditEntry, ControlCheckResult, DAOState } from "../../types/index.js";
+import type { AuditEntry, ControlCheckResult, DAOState, Proposal } from "../../types/index.js";
 
-export type ControlProposalResult = { ok: true; control: ControlCheckResult } | { ok: false; error: string };
+export type ControlProposalResult =
+  | { ok: true; control: ControlCheckResult; status: Proposal["status"] }
+  | { ok: false; error: string };
 
 export class ControlProposalUseCase {
   public constructor(
@@ -36,7 +38,12 @@ export class ControlProposalUseCase {
     }
 
     const now = this.dependencies.clock.now();
-    const control = runGates(proposal, state.config, { allProposals: state.proposals, now });
+    const control = runGates(proposal, state.config, {
+      allProposals: state.proposals,
+      electorate: state.agents,
+      daoRoot: state.daoRoot,
+      now,
+    });
     state.controlResults[proposal.id] = control;
     if (control.allGatesPassed) {
       const transition = dispatchProposalEvent(
@@ -44,13 +51,21 @@ export class ControlProposalUseCase {
         { type: "CONTROL_PASS", result: control },
         {
           clock: this.dependencies.clock,
+          config: state.config,
+          electorate: state.agents,
+          allProposals: state.proposals,
+          daoRoot: state.daoRoot,
         },
       );
       if (!transition.ok) return transition;
       this.audit(state, proposal.id, "gates_passed", "All gates passed");
       state.deliveryPlans[proposal.id] ??= generateDeliveryPlan(proposal);
     } else {
-      if (command.failOnGateFailure) {
+      // Fail closed by default (issue #168.2): a gate failure must not leave
+      // the proposal silently `approved` and re-executable. Callers that
+      // intentionally want check-only semantics pass failOnGateFailure: false.
+      const failOnGateFailure = command.failOnGateFailure ?? true;
+      if (failOnGateFailure) {
         const transition = dispatchProposalEvent(
           proposal,
           { type: "CONTROL_FAIL" },
@@ -61,7 +76,7 @@ export class ControlProposalUseCase {
       this.audit(state, proposal.id, "gates_failed", `${control.blockerCount} blockers`);
     }
     await this.dependencies.repository.persist();
-    return { ok: true, control };
+    return { ok: true, control, status: proposal.status };
   }
 
   private audit(state: DAOState, proposalId: number, action: string, details: string): void {

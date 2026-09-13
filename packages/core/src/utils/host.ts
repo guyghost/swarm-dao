@@ -191,13 +191,28 @@ export async function readFileContained(filePath: string, baseDir?: string): Pro
   return fs.readFile(filePath, "utf-8");
 }
 
-/** Write a file as UTF-8, with optional path containment enforcement. */
+/** Write a file as UTF-8, with optional path containment enforcement.
+ *  The write is atomic (temp file + rename) so a crash mid-write cannot
+ *  leave a truncated file behind (issue #167.2). */
 export async function writeFileContained(filePath: string, content: string, baseDir?: string): Promise<void> {
   if (baseDir) {
     const resolved = await resolveContainedPath(filePath, baseDir);
     await fs.mkdir(path.dirname(resolved), { recursive: true });
-    await fs.writeFile(resolved, content, "utf-8");
+    await writeAtomicTo(resolved, content);
     return;
   }
-  await fs.writeFile(filePath, content, "utf-8");
+  await writeAtomicTo(filePath, content);
+}
+
+/** Serialize to a sibling temp file, then rename over the target. POSIX
+ *  rename(2) is atomic: readers observe either the old or the new content. */
+async function writeAtomicTo(filePath: string, content: string): Promise<void> {
+  const tmpPath = `${filePath}.tmp-${process.pid}-${Math.random().toString(36).slice(2, 10)}`;
+  try {
+    await fs.writeFile(tmpPath, content, "utf-8");
+    await fs.rename(tmpPath, filePath);
+  } catch (error) {
+    await fs.unlink(tmpPath).catch(() => undefined);
+    throw error;
+  }
 }
