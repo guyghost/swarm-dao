@@ -37,6 +37,26 @@ describe("control/gates", () => {
     expect(typeof result.allGatesPassed).toBe("boolean");
   });
 
+  it("fails closed when requiredGates names an unknown gate", () => {
+    const proposal = {
+      id: 1,
+      title: "Test",
+      type: "product-feature" as const,
+      description: "Test proposal",
+      proposedBy: "test",
+      status: "approved" as const,
+      votes: [{ agentId: "a", agentName: "A", position: "for" as const, reasoning: "Good", weight: 3 }],
+      agentOutputs: [],
+      createdAt: new Date().toISOString(),
+    };
+    const result = runGates(proposal, { ...DEFAULT_CONFIG, requiredGates: ["quorum-quality", "quorum-qualit"] });
+    const unknown = result.gates.find((gate) => gate.gateId === "quorum-qualit");
+    expect(unknown?.passed).toBe(false);
+    expect(unknown?.severity).toBe("blocker");
+    expect(result.blockerCount).toBeGreaterThan(0);
+    expect(result.allGatesPassed).toBe(false);
+  });
+
   it("formats control result", () => {
     const result = {
       proposalId: 1,

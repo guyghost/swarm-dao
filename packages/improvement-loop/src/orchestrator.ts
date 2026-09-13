@@ -26,10 +26,10 @@
 // models/improvement-loop.graph.json; a failed anchor is submitted honestly,
 // never retried by the orchestrator.
 
-import { exec as execCallback } from "node:child_process";
 import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve, sep } from "node:path";
-import { parseArgs, promisify } from "node:util";
+import { parseArgs } from "node:util";
+import { execCommand } from "@guyghost/swarm-dao-core";
 import {
   arbitratePairedSignals,
   createOrchestratorActor,
@@ -55,8 +55,6 @@ import {
   loadProjectImprovementConfig,
 } from "./config.js";
 import { extractLastJsonObject, runHerdrWorker, type WorkerHarvest } from "./workers.js";
-
-const execAsync = promisify(execCallback);
 
 export const DEFAULT_SERIES_EVIDENCE_ROOT = "evidence/improvement-series";
 export const DEFAULT_CYCLE_EVIDENCE_ROOT = "evidence/improvement-cycles";
@@ -259,31 +257,21 @@ const tail = (value: string, max: number): string => (value.length <= max ? valu
 const defaultRunCommand =
   (cwd: string) =>
   async (command: string): Promise<AnchorCommandOutcome> => {
-    try {
-      const { stdout } = await execAsync(command, { cwd, timeout: 600_000 });
+    const { stdout, stderr, exitCode } = await execCommand(command, { cwd, timeout: 600_000 });
+    if (exitCode === 0) {
       return { ok: true, detail: tail(stdout.trim(), 300) || "exit 0" };
-    } catch (error) {
-      const failure = error as {
-        killed?: boolean;
-        code?: number | string;
-        message?: string;
-        stderr?: string;
-        stdout?: string;
-      };
-      const detail = [failure.stderr, failure.stdout, failure.message]
-        .filter((part) => part && part.length > 0)
-        .join(" ");
-      // Issue #145: classify "no verdict" as blocked — the runner killed the
-      // command (budget timeout) or the execution environment refused it
-      // (sandbox launch failures conventionally exit 125; a missing binary
-      // never ran). Everything else executed and measured a real failure.
-      const unmeasured = failure.killed === true || failure.code === 125 || /\bENOENT\b/.test(failure.message ?? "");
-      return {
-        ok: false,
-        detail: tail(detail.trim(), 300) || "command failed",
-        ...(unmeasured ? { infra: true } : {}),
-      };
     }
+    const detail = [stderr, stdout].filter((part) => part && part.length > 0).join(" ");
+    // Issue #145: classify "no verdict" as blocked — the runner killed the
+    // command (budget timeout / exit 124) or the execution environment refused
+    // it (sandbox launch failures conventionally exit 125; a missing binary
+    // never ran). Everything else executed and measured a real failure.
+    const unmeasured = exitCode === 124 || exitCode === 125 || /\bENOENT\b/.test(stderr);
+    return {
+      ok: false,
+      detail: tail(detail.trim(), 300) || "command failed",
+      ...(unmeasured ? { infra: true } : {}),
+    };
   };
 
 const defaultRunWorker =
@@ -832,11 +820,9 @@ export class OrchestratorRunner {
    * are not git repositories cannot be verified and keep the previous
    * behavior (test evidence roots, foreign layouts). */
   async #assertCleanTree(workDir: string): Promise<void> {
-    const inRepo = await execAsync("git rev-parse --is-inside-work-tree", { cwd: workDir })
-      .then(() => true)
-      .catch(() => false);
-    if (!inRepo) return;
-    const { stdout } = await execAsync("git status --porcelain", { cwd: workDir });
+    const inside = await execCommand("git rev-parse --is-inside-work-tree", { cwd: workDir });
+    if (inside.exitCode !== 0) return;
+    const { stdout } = await execCommand("git status --porcelain", { cwd: workDir });
     const dirty = stdout.split("\n").filter((line) => line.trim().length > 0);
     if (dirty.length === 0) return;
     const listed = dirty.slice(0, 20).join("\n  ");

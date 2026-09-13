@@ -23,22 +23,44 @@ import {
 import type { ShipAuditSnapshot, ShipAuditStorePort } from "../ports/ship-audit.js";
 import type { Proposal } from "../types/index.js";
 
+function sortedBy<T>(items: readonly T[], key: (item: T) => string): T[] {
+  return [...items].sort((left, right) => key(left).localeCompare(key(right)));
+}
+
+function canonicalCriteria(proposal: Proposal): unknown[] {
+  return (proposal.acceptanceCriteria ?? []).map((criterion) =>
+    typeof criterion === "string"
+      ? criterion
+      : { id: criterion.id, given: criterion.given, when: criterion.when, thenClause: criterion.then },
+  );
+}
+
 /** Canonical decision-relevant content of a proposal. Pure data selection. */
 function decisionContent(proposal: Proposal): Record<string, unknown> {
-  const control = proposal.riskZone ? { riskZone: proposal.riskZone } : {};
   return {
     id: proposal.id,
     title: proposal.title,
     type: proposal.type,
     description: proposal.description,
     status: proposal.status,
-    dependsOn: proposal.dependsOn ?? [],
-    votes: (proposal.votes ?? []).map((vote) => ({
+    dependsOn: [...(proposal.dependsOn ?? [])].sort((a, b) => a - b),
+    votes: sortedBy(proposal.votes ?? [], (vote) => vote.agentId).map((vote) => ({
       agentId: vote.agentId,
       position: vote.position,
       weight: vote.weight,
     })),
-    control,
+    control: {
+      riskZone: proposal.riskZone ?? null,
+      compositeRiskZone: proposal.compositeScore?.riskZone ?? null,
+      compositeWeighted: proposal.compositeScore?.weighted ?? null,
+      dryRunAt: proposal.dryRunAt ?? null,
+      acceptanceCriteria: canonicalCriteria(proposal),
+      affectedPaths: [...(proposal.affectedPaths ?? [])].sort(),
+      agentOutputs: sortedBy(proposal.agentOutputs ?? [], (output) => output.agentId).map((output) => ({
+        agentId: output.agentId,
+        content: output.content,
+      })),
+    },
   };
 }
 

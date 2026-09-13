@@ -96,7 +96,7 @@ export const DAO_COMMANDS: readonly DaoCommand[] = [
     tool: "dao_control",
     mutating: true,
     args: "proposalId",
-    hosts: ["mcp", "claude", "copilot", "codex", "pi", "opencode"],
+    hosts: ["mcp", "claude", "copilot", "codex", "pi", "opencode", "cli"],
   },
   {
     id: "execute",

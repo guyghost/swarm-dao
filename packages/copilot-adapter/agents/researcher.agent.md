@@ -33,7 +33,7 @@ For each proposal, research:
 [Your research findings]
 
 ## Vote
-for | against | abstain
+<for|against|abstain>
 
 ## Reasoning
 [Why you voted this way]

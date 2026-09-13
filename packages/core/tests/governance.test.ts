@@ -52,6 +52,72 @@ describe("governance/voting", () => {
     expect(parseVoteFromOutput("strategist", "Product Strategist", 3, output)).toBeUndefined();
   });
 
+  it("does not treat the charter placeholder as a for vote", () => {
+    expect(
+      parseVoteFromOutput(
+        "critic",
+        "Critic",
+        3,
+        "## Analysis\nrisky.\n\n## Vote\nfor | against | abstain\n\n## Reasoning\nUnsure.",
+      ),
+    ).toBeUndefined();
+    expect(
+      parseVoteFromOutput(
+        "critic",
+        "Critic",
+        3,
+        "## Analysis\nrisky.\n\n## Vote\n<for|against|abstain>\n\n## Reasoning\nUnsure.",
+      ),
+    ).toBeUndefined();
+  });
+
+  it("skips a placeholder Vote section and uses the later real vote", () => {
+    const output = `## Vote
+for | against | abstain
+
+## Vote
+against
+
+## Reasoning
+Too broad.`;
+    expect(parseVoteFromOutput("critic", "Critic", 3, output)?.position).toBe("against");
+  });
+
+  it("ignores ## Vote headings inside fenced code blocks", () => {
+    const output = `## Analysis
+Format reminder:
+
+\`\`\`markdown
+## Vote
+against
+\`\`\`
+
+## Vote
+for
+
+## Reasoning
+Real vote is for.`;
+    expect(parseVoteFromOutput("critic", "Critic", 3, output)?.position).toBe("for");
+  });
+
+  it("does not let a delegated child's vote become the parent's", () => {
+    const output = `## Analysis
+Parent analysis, no vote section.
+
+## Delegated Facets
+
+### security (from child)
+## Analysis
+Child analysis.
+
+## Vote
+against
+
+## Reasoning
+Child reasoning.`;
+    expect(parseVoteFromOutput("critic", "Critic", 3, output)).toBeUndefined();
+  });
+
   it("merges votes: incoming replaces same agent only, others preserved", () => {
     const existing = [
       { agentId: "cli-user", agentName: "cli-user", position: "against" as const, reasoning: "Human veto", weight: 5 },
@@ -442,6 +508,12 @@ describe("governance/amendments", () => {
     const payload = { type: "agent-update" as const, agentId: "strategist", changes: { weight: 5 } };
     const result = validateAmendmentPayload(payload);
     expect(result.valid).toBe(true);
+  });
+
+  it("rejects a gate-update that adds an unknown gate", () => {
+    const result = validateAmendmentPayload({ type: "gate-update", addGates: ["not-a-gate"] });
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContain("Unknown gate 'not-a-gate'");
   });
 
   it("executes agent-update amendment", () => {

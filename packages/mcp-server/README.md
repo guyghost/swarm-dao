@@ -47,7 +47,7 @@ see the sibling adapters:
 
 ## Tools
 
-30 tools covering the full governance lifecycle:
+32 tools covering the full governance lifecycle:
 
 | Group | Tools |
 | --- | --- |

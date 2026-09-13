@@ -31,30 +31,62 @@ export function resolveTypeThresholds(proposal: Proposal, config: DAOConfig): Ty
 // a newline, and bodies are collected line by line instead of
 // [\s\S]*? + lookahead alternations.
 const VOTE_HEADING = /^##[ \t]*vote[ \t]*$/i;
-const VOTE_WORD = /^(for|against|abstain)\b/i;
+const VOTE_WORD = /^(for|against|abstain)$/i;
 const REASONING_HEADING = /^##[ \t]*reasoning[ \t]*$/i;
+const DELEGATED_FACETS_HEADING = /^##[ \t]*delegated[ \t]+facets[ \t]*$/i;
+const FENCE = /^[ \t]*```/;
 
-/** Body lines after the `heading` line, up to the next line-anchored "##". */
-function sectionLines(content: string, heading: RegExp): string[] | null {
+/** Drop folded child output so a child's `## Vote` can never become the
+ *  parent's (INV-6). The orchestrator appends children after this heading. */
+function parentSignalContent(content: string): string {
   const lines = content.split("\n");
-  const start = lines.findIndex((line) => heading.test(line));
-  if (start < 0) return null;
-  const end = lines.findIndex((line, i) => i > start && /^##/.test(line));
-  return lines.slice(start + 1, end < 0 ? lines.length : end);
+  const cut = lines.findIndex((line) => DELEGATED_FACETS_HEADING.test(line));
+  return cut < 0 ? content : lines.slice(0, cut).join("\n");
 }
 
-/** Position from the first "## Vote" section that actually carries a vote
- *  word — echoed template sections (stripped of their vote line) must not
- *  shadow the agent's real answer further down the transcript. */
+/** Body lines after the first unfenced `heading`, up to the next "##". */
+function sectionLines(content: string, heading: RegExp): string[] | null {
+  const lines = content.split("\n");
+  let inFence = false;
+  let start = -1;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] ?? "";
+    if (FENCE.test(line)) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence) continue;
+    if (start < 0 && heading.test(line)) {
+      start = i;
+      continue;
+    }
+    if (start >= 0 && /^##/.test(line)) return lines.slice(start + 1, i);
+  }
+  return start < 0 ? null : lines.slice(start + 1);
+}
+
+/** Position from the first unfenced "## Vote" whose first non-empty body
+ *  line is exclusively `for`, `against`, or `abstain`. Placeholders
+ *  (`for | against | abstain`, `<for|against|abstain>`) and fenced
+ *  examples are skipped so they cannot shadow a later real vote. */
 function extractVotePosition(content: string): VotePosition | undefined {
   const lines = content.split("\n");
+  let inFence = false;
   for (let i = 0; i < lines.length; i++) {
-    if (!VOTE_HEADING.test(lines[i] ?? "")) continue;
+    const line = lines[i] ?? "";
+    if (FENCE.test(line)) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence || !VOTE_HEADING.test(line)) continue;
     for (let j = i + 1; j < lines.length; j++) {
       const body = lines[j] ?? "";
       if (/^##/.test(body)) break;
-      const match = body.trim().match(VOTE_WORD);
+      const trimmed = body.trim();
+      if (trimmed.length === 0) continue;
+      const match = trimmed.match(VOTE_WORD);
       if (match?.[1]) return match[1].toLowerCase() as VotePosition;
+      break;
     }
   }
   return undefined;
@@ -70,12 +102,13 @@ export function parseVoteFromOutput(
   weight: number,
   content: string,
 ): Vote | undefined {
-  const position = extractVotePosition(content);
+  const signal = parentSignalContent(content);
+  const position = extractVotePosition(signal);
   // No vote section → no fabricated vote: agents that did not vote must not
   // dilute the tally with template abstentions (and don't count toward quorum).
   if (!position) return undefined;
 
-  const reasoning = sectionLines(content, REASONING_HEADING)?.join("\n").trim() || "No reasoning provided";
+  const reasoning = sectionLines(signal, REASONING_HEADING)?.join("\n").trim() || "No reasoning provided";
 
   return {
     agentId,

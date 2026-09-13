@@ -19,6 +19,7 @@ import {
   ATTENTION_SOURCES,
   type AttentionSource,
   addVote,
+  ControlProposalUseCase,
   CreateProposalUseCase,
   collectAttention,
   configureGitHub,
@@ -29,6 +30,7 @@ import {
   FsAttentionStore,
   FsShipAuditStore,
   formatAttention,
+  formatControlResult,
   getAllAuditLog,
   getAuditLog,
   getDaoCommandsByPhase,
@@ -321,6 +323,7 @@ const CLI_IMPLEMENTED = [
   "list",
   "show",
   "vote",
+  "control",
   "reject-proposal",
   "ship",
   "implement",
@@ -356,7 +359,8 @@ const CLI_USAGE_DETAILS: Record<string, string> = {
     "  implement <id> [<id>…] [--host <herdr|tmux|auto>] [--kind <pi|codex|claude|…>] [--keep-panes] [--timeout-ms <ms>]\n        dispatch one child agent per proposal; multiple ids develop in\n        parallel, each in its own worktree (needs execution.isolation)",
   list: "  list [--status <s>] [--type <T>]",
   show: "  show <id>",
-  vote: "  vote <id> --position <for|against|abstain> --reasoning <text>\n        [--weight <n>] [--agent <name>]",
+  vote: "  vote <id> --position <for|against|abstain> --reasoning <text>\n        [--weight <n>] [--agent <id>]\n        --weight defaults to the council agent's registry weight",
+  control: "  control <id>\n        Run quality-control gates (alias: check)",
   "reject-proposal": "  reject-proposal <id> --reason <text>",
   ship: "  ship <id> [--cascade] [--force]",
   "github-config": "  github-config --owner <o> --repo <r> [--issues]",
@@ -377,7 +381,7 @@ const CLI_USAGE_DETAILS: Record<string, string> = {
     "  product <init|status|submit> --run-id <id> [--evidence-root <path>]\n        product submit --run-id <id> --signal <file.json>",
   improve: `  improve init --series-id <id> --scope <s> --reference-hash <hash> [--cooldown-ms <ms>]
         improve status --series-id <id>
-        improve once --series-id <id> [--sandbox <docker|container|auto|none>] [--image <img>]
+        improve once --series-id <id> [--sandbox <docker|container|auto|none>] [--image <name>]
         improve submit --series-id <id> --event <file>
         improve cycles --series-id <id>
       cycle human gates (see: swarm-dao attention --source improvement-loop)
@@ -711,22 +715,37 @@ async function cmdVote(cwd: string, positional: string[], flags: Record<string, 
   const reasoning = typeof flags.reasoning === "string" ? flags.reasoning : "";
   if (!reasoning) err("--reasoning is required");
 
-  const weight = typeof flags.weight === "string" ? Number(flags.weight) : 1;
-  if (!Number.isFinite(weight) || weight <= 0) {
-    err("--weight must be a positive number");
-  }
-  const agent = typeof flags.agent === "string" ? flags.agent : "cli-user";
+  const HUMAN_VOTER = "cli-user";
+  const agent = typeof flags.agent === "string" ? flags.agent : HUMAN_VOTER;
 
   await ensureLoaded(cwd);
   const p = getProposal(id);
   if (!p) err(`proposal #${id} not found`);
 
-  const result = await addVote(id, { agentId: agent, agentName: agent, position, reasoning, weight });
+  const roster = getState().agents ?? [];
+  const member = roster.find((candidate) => candidate.id === agent);
+  if (agent !== HUMAN_VOTER && !member) {
+    const known = roster.map((candidate) => candidate.id).join(", ") || "(none — run swarm-dao setup)";
+    err(`unknown agent '${agent}'. Use a council id (${known}) or omit --agent for a human vote (${HUMAN_VOTER}).`);
+  }
+
+  const weight = typeof flags.weight === "string" ? Number(flags.weight) : (member?.weight ?? 1);
+  if (!Number.isFinite(weight) || weight <= 0) {
+    err("--weight must be a positive number");
+  }
+
+  const result = await addVote(id, {
+    agentId: agent,
+    agentName: member?.name ?? agent,
+    position,
+    reasoning,
+    weight,
+  });
   if (!result.ok) err(result.error);
   await recordAudit(id, "governance", "vote-cast", agent, `${position} (w=${weight}): ${reasoning}`);
   await saveState();
   info(`✓ Vote ${result.replaced ? "updated" : "recorded"} for #${id}: ${positionRaw} by ${agent}`);
-  info(c.dim(`  → next: swarm-dao show ${id} · ship when votes settle: swarm-dao ship ${id}`));
+  info(c.dim(`  → next: swarm-dao show ${id} · after approval: swarm-dao control ${id}`));
 }
 
 async function cmdRejectProposal(
@@ -751,6 +770,27 @@ async function cmdRejectProposal(
   if (!result.ok) err(result.error);
   info(`✓ Proposal #${id} rejected (${result.via}) — status: rejected`);
   info(c.dim(`  → audit trail: swarm-dao audit --proposal ${id}`));
+}
+
+async function cmdControl(cwd: string, positional: string[]): Promise<void> {
+  const idStr = positional[0];
+  if (!idStr) err("usage: swarm-dao control <id>");
+  const id = Number(idStr);
+  if (!Number.isInteger(id)) err(`invalid proposal id '${idStr}'`);
+
+  const repository = await ensureLoaded(cwd);
+  const result = await new ControlProposalUseCase({ repository, clock: systemClock }).execute({
+    proposalId: id,
+    failOnGateFailure: false,
+  });
+  if (!result.ok) err(result.error);
+  info(formatControlResult(result.control));
+  info(`status: ${result.status}`);
+  if (result.status === "controlled") {
+    info(c.dim(`  → next: swarm-dao ship ${id}`));
+  } else if (!result.control.allGatesPassed) {
+    info(c.dim("  → gates failed; the proposal stays approved so you can fix and re-run control"));
+  }
 }
 
 async function cmdShip(cwd: string, positional: string[], flags: Record<string, string | true>): Promise<void> {
@@ -1653,6 +1693,10 @@ export async function main(argv: string[], cwd: string = process.cwd()): Promise
         return await cmdProduct(cwd, positional, flags);
       case "vote":
         await cmdVote(cwd, positional, flags);
+        return 0;
+      case "control":
+      case "check":
+        await cmdControl(cwd, positional);
         return 0;
       case "reject-proposal":
         await cmdRejectProposal(cwd, positional, flags);

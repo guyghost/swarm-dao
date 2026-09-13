@@ -15,7 +15,7 @@ describe("charter composition", () => {
   test("the charter carries the binding law and the parseable output format", () => {
     expect(AGENT_CHARTER).toContain("## Analysis");
     expect(AGENT_CHARTER).toContain("## Vote");
-    expect(AGENT_CHARTER).toContain("for | against | abstain");
+    expect(AGENT_CHARTER).toContain("<for|against|abstain>");
     expect(AGENT_CHARTER).toContain("## Composite Score Inputs (0-10)");
     expect(AGENT_CHARTER).toContain("## Risk Score (1-10)");
   });

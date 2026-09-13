@@ -34,7 +34,7 @@ For each proposal, score:
 [Your prioritization analysis]
 
 ## Vote
-for | against | abstain
+<for|against|abstain>
 
 ## Reasoning
 [Why you voted this way]

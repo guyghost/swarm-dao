@@ -1,7 +1,6 @@
 // Deliberation recovery & delegation gate semantics.
 // Issue #160: a failed worker/host must not strand the proposal in
-// `deliberating` — the use case rolls back via ERROR, and ABORT_DELIBERATION
-// offers a non-terminal return to `open`.
+// `deliberating` — the use case rolls back via ABORT_DELIBERATION to `open`.
 // Issue #159: the delegation-closed gate consults a persisted cross-process
 // in-flight marker, because the in-memory registry is cleared before any
 // dao_control can observe it.
@@ -61,8 +60,8 @@ describe("deliberation recovery (issue #160)", () => {
     expect(result.ok).toBe(false);
 
     const stored = repository.get().proposals.find((p) => p.id === created.proposal.id);
-    // Not stuck in `deliberating`: the ERROR rollback recorded the failure.
-    expect(stored?.status).toBe("failed");
+    // Not stuck in `deliberating`: ABORT_DELIBERATION returns to open.
+    expect(stored?.status).toBe("open");
     expect(repository.get().auditLog.some((e) => e.action === "deliberation_failed")).toBe(true);
   });
 

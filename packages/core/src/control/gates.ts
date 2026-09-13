@@ -334,6 +334,9 @@ function generateChecklist(proposal: Proposal): ChecklistItem[] {
   return items;
 }
 
+/** Registered gate ids — used to fail closed on typos in `requiredGates`. */
+export const GATE_IDS: readonly string[] = GATES.map((gate) => gate.id);
+
 // ── Run Gates ────────────────────────────────────────────────
 
 export function runGates(
@@ -364,6 +367,19 @@ export function runGates(
       if (gateDef.severity === "blocker") blockerCount++;
       if (gateDef.severity === "warning") warningCount++;
     }
+  }
+
+  const knownIds = new Set(GATE_IDS);
+  for (const id of config.requiredGates) {
+    if (knownIds.has(id)) continue;
+    gates.push({
+      gateId: id,
+      name: id,
+      passed: false,
+      severity: "blocker",
+      message: `Unknown required gate '${id}' — not in the gate registry`,
+    });
+    blockerCount++;
   }
 
   // Type-specific severity promotion

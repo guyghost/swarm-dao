@@ -33,8 +33,10 @@ remains the only path to `executed`.
    injected store port. The machine performs no filesystem access.
 5. Fingerprints are computed by a pure function over the proposal's
    decision-relevant content (id, title, type, description, status, dependsOn,
-   votes with positions and weights, control summary). Timestamps are injected,
-   never read.
+   votes with positions and weights, and a control summary: risk zone,
+   composite score, dry-run stamp, acceptance criteria, affected paths, and
+   agent-output bodies). Vote and output arrays are sorted by agent id so
+   merge order cannot re-challenge. Timestamps are injected, never read.
 
 ## Configuration
 

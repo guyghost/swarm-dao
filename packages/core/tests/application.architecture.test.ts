@@ -810,4 +810,48 @@ describe("application architecture", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toContain("terminal");
   });
+
+  it("cascade+force still resolves the dependency chain instead of shipping only the target", async () => {
+    const clock = { now: () => "2031-01-01T00:02:00.000Z" };
+    const seed = () => {
+      const state = createInitialState("/project/.dao");
+      state.initialized = true;
+      const base = {
+        proposedBy: "user",
+        votes: [] as const,
+        agentOutputs: [] as const,
+        createdAt: "2031-01-01T00:00:00.000Z",
+      };
+      state.proposals.push(
+        { id: 1, title: "Dep", type: "technical-change", description: "d", status: "open", ...base },
+        {
+          id: 2,
+          title: "Main",
+          type: "product-feature",
+          description: "d",
+          status: "controlled",
+          dependsOn: [1],
+          ...base,
+        },
+      );
+      return new InMemoryDaoStateRepository(state);
+    };
+
+    const forceOnly = await new ShipProposalUseCase({ repository: seed(), clock }).execute({
+      proposalId: 2,
+      actor: "test",
+      force: true,
+    });
+    expect(forceOnly.ok).toBe(true);
+    if (forceOnly.ok) expect(forceOnly.shipped).toEqual([2]);
+
+    const cascadeForce = await new ShipProposalUseCase({ repository: seed(), clock }).execute({
+      proposalId: 2,
+      actor: "test",
+      cascade: true,
+      force: true,
+    });
+    expect(cascadeForce.ok).toBe(false);
+    if (!cascadeForce.ok) expect(cascadeForce.error).toContain("not in 'controlled' state");
+  });
 });
