@@ -61,84 +61,104 @@ jobs:
       - name: Test
         # TEMPORARY (test-hang diagnosis): the minimal faulty pair is
         # pi-spawn.test.ts + dry-run.test.ts — deterministic freeze on the
-        # runner right after dry-run's last test (~1s in), passing locally
-        # (docker arm64 AND amd64 emulation, same bun). Since it only
-        # reproduces on the runner, this step captures forensics from the
-        # frozen process ON the runner:
-        #   run 1: revalidate the pair in foreground (timeout 25)
-        #   run 2: background run; if frozen, gdb attach x3 backtrace
-        #          samples + per-thread CPU ticks delta + kernel stack
-        #   run 3: same with BUN_JSC_useJIT=0 to classify a JIT bug
+        # runner, passing locally (arm64 + amd64 docker, same bun). gdb
+        # showed a pure userspace JS spin (main thread, no allocation, also
+        # in LLInt with useJIT=0), and the CDP inspector cannot pause a
+        # synchronous spin. So we run the pair with a preload watchdog that:
+        #   - traces every child_process spawn/close (unbuffered, sync)
+        #   - logs an afterEach hook per test (exact test position)
+        #   - beats a heartbeat from a worker thread into /tmp/hb.log
+        #     (immune to a main-thread event-loop hang -> proves the
+        #     process is alive while the main thread is silent)
+        # If the pair is still running after 75s (normal: ~2s), we dump the
+        # last 150 log lines and fail with 99.
         run: |
           set +e
           PAIR="packages/pi-adapter/tests/pi-spawn.test.ts packages/core/tests/dry-run.test.ts"
 
-          sudo apt-get update -qq >/dev/null 2>&1
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq gdb >/dev/null 2>&1
-          echo "gdb: $(command -v gdb || echo MISSING)"
+          cat > /tmp/wd-preload.js <<'WD'
+          const fs = require("node:fs");
+          const log = (m) => { try { fs.writeSync(2, "[wd " + Date.now() + "] " + m + "\n"); } catch {} };
+          log("preload up");
+          try {
+            const { afterEach } = require("bun:test");
+            afterEach(() => { log("afterEach"); });
+          } catch (e) { log("hook fail " + e); }
+          try {
+            const cp = require("node:child_process");
+            const origSpawn = cp.spawn.bind(cp);
+            cp.spawn = (...a) => {
+              log("spawn " + a[0]);
+              const c = origSpawn(...a);
+              try { c.on("close", (code) => log("close " + a[0] + " code=" + code)); } catch {}
+              return c;
+            };
+          } catch (e) { log("cp patch fail " + e); }
+          try {
+            const { Worker } = require("node:worker_threads");
+            const w = new Worker(
+              'const fs=require("node:fs");setInterval(()=>{try{fs.appendFileSync("/tmp/hb.log",Date.now()+" beat\\n")}catch{}},500);',
+              { eval: true }
+            );
+            if (w.unref) w.unref();
+          } catch (e) { log("worker fail " + e); }
+          WD
 
-          thread_ticks() {
-            for T in /proc/$1/task/*; do
-              awk '{printf "  tid=%s comm=%-16s state=%s utime=%s stime=%s\n", $1, $2, $3, $14, $15}' "$T/stat" 2>/dev/null
+          : > /tmp/hb.log
+          echo "===== pair + watchdog preload: start $(date -u +%H:%M:%S) ====="
+          TERM=dumb bun test --preload /tmp/wd-preload.js $PAIR >/tmp/pair.log 2>&1 &
+          BPID=$!
+          # /proc child watcher: ESM imports bypass the CJS spawn patch, so
+          # trace child processes of the bun pid directly (appear/gone +
+          # state). Catches git/pi spawned through any API.
+          : > /tmp/children.log
+          (
+            SEEN="|"
+            PREV=" "
+            END=$((SECONDS + 80))
+            while [ $SECONDS -lt $END ] && kill -0 $BPID 2>/dev/null; do
+              CUR=" "
+              for C in $(pgrep -P $BPID 2>/dev/null); do
+                CUR="$CUR$C "
+                case "$SEEN" in *"|$C|"*) ;; *)
+                  SEEN="$SEEN$C|"
+                  COMM=$(cat /proc/$C/comm 2>/dev/null)
+                  ST=$(awk '{print $3}' /proc/$C/stat 2>/dev/null)
+                  echo "$(date -u +%H:%M:%S.%3N) child pid=$C comm=$COMM state=$ST" >> /tmp/children.log
+                ;; esac
+              done
+              for C in $PREV; do
+                case "$CUR" in *" $C "*) ;; *)
+                  echo "$(date -u +%H:%M:%S.%3N) gone pid=$C" >> /tmp/children.log
+                ;; esac
+              done
+              PREV="$CUR"
+              sleep 0.2
             done
-          }
-
-          capture_forensics() {
-            BPID=$1
-            echo ">>> FROZEN (pid $BPID) — forensics:"
-            echo "--- wchan: $(sudo cat /proc/$BPID/wchan 2>/dev/null)"
-            echo "--- kernel stack (main):"; sudo cat /proc/$BPID/stack 2>/dev/null || echo "  (unavailable)"
-            grep -E 'Threads|voluntary_ctxt' /proc/$BPID/status 2>/dev/null || true
-            echo "--- thread ticks sample A:"; thread_ticks "$BPID"
+          ) &
+          WPID=$!
+          DEADLINE=$((SECONDS + 75))
+          while [ $SECONDS -lt $DEADLINE ] && kill -0 $BPID 2>/dev/null; do
             sleep 2
-            echo "--- thread ticks sample B (+2s; spinning thread's utime jumps):"; thread_ticks "$BPID"
-            for s in 1 2 3; do
-              echo "--- gdb backtrace sample $s:"
-              sudo gdb -p "$BPID" -batch -ex "thread apply all bt 25" 2>&1 \
-                | grep -vE 'Downloading|Missing separate|warning:|\[Thread|Reading symbols|no debugging' \
-                | head -100
-              sleep 2
-            done
-          }
-
-          run_bg() {
-            label=$1
-            LOG=/tmp/bun-$label.log
-            echo ""
-            echo "===== $label: starting $(date -u +%H:%M:%S.%3NZ) ====="
-            TERM=dumb bun test $PAIR >"$LOG" 2>&1 &
-            BPID=$!
-            frozen=0
-            for i in $(seq 1 45); do
-              kill -0 $BPID 2>/dev/null || break
-              sleep 1
-            done
-            if kill -0 $BPID 2>/dev/null; then
-              frozen=1
-              echo "===== $label last log lines:"
-              tail -15 "$LOG"
-              capture_forensics "$BPID"
-              sudo kill -9 $BPID 2>/dev/null
-              wait $BPID 2>/dev/null
-            else
-              wait $BPID; rc=$?
-              echo "===== $label FINISHED rc=$rc after ${i}s:"
-              tail -5 "$LOG"
-            fi
-            echo ">>> $label frozen=$frozen <<<"
-            return 0
-          }
-
-          echo "===== run 1: foreground revalidation ====="
-          rc=0
-          TERM=dumb timeout 25 bun test $PAIR || rc=$?
-          echo "===== run 1 rc=$rc (124 = frozen) ====="
-
-          run_bg pair
-          export BUN_JSC_useJIT=0
-          run_bg nojit
-          unset BUN_JSC_useJIT
-          exit 99
+          done
+          if kill -0 $BPID 2>/dev/null; then
+            echo "===== FROZEN after ${SECONDS}s — last 150 lines of /tmp/pair.log:"
+            tail -150 /tmp/pair.log
+            echo "===== children trace (appear/gone):"
+            cat /tmp/children.log
+            echo "===== heartbeat tail (process still alive proof):"
+            tail -3 /tmp/hb.log
+            kill -9 $BPID 2>/dev/null
+            wait $BPID 2>/dev/null
+            exit 99
+          fi
+          wait $BPID; RC=$?
+          wait $WPID 2>/dev/null
+          echo "===== pair FINISHED rc=$RC after ${SECONDS}s — tail:"
+          tail -40 /tmp/pair.log
+          echo "===== children trace (appear/gone):"
+          cat /tmp/children.log
+          exit $RC
 
       - name: Integration tests
         run: bun run test:integration
