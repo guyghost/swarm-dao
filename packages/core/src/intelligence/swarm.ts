@@ -12,6 +12,7 @@ import {
   type ModelResolutionContext,
   resolveAgentModel,
 } from "./model.js";
+import { describeHarnessResolution, type RuntimeResolutionContext, resolveAgentRuntime } from "./runtime.js";
 
 export interface SwarmProgressUpdate {
   agentId: string;
@@ -27,6 +28,9 @@ export interface DispatchInstruction {
   prompt: string;
   model: string;
   modelDescription: string;
+  harness?: string;
+  harnessDescription?: string;
+  harnessWarning?: string;
   timeoutMs: number;
 }
 
@@ -38,7 +42,7 @@ export function buildDispatchInstructions(
   proposal: Proposal,
   agents: DAOAgent[],
   modelContext: ModelResolutionContext,
-  options: { projectBrief?: string } = {},
+  options: { projectBrief?: string; runtime?: RuntimeResolutionContext } = {},
 ): DispatchInstruction[] {
   const brief = options.projectBrief?.trim();
   const briefSection = brief ? `${brief}\n\n` : "";
@@ -61,12 +65,30 @@ ${briefSection}Evaluate this proposal carefully. Provide your analysis, vote, an
 
   return agents.map((agent) => {
     const model = resolveAgentModel(agent, modelContext);
+    let harness: string | undefined;
+    let harnessDescription: string | undefined;
+    let harnessWarning: string | undefined;
+    if (options.runtime) {
+      const resolution = resolveAgentRuntime(agent, model, options.runtime);
+      if (resolution.ok) {
+        harness = resolution.runtime.harness;
+        harnessDescription = describeHarnessResolution({
+          harness: resolution.runtime.harness,
+          source: resolution.runtime.harnessSource,
+        });
+      } else {
+        harnessWarning = `⚠️ ${resolution.message}`;
+      }
+    }
     return {
       agentId: agent.id,
       agentName: agent.name,
       prompt: `${agent.systemPrompt}\n\n${basePrompt}`,
       model,
       modelDescription: describeModelResolution(agent, model, modelContext),
+      harness,
+      harnessDescription,
+      harnessWarning,
       timeoutMs: 120_000,
     };
   });
@@ -95,7 +117,7 @@ ${instructions
   .map(
     (inst) => `### @${inst.agentId} (${inst.agentName})
 - Model: ${inst.modelDescription}
-- Timeout: ${inst.timeoutMs}ms
+${inst.harness ? `- Harness: ${inst.harnessDescription ?? inst.harness}\n` : ""}${inst.harnessWarning ? `${inst.harnessWarning}\n` : ""}- Timeout: ${inst.timeoutMs}ms
 
 Spawn this sub-agent with the following task (use \`task\` with \`model="${inst.model}"\` when available):
 \`\`\`
@@ -139,7 +161,7 @@ export async function dispatchSwarm(
   modelContext: ModelResolutionContext,
   onUpdate?: (update: SwarmProgressUpdate) => void,
   delegation?: { config: DAOConfig },
-  options?: { projectBrief?: string },
+  options?: { projectBrief?: string; runtime?: RuntimeResolutionContext },
 ): Promise<AgentOutput[]> {
   const instructions = buildDispatchInstructions(proposal, agents, modelContext, options);
   const outputs: AgentOutput[] = [];
@@ -170,11 +192,41 @@ export async function dispatchSwarm(
             phase: "started",
           });
 
+          // Runtime resolution (models/agent-runtime.md): a typed failure
+          // produces a per-agent error output — never a throw across the
+          // dispatch loop, never a silent model drop.
+          let harness: string | undefined;
+          if (options?.runtime) {
+            const resolution = resolveAgentRuntime(agent, inst.model, options.runtime);
+            if (!resolution.ok) {
+              const errorOutput: AgentOutput = {
+                agentId: inst.agentId,
+                agentName: inst.agentName,
+                role: agent.role,
+                content: "",
+                durationMs: 0,
+                error: resolution.message,
+              };
+              outputs.push(errorOutput);
+              onUpdate?.({
+                agentId: inst.agentId,
+                agentName: inst.agentName,
+                phase: "error",
+                output: errorOutput,
+              });
+              return errorOutput;
+            }
+            harness = resolution.runtime.harness;
+          } else {
+            harness = agent.harness;
+          }
+
           const output = await adapter.spawnAgent({
             agent,
             proposal,
             systemPrompt: inst.prompt,
             model: inst.model,
+            harness,
             timeoutMs: inst.timeoutMs,
           });
 

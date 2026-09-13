@@ -302,6 +302,7 @@ export interface DAOAgent {
   weight: number;
   systemPrompt: string;
   model?: string;
+  harness?: string;
   tools?: string[];
   owner?: string;
   mission?: string;
@@ -945,6 +946,7 @@ export interface HostAdapter {
     proposal: Proposal;
     systemPrompt: string;
     model?: string;
+    harness?: string;
     timeoutMs?: number;
   }): Promise<AgentOutput>;
 

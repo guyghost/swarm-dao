@@ -328,6 +328,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
               failOnGateFailure: false,
               getSessionModel: () => parentSessionModel,
               hostDefaultModel,
+              hostDefaultHarness: "opencode",
               repository,
             },
             args.proposalId,

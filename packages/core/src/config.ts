@@ -5,6 +5,8 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { composeSystemPrompt } from "./governance/charter.js";
+import type { RuntimeConfig } from "./intelligence/runtime.js";
+import { isValidHarnessId, isValidModelFlag } from "./intelligence/runtime.js";
 import type { DAOAgent, DAOConfig, DelegationConfig } from "./types/index.js";
 import { redactSensitiveFields } from "./utils/security.js";
 
@@ -47,6 +49,9 @@ export interface TmuxConfig {
   /** Operator-owned agent command run in each pane session; $PROMPT carries
    *  the deliberation prompt (same trust level as package.json scripts). */
   command?: string;
+  /** Per-agent command overrides keyed by agent id (same trust level as
+   *  `command`; unknown agent ids fall back to the global command). */
+  agentCommands?: Record<string, string>;
   /** Keep child sessions alive after harvest (default false: killed). */
   keepSessions?: boolean;
   /** Per-child timeout in ms (default 300000). */
@@ -63,6 +68,8 @@ export interface ProjectConfig {
   execution?: ExecutionConfig;
   deliberation?: DeliberationConfig;
   ship?: ShipConfig;
+  /** Per-agent LLM harness configuration (models/agent-runtime.md). */
+  runtime?: RuntimeConfig;
   /** Delegated Facet Investigation budget (opt-in, disabled by default). */
   delegation?: DelegationConfig;
   /** herdr child-session defaults for multi-agent CLI flows
@@ -273,6 +280,37 @@ function validateProjectConfig(input: Record<string, unknown>, configPath: strin
     };
   }
 
+  if (input.runtime !== undefined) {
+    if (typeof input.runtime !== "object" || input.runtime === null || Array.isArray(input.runtime)) {
+      fail(`"runtime" must be an object`);
+    }
+    const r = input.runtime as Record<string, unknown>;
+    const runtime: RuntimeConfig = {};
+    if (r.defaultHarness !== undefined) {
+      if (typeof r.defaultHarness !== "string" || !isValidHarnessId(r.defaultHarness)) {
+        fail(`"runtime.defaultHarness" must match ^[a-z][a-z0-9_-]{0,31}$`);
+      }
+      runtime.defaultHarness = r.defaultHarness as string;
+    }
+    if (r.harnessModelFlag !== undefined) {
+      if (typeof r.harnessModelFlag !== "object" || r.harnessModelFlag === null || Array.isArray(r.harnessModelFlag)) {
+        fail(`"runtime.harnessModelFlag" must be an object mapping harness id to flag`);
+      }
+      const flags: Record<string, string> = {};
+      for (const [harness, flag] of Object.entries(r.harnessModelFlag as Record<string, unknown>)) {
+        if (!isValidHarnessId(harness)) {
+          fail(`"runtime.harnessModelFlag" key "${harness}" is not a valid harness id`);
+        }
+        if (typeof flag !== "string" || !isValidModelFlag(flag)) {
+          fail(`"runtime.harnessModelFlag.${harness}" must match ^--[a-z][a-z0-9-]*$`);
+        }
+        flags[harness] = flag as string;
+      }
+      runtime.harnessModelFlag = flags;
+    }
+    out.runtime = runtime;
+  }
+
   for (const key of ["github", "gitlab", "bitbucket", "herdr", "tmux"] as const) {
     const v = input[key];
     if (v === undefined) continue;
@@ -282,6 +320,16 @@ function validateProjectConfig(input: Record<string, unknown>, configPath: strin
       const t = rec.timeoutMs;
       if (typeof t !== "number" || !Number.isInteger(t) || t <= 0 || t > 300000) {
         fail(`"${key}.timeoutMs" must be an integer in (0, 300000]`);
+      }
+    }
+    if (key === "tmux" && rec.agentCommands !== undefined) {
+      if (typeof rec.agentCommands !== "object" || rec.agentCommands === null || Array.isArray(rec.agentCommands)) {
+        fail(`"tmux.agentCommands" must be an object mapping agent id to command`);
+      }
+      for (const [agentId, command] of Object.entries(rec.agentCommands as Record<string, unknown>)) {
+        if (typeof command !== "string" || command.trim().length === 0) {
+          fail(`"tmux.agentCommands.${agentId}" must be a non-empty string`);
+        }
       }
     }
     (out as unknown as Record<string, unknown>)[key] = { ...rec };

@@ -305,6 +305,9 @@ function parseAgentFrontmatter(content: string): Partial<DAOAgent> & { id?: stri
       case "model":
         parsed.model = value;
         break;
+      case "harness":
+        parsed.harness = value;
+        break;
       case "tools": {
         // Comma-separated list or an empty "[]"; declarative hint of the
         // external tools (e.g. MCP servers) this agent is expected to use.
@@ -417,6 +420,7 @@ async function readAndMergeMarkdownAgents(
       ...fields,
       ...(override.body ? { systemPrompt: override.body } : {}),
       model: override.model ?? agent.model,
+      harness: override.harness ?? agent.harness,
     };
   });
 

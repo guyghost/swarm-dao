@@ -304,3 +304,66 @@ describe("tmux host adapter", () => {
     expect(sanitizeSessionName("")).toBe("agent");
   });
 });
+
+describe("tmux adapter per-agent commands (models/agent-runtime.md tmux row)", () => {
+  let workDir: string;
+
+  beforeAll(async () => {
+    workDir = await fs.mkdtemp(path.join(tmpdir(), "swarm-dao-tmux-harness-"));
+  });
+
+  afterAll(async () => {
+    await fs.rm(workDir, { recursive: true, force: true });
+  });
+
+  test("agentCommands[agentId] overrides the global command; others fall back", async () => {
+    const fake = fakeTmux();
+    fake.pane("## Analysis\na\n## Vote\nfor\n## Reasoning\nr");
+    const adapter = createTmuxHostAdapter({
+      workDir,
+      runner: fake.runner,
+      command: "agent-cli",
+      agentCommands: { critic: "codex exec --full-auto" },
+    });
+
+    await adapter.spawnAgent({
+      agent: agent("critic"),
+      proposal: proposal(1),
+      systemPrompt: "P",
+    });
+
+    const newSession = fake.calls.find((c) => line(c).includes("tmux new-session"));
+    expect(line(newSession)).toContain("codex exec --full-auto");
+
+    // A different agent id falls back to the global command.
+    fake.calls.length = 0;
+    await adapter.spawnAgent({
+      agent: agent("scout"),
+      proposal: proposal(1),
+      systemPrompt: "P",
+    });
+    const newSession2 = fake.calls.find((c) => line(c).includes("tmux new-session"));
+    expect(line(newSession2)).toContain("agent-cli");
+    expect(line(newSession2)).not.toContain("codex exec");
+  });
+
+  test("an unknown agent id with no per-agent command falls back to the global command", async () => {
+    const fake = fakeTmux();
+    fake.pane("## Analysis\na\n## Vote\nfor\n## Reasoning\nr");
+    const adapter = createTmuxHostAdapter({
+      workDir,
+      runner: fake.runner,
+      command: "agent-cli",
+      agentCommands: { critic: "claude -p" },
+    });
+
+    await adapter.spawnAgent({
+      agent: agent("architect"),
+      proposal: proposal(1),
+      systemPrompt: "P",
+    });
+
+    const newSession = fake.calls.find((c) => line(c).includes("tmux new-session"));
+    expect(line(newSession)).toContain("agent-cli");
+  });
+});

@@ -72,6 +72,7 @@ function createToolContext(workDir: string, repository?: DaoStateRepositoryPort)
     deliberationMode: "manual" as const,
     controlToolName: "dao_control" as const,
     failOnGateFailure: false,
+    hostDefaultHarness: "mcp",
     repository,
   };
 }

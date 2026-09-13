@@ -691,3 +691,177 @@ describe("child workspace linkage (parent herdr session)", () => {
     expect(result).toEqual({ ok: false, error: "herdr workspace create failed: x: down" });
   });
 });
+
+describe("herdr adapter per-agent harness + model (models/agent-runtime.md D3/E-host)", () => {
+  let workDir: string;
+
+  beforeAll(async () => {
+    workDir = await fs.mkdtemp(path.join(tmpdir(), "swarm-dao-herdr-harness-"));
+  });
+
+  afterAll(async () => {
+    await fs.rm(workDir, { recursive: true, force: true });
+  });
+
+  test("per-spawn harness overrides the adapter kind and the model flag rides after -- (D3 row 1)", async () => {
+    const fake = fakeHerdr([
+      { stdout: WORKSPACE_CREATED, exitCode: 0 },
+      { stdout: AGENT_SETTLED("idle"), exitCode: 0 },
+      { stdout: AGENT_SETTLED("idle"), exitCode: 0 },
+      { exitCode: 0 },
+    ]);
+    const adapter = createHerdrHostAdapter({ workDir, runner: fake.runner, kind: "pi" });
+
+    const output = await adapter.spawnAgent({
+      agent: agent("critic"),
+      proposal: proposal(1),
+      systemPrompt: "P",
+      model: "gpt-5.4",
+      harness: "codex",
+    });
+
+    expect(output.error).toBeUndefined();
+    const start = fake.calls.find((call) => call.argv[2] === "start");
+    expect(line(start)).toMatch(/--kind codex/);
+    const dashDash = start?.argv.indexOf("--") ?? -1;
+    expect(dashDash).toBeGreaterThan(-1);
+    expect(start?.argv[dashDash + 1]).toBe("--model");
+    expect(start?.argv[dashDash + 2]).toBe("gpt-5.4");
+  });
+
+  test('model "default" emits no flag at all (D3 row 3)', async () => {
+    const fake = fakeHerdr([
+      { stdout: WORKSPACE_CREATED, exitCode: 0 },
+      { stdout: AGENT_SETTLED("idle"), exitCode: 0 },
+      { stdout: AGENT_SETTLED("idle"), exitCode: 0 },
+      { exitCode: 0 },
+    ]);
+    const adapter = createHerdrHostAdapter({ workDir, runner: fake.runner, kind: "pi" });
+
+    await adapter.spawnAgent({
+      agent: agent("critic"),
+      proposal: proposal(2),
+      systemPrompt: "P",
+      model: "default",
+      harness: "codex",
+    });
+
+    const start = fake.calls.find((call) => call.argv[2] === "start");
+    expect(line(start)).not.toContain("-- --model");
+  });
+
+  test("existing agentArgs come first, then the model flag (§6 herdr row)", async () => {
+    const fake = fakeHerdr([
+      { stdout: WORKSPACE_CREATED, exitCode: 0 },
+      { stdout: AGENT_SETTLED("idle"), exitCode: 0 },
+      { stdout: AGENT_SETTLED("idle"), exitCode: 0 },
+      { exitCode: 0 },
+    ]);
+    const adapter = createHerdrHostAdapter({
+      workDir,
+      runner: fake.runner,
+      kind: "pi",
+      agentArgs: ["--flag-x", "value x"],
+    });
+
+    await adapter.spawnAgent({
+      agent: agent("critic"),
+      proposal: proposal(3),
+      systemPrompt: "P",
+      model: "claude-opus-4-6",
+      harness: "claude",
+    });
+
+    const start = fake.calls.find((call) => call.argv[2] === "start");
+    const dashDash = start?.argv.indexOf("--") ?? -1;
+    expect(start?.argv[dashDash + 1]).toBe("--flag-x");
+    expect(start?.argv[dashDash + 2]).toBe("value x");
+    expect(start?.argv[dashDash + 3]).toBe("--model");
+    expect(start?.argv[dashDash + 4]).toBe("claude-opus-4-6");
+  });
+
+  test("E4: model for an untabled harness without override is a typed error, spawn is skipped", async () => {
+    const fake = fakeHerdr([{ stdout: WORKSPACE_CREATED, exitCode: 0 }, { exitCode: 0 }]);
+    const adapter = createHerdrHostAdapter({ workDir, runner: fake.runner, kind: "pi" });
+
+    const output = await adapter.spawnAgent({
+      agent: agent("critic"),
+      proposal: proposal(4),
+      systemPrompt: "P",
+      model: "grok-4",
+      harness: "grok",
+    });
+
+    expect(output.error).toContain("harnessModelFlag");
+    expect(fake.calls.some((call) => call.argv[2] === "start")).toBe(false);
+  });
+
+  test("harnessModelFlag option repairs an unknown harness (D3 override)", async () => {
+    const fake = fakeHerdr([
+      { stdout: WORKSPACE_CREATED, exitCode: 0 },
+      { stdout: AGENT_SETTLED("idle"), exitCode: 0 },
+      { stdout: AGENT_SETTLED("idle"), exitCode: 0 },
+      { exitCode: 0 },
+    ]);
+    const adapter = createHerdrHostAdapter({
+      workDir,
+      runner: fake.runner,
+      kind: "pi",
+      harnessModelFlag: { grok: "--model" },
+    });
+
+    const output = await adapter.spawnAgent({
+      agent: agent("critic"),
+      proposal: proposal(5),
+      systemPrompt: "P",
+      model: "grok-4",
+      harness: "grok",
+    });
+
+    expect(output.error).toBeUndefined();
+    const start = fake.calls.find((call) => call.argv[2] === "start");
+    expect(line(start)).toMatch(/--kind grok/);
+    expect(line(start)).toContain("-- --model grok-4");
+  });
+
+  test("defaultHarness option is used when the spawn carries no harness (D1 fallback)", async () => {
+    const fake = fakeHerdr([
+      { stdout: WORKSPACE_CREATED, exitCode: 0 },
+      { stdout: AGENT_SETTLED("idle"), exitCode: 0 },
+      { stdout: AGENT_SETTLED("idle"), exitCode: 0 },
+      { exitCode: 0 },
+    ]);
+    const adapter = createHerdrHostAdapter({
+      workDir,
+      runner: fake.runner,
+      kind: "pi",
+      defaultHarness: "codex",
+    });
+
+    await adapter.spawnAgent({
+      agent: agent("critic"),
+      proposal: proposal(6),
+      systemPrompt: "P",
+      model: "gpt-5.4",
+    });
+
+    const start = fake.calls.find((call) => call.argv[2] === "start");
+    expect(line(start)).toMatch(/--kind codex/);
+    expect(line(start)).toContain("-- --model gpt-5.4");
+  });
+
+  test("a per-spawn harness violating SAFE_KIND is a typed error before any herdr call (E1)", async () => {
+    const fake = fakeHerdr([]);
+    const adapter = createHerdrHostAdapter({ workDir, runner: fake.runner, kind: "pi" });
+
+    const output = await adapter.spawnAgent({
+      agent: agent("critic"),
+      proposal: proposal(7),
+      systemPrompt: "P",
+      harness: "-evil",
+    });
+
+    expect(output.error).toBeDefined();
+    expect(fake.calls.length).toBe(0);
+  });
+});

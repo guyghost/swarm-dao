@@ -176,3 +176,68 @@ describe("config", () => {
     }
   });
 });
+
+describe("config runtime + agentCommands validation (models/agent-runtime.md §8.5)", () => {
+  it("loads runtime and tmux.agentCommands sections", async () => {
+    const daoRoot = await fs.mkdtemp(path.join(os.tmpdir(), "swarm-config-runtime-"));
+    try {
+      await saveConfig(daoRoot, {
+        runtime: { defaultHarness: "codex", harnessModelFlag: { grok: "--model" } },
+        tmux: { command: "echo run", agentCommands: { critic: "codex exec" } },
+      } as Partial<DAOConfig>);
+      const loaded = await loadConfig(daoRoot);
+      expect(loaded.runtime).toEqual({ defaultHarness: "codex", harnessModelFlag: { grok: "--model" } });
+      expect(loaded.tmux?.agentCommands).toEqual({ critic: "codex exec" });
+    } finally {
+      await fs.rm(daoRoot, { recursive: true, force: true }).catch(() => {});
+    }
+  });
+
+  it("rejects an invalid runtime.defaultHarness at load time (E1)", async () => {
+    const daoRoot = await fs.mkdtemp(path.join(os.tmpdir(), "swarm-config-runtime-"));
+    try {
+      await fs.writeFile(
+        path.join(daoRoot, "config.json"),
+        JSON.stringify({ runtime: { defaultHarness: "-bad id" } }),
+        "utf-8",
+      );
+      await expect(loadConfig(daoRoot)).rejects.toThrow("runtime.defaultHarness");
+    } finally {
+      await fs.rm(daoRoot, { recursive: true, force: true }).catch(() => {});
+    }
+  });
+
+  it("rejects invalid harnessModelFlag keys and values at load time (E5)", async () => {
+    const daoRoot = await fs.mkdtemp(path.join(os.tmpdir(), "swarm-config-runtime-"));
+    try {
+      await fs.writeFile(
+        path.join(daoRoot, "config.json"),
+        JSON.stringify({ runtime: { harnessModelFlag: { "BAD KEY": "--model" } } }),
+        "utf-8",
+      );
+      await expect(loadConfig(daoRoot)).rejects.toThrow("harnessModelFlag");
+      await fs.writeFile(
+        path.join(daoRoot, "config.json"),
+        JSON.stringify({ runtime: { harnessModelFlag: { grok: "model" } } }),
+        "utf-8",
+      );
+      await expect(loadConfig(daoRoot)).rejects.toThrow("harnessModelFlag");
+    } finally {
+      await fs.rm(daoRoot, { recursive: true, force: true }).catch(() => {});
+    }
+  });
+
+  it("rejects non-string or empty tmux.agentCommands values at load time", async () => {
+    const daoRoot = await fs.mkdtemp(path.join(os.tmpdir(), "swarm-config-runtime-"));
+    try {
+      await fs.writeFile(
+        path.join(daoRoot, "config.json"),
+        JSON.stringify({ tmux: { command: "x", agentCommands: { critic: "" } } }),
+        "utf-8",
+      );
+      await expect(loadConfig(daoRoot)).rejects.toThrow("agentCommands");
+    } finally {
+      await fs.rm(daoRoot, { recursive: true, force: true }).catch(() => {});
+    }
+  });
+});

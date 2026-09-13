@@ -26,6 +26,20 @@ import { evaluateEditGate, formatEditGate } from "../governance/edit-gate.js";
 import { computeHealthScore, formatHealthScore, generateDashboard } from "../health-score.js";
 import { ghBranchNameFor, ghCreateBranch, ghCreatePullRequest, isGitHubEnabled } from "../integrations/github.js";
 import { formatRoundTableResults } from "../intelligence/roundtable.js";
+import { buildRuntimeResolutionContext } from "../intelligence/runtime.js";
+
+// Runtime resolution activates only when a signal exists (project runtime
+// config or a host-declared default harness). A host that never opted in
+// keeps the legacy dispatch: agent.harness passes through raw (D1 row 1)
+// and no E-failure can fire — absence of the feature is not E2.
+function runtimeContextFrom(
+  projectRuntime: { defaultHarness?: string; harnessModelFlag?: Record<string, string> } | undefined,
+  hostDefaultHarness: string | undefined,
+) {
+  if (!projectRuntime && !hostDefaultHarness) return undefined;
+  return buildRuntimeResolutionContext({ projectRuntime, hostDefaultHarness });
+}
+
 import { buildDispatchInstructions, createDispatchModelContext, formatDispatchPlan } from "../intelligence/swarm.js";
 import { recordProposalExecuted } from "../observability/metrics.js";
 import { getAllAuditLog, getOrCreateState, getProposal, getState, initStorage } from "../persistence.js";
@@ -64,6 +78,9 @@ export interface DaoToolContext {
   failOnGateFailure?: boolean;
   getSessionModel?: () => string | undefined;
   hostDefaultModel?: string | undefined;
+  /** Host-declared default harness (models/agent-runtime.md D1 row 3),
+   * e.g. the running pi extension for the pi host. */
+  hostDefaultHarness?: string | undefined;
   repository?: DaoStateRepositoryPort;
   onDeliberationProgress?: (update: { agentName: string; phase: string }) => void;
 }
@@ -133,7 +150,8 @@ export async function handleDaoDeliberate(ctx: DaoToolContext, proposalId: numbe
       hostDefaultModel: ctx.hostDefaultModel,
     });
     const projectBrief = await buildProjectBrief(ctx.workDir);
-    const instructions = buildDispatchInstructions(proposal, agents, modelContext, { projectBrief });
+    const runtime = runtimeContextFrom(projectConfig.runtime, ctx.hostDefaultHarness);
+    const instructions = buildDispatchInstructions(proposal, agents, modelContext, { projectBrief, runtime });
     const plan = formatDispatchPlan(proposal, instructions, {
       strategy: projectConfig.deliberation?.strategy,
       charsPerAgent: projectConfig.deliberation?.charsPerAgent,
@@ -157,6 +175,7 @@ export async function handleDaoDeliberate(ctx: DaoToolContext, proposalId: numbe
     parentSessionModel: ctx.getSessionModel?.(),
     hostDefaultModel: ctx.hostDefaultModel,
     projectBrief,
+    runtime: runtimeContextFrom(projectConfig.runtime, ctx.hostDefaultHarness),
     onUpdate: (update) => ctx.onDeliberationProgress?.(update),
   });
   if (!result.ok) return `Cannot deliberate: ${result.error}`;
