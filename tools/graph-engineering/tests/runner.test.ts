@@ -75,7 +75,9 @@ describe("graph runner", () => {
         .trim()
         .split("\n");
       expect(journal).toHaveLength(2);
-      expect(JSON.parse(journal[1] ?? "")).toMatchObject({ sequence: 2, accepted: false });
+      const secondEntry: string | undefined = journal[1];
+      expect(secondEntry).toBeDefined();
+      expect(JSON.parse(secondEntry ?? "")).toMatchObject({ sequence: 2, accepted: false });
     } finally {
       await rm(evidenceRoot, { recursive: true, force: true });
     }

@@ -601,7 +601,9 @@ describe("improvement-orchestrator wiring — concurrent runners (issue #139)", 
       const journal = await readFile(join(evidenceRoot, "series-duel", "journal.ndjson"), "utf8");
       const lines = journal.split("\n").filter((line) => line.trim().length > 0);
       expect(lines.length).toBe(2);
-      expect(JSON.parse(lines[1] ?? "")).toMatchObject({ sequence: 2 });
+      const secondLine: string | undefined = lines[1];
+      expect(secondLine).toBeDefined();
+      expect(JSON.parse(secondLine ?? "")).toMatchObject({ sequence: 2 });
     } finally {
       await rm(evidenceRoot, { recursive: true, force: true });
     }

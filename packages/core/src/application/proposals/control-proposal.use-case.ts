@@ -54,6 +54,7 @@ export class ControlProposalUseCase {
           config: state.config,
           electorate: state.agents,
           allProposals: state.proposals,
+          daoRoot: state.daoRoot,
         },
       );
       if (!transition.ok) return transition;

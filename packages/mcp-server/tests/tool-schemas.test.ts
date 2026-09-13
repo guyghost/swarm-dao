@@ -65,6 +65,28 @@ describe("mcp tool argument validation (issue #161)", () => {
     ).toThrow(/must be one of/);
   });
 
+  it("rejects a non-integer proposal id (review)", () => {
+    expect(() => validateToolArgs("dao_deliberate", schemas.dao_deliberate, { proposalId: 1.2 })).toThrow(
+      /proposalId must be an integer/,
+    );
+    expect(() => validateToolArgs("dao_deliberate", schemas.dao_deliberate, { proposalId: Number.NaN })).toThrow(
+      /must be a finite number/,
+    );
+    expect(() => validateToolArgs("dao_deliberate", schemas.dao_deliberate, { proposalId: 3 })).not.toThrow();
+  });
+
+  it("rejects malformed argument shapes with a precise message (review)", () => {
+    expect(() => validateToolArgs("dao_deliberate", schemas.dao_deliberate, null)).toThrow(
+      /arguments must be an object/,
+    );
+    expect(() => validateToolArgs("dao_deliberate", schemas.dao_deliberate, [1, 2])).toThrow(
+      /arguments must be an object/,
+    );
+    expect(() => validateToolArgs("dao_deliberate", schemas.dao_deliberate, "proposalId")).toThrow(
+      /arguments must be an object/,
+    );
+  });
+
   it("accepts legitimate arguments", () => {
     expect(() =>
       validateToolArgs("dao_graph_submit", schemas.dao_graph_submit, {

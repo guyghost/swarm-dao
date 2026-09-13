@@ -232,6 +232,22 @@ describe("proposal state machine — guards recompute, never trust the payload (
     expect(result.ok).toBe(false);
     expect(proposal.status).toBe("approved");
   });
+
+  it("CONTROL_PASS replay uses the electorate — a forged pass fails when real gates would (review)", () => {
+    approveable(proposal);
+    dispatchProposalEvent(proposal, { type: "APPROVE", tally: makeTally(true) }, { config: guardConfig });
+    // Real context: a council of 10×1 members — the 2 cast votes are 20%
+    // participation, below the 60% quorum bar. Without the electorate in the
+    // replay the fallback denominator (votes cast) would pass the guard.
+    const electorate = Array.from({ length: 10 }, (_, i) => ({ id: `agent-${i}`, weight: 1 }));
+    const result = dispatchProposalEvent(
+      proposal,
+      { type: "CONTROL_PASS", result: makeControl(true) },
+      { config: guardConfig, electorate },
+    );
+    expect(result.ok).toBe(false);
+    expect(proposal.status).toBe("approved");
+  });
 });
 
 describe("proposal state machine — forbidden transitions", () => {

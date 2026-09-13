@@ -303,13 +303,15 @@ export function createSwarmDaoMcpServer(workDir = resolveDaoRoot(), repository?:
   }));
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    const args = (request.params.arguments ?? {}) as Record<string, unknown>;
+    const rawArgs = request.params.arguments;
     const name = request.params.name;
     try {
       // Runtime validation against the SAME schema published in ListTools
-      // (issue #161): bad types, NaN ids, out-of-range scores and forged
-      // event enums are rejected before any handler runs.
-      validateToolArgs(name, toolInputSchemas[name], args);
+      // (issue #161): bad types, NaN/float ids, out-of-range scores, forged
+      // event enums and malformed argument shapes are rejected before any
+      // handler runs.
+      validateToolArgs(name, toolInputSchemas[name], rawArgs);
+      const args = (rawArgs ?? {}) as Record<string, unknown>;
       switch (name) {
         case "dao_help": {
           const state = getState();

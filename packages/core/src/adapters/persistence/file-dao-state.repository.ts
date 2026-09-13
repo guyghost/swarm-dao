@@ -54,7 +54,9 @@ function repairState(value: Partial<DAOState>, daoRoot: string): RepairResult {
     return fallbackValue;
   };
   const recordOr = <T>(candidate: unknown, fallbackValue: T): T => {
-    if (candidate && !Array.isArray(candidate)) return candidate as T;
+    // Plain objects only (review): a truthy primitive (string/number) in a
+    // corrupted state.json must be substituted, not adopted as a record.
+    if (typeof candidate === "object" && candidate !== null && !Array.isArray(candidate)) return candidate as T;
     repaired = true;
     return fallbackValue;
   };

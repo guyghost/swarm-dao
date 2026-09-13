@@ -44,6 +44,9 @@ export function dispatchProposalEvent(
     config?: DAOConfig;
     electorate?: Electorate;
     allProposals?: readonly Proposal[];
+    /** DAO root, so gate replay sees the same on-disk state (delegation
+     *  markers) as the originating runGates call. */
+    daoRoot?: string;
   } = {},
 ): DispatchResult {
   // Terminal states are final: no event may leave them. This guard
@@ -79,7 +82,15 @@ export function dispatchProposalEvent(
         error: 'Event "CONTROL_PASS" requires config so the gates can be replayed against the proposal.',
       };
     }
-    const replay = runGates(proposal, options.config, { allProposals: options.allProposals });
+    // Replay under the SAME context as the originating runGates call
+    // (review: electorate + daoRoot included) — otherwise quorum-dependent
+    // gates could pass in replay while failing in the real run, re-opening
+    // the trust boundary the recompute is meant to close.
+    const replay = runGates(proposal, options.config, {
+      allProposals: options.allProposals,
+      electorate: options.electorate,
+      daoRoot: options.daoRoot,
+    });
     machineInput.expectedGatesPass = replay.allGatesPassed && replay.blockerCount === 0;
   }
 

@@ -14,6 +14,8 @@ export interface JsonSchemaProperty {
   items?: SchemaNode;
   minimum?: number;
   maximum?: number;
+  /** Number-only: require a whole value (JSON-schema "integer"). */
+  integer?: boolean;
 }
 
 /** A schema node: property or nested item. Object nodes may carry
@@ -29,7 +31,7 @@ export interface ToolJsonSchema {
   properties?: Record<string, SchemaNode>;
 }
 
-const PROPOSAL_ID: JsonSchemaProperty = { type: "number", description: "Proposal id" };
+const PROPOSAL_ID: JsonSchemaProperty = { type: "number", integer: true, description: "Proposal id" };
 const EVIDENCE_ROOT: JsonSchemaProperty = {
   type: "string",
   description: "Evidence root (defaults to a .dao path under the workspace)",
@@ -225,6 +227,7 @@ function validateNode(where: string, value: unknown, node: SchemaNode): string |
       return null;
     case "number": {
       if (typeof value !== "number" || !Number.isFinite(value)) return `${where} must be a finite number`;
+      if (node.integer && !Number.isInteger(value)) return `${where} must be an integer`;
       if (node.minimum !== undefined && value < node.minimum) return `${where} must be >= ${node.minimum}`;
       if (node.maximum !== undefined && value > node.maximum) return `${where} must be <= ${node.maximum}`;
       return null;
@@ -265,20 +268,22 @@ function validateNode(where: string, value: unknown, node: SchemaNode): string |
  * Validate CallTool arguments against the tool's declared schema.
  * Throws with a precise, tool-scoped message on the first violation.
  */
-export function validateToolArgs(
-  tool: string,
-  schema: ToolJsonSchema | undefined,
-  args: Record<string, unknown>,
-): void {
+export function validateToolArgs(tool: string, schema: ToolJsonSchema | undefined, args: unknown): void {
+  // Shape guard (review): a client sending null/array/string for `arguments`
+  // must get a precise validation error, not a TypeError or a silent pass.
+  if (typeof args !== "object" || args === null || Array.isArray(args)) {
+    throw new Error(`Invalid arguments for ${tool}: arguments must be an object`);
+  }
+  const record = args as Record<string, unknown>;
   if (!schema) return;
   for (const name of schema.required ?? []) {
-    if (args[name] === undefined) {
+    if (record[name] === undefined) {
       throw new Error(`Invalid arguments for ${tool}: '${name}' is required`);
     }
   }
   for (const [name, node] of Object.entries(schema.properties ?? {})) {
-    if (args[name] === undefined) continue;
-    const error = validateNode(name, args[name], node);
+    if (record[name] === undefined) continue;
+    const error = validateNode(name, record[name], node);
     if (error) throw new Error(`Invalid arguments for ${tool}: ${error}`);
   }
 }

@@ -197,4 +197,27 @@ describe("FileDaoStateRepository concurrency", () => {
       await fs.rm(cwd, { recursive: true, force: true });
     }
   });
+
+  it("open() repairs record fields holding primitives, not just missing keys (review)", async () => {
+    const cwd = await mkRoot();
+    try {
+      const daoRoot = path.join(cwd, ".dao");
+      await fs.mkdir(daoRoot, { recursive: true });
+      // controlResults is a string: a truthy non-object must be substituted
+      // (and flagged), not adopted as a record.
+      await fs.writeFile(
+        path.join(daoRoot, "state.json"),
+        JSON.stringify({ daoRoot, initialized: true, controlResults: "oops", outcomes: 42 }),
+        "utf8",
+      );
+
+      const repo = await FileDaoStateRepository.open(cwd);
+      expect(repo.get().controlResults).toEqual({});
+      expect(repo.get().outcomes).toEqual({});
+      const entries = await fs.readdir(daoRoot);
+      expect(entries.some((e) => e.startsWith("state.json.backup-"))).toBe(true);
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
 });

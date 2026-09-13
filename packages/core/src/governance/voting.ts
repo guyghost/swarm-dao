@@ -119,12 +119,10 @@ export function tallyVotes(proposal: Proposal, config: DAOConfig, electorate?: E
   let weightedFor = 0;
   let weightedAgainst = 0;
   let weightedAbstain = 0;
-  let _totalObservedWeight = 0;
   let votingAgents = 0;
 
   for (const v of votes) {
     const w = normalizeVoteWeight(v.weight);
-    _totalObservedWeight += w;
     if (v.position === "for") {
       weightedFor += w;
       votingAgents++;
