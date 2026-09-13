@@ -350,9 +350,21 @@ export async function withFileLock<T>(daoRoot: string, fn: () => Promise<T>): Pr
     }
   }
   // Heartbeat: refresh the timestamp while the critical section runs, so a
-  // legitimately long write is not declared stale by a waiting process.
+  // legitimately long write is not declared stale by a waiting process. Only
+  // refresh while the lock file still holds OUR token (review): after a
+  // stale takeover by another writer, the old owner's heartbeat must not
+  // clobber the new owner's token.
   const heartbeat = setInterval(() => {
-    fs.writeFile(lockPath, lockPayload(), { flag: "w" }).catch(() => undefined);
+    void (async () => {
+      try {
+        const raw = await fs.readFile(lockPath, "utf8");
+        const parsed = JSON.parse(raw) as { token?: unknown };
+        if (parsed.token !== token) return; // we no longer own the lock file
+        await fs.writeFile(lockPath, lockPayload(), { flag: "w" });
+      } catch {
+        // Lock already gone or unreadable — nothing to refresh.
+      }
+    })();
   }, LOCK_STALE_MS / 2);
   try {
     return await fn();

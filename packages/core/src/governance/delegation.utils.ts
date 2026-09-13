@@ -272,15 +272,25 @@ function delegationMarkerPath(daoRoot: string, proposalId: number): string {
   return path.join(daoRoot, "delegations", `${proposalId}.in-flight.json`);
 }
 
-/** Persist an in-flight marker for the proposal's deliberation (INV-8). */
+/** Persist an in-flight marker for the proposal's deliberation (INV-8).
+ *  Atomic (temp + rename): a concurrent gate read must never observe a
+ *  partially-written marker (review — a parse failure would otherwise have
+ *  to guess between "in flight" and "garbage"). */
 export async function markDelegationInFlight(daoRoot: string, proposalId: number): Promise<void> {
   const file = delegationMarkerPath(daoRoot, proposalId);
   await fs.mkdir(path.dirname(file), { recursive: true });
-  await fs.writeFile(
-    file,
-    `${JSON.stringify({ proposalId, startedAt: new Date().toISOString(), pid: process.pid }, null, 2)}\n`,
-    "utf8",
-  );
+  const tmpPath = `${file}.tmp-${process.pid}-${Math.random().toString(36).slice(2, 10)}`;
+  try {
+    await fs.writeFile(
+      tmpPath,
+      `${JSON.stringify({ proposalId, startedAt: new Date().toISOString(), pid: process.pid }, null, 2)}\n`,
+      "utf8",
+    );
+    await fs.rename(tmpPath, file);
+  } catch (error) {
+    await fs.rm(tmpPath, { force: true }).catch(() => undefined);
+    throw error;
+  }
 }
 
 /** Remove the in-flight marker once the delegation drained. */
@@ -290,20 +300,27 @@ export async function clearDelegationInFlight(daoRoot: string, proposalId: numbe
 
 /**
  * Whether a delegation marker is on disk for this proposal (and fresh).
- * Synchronous: gates are sync. A missing marker means "no delegation in
- * flight"; a marker older than DELEGATION_MARKER_STALE_MS is treated as
- * orphaned (crashed deliberation) and ignored.
+ * Synchronous: gates are sync. Semantics are fail-closed (review): a marker
+ * that exists but cannot be parsed counts as IN FLIGHT — INV-8 must not be
+ * bypassable by a corrupt or half-written marker; only ENOENT (no marker)
+ * and a marker older than DELEGATION_MARKER_STALE_MS (orphaned by a crashed
+ * deliberation) let the gate pass.
  */
 export function isDelegationInFlightOnDisk(daoRoot: string, proposalId: number): boolean {
+  let raw: string;
   try {
-    const raw = readFileSync(delegationMarkerPath(daoRoot, proposalId), "utf8");
+    raw = readFileSync(delegationMarkerPath(daoRoot, proposalId), "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    return true; // unreadable marker: fail closed
+  }
+  try {
     const parsed = JSON.parse(raw) as { startedAt?: unknown };
     if (typeof parsed.startedAt !== "string") return true;
     const startedAt = Date.parse(parsed.startedAt);
     if (!Number.isFinite(startedAt)) return true;
     return Date.now() - startedAt < DELEGATION_MARKER_STALE_MS;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
-    return false; // unreadable marker: do not block on it
+  } catch {
+    return true; // corrupt marker: fail closed
   }
 }

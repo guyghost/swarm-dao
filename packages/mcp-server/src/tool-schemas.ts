@@ -269,12 +269,14 @@ function validateNode(where: string, value: unknown, node: SchemaNode): string |
  * Throws with a precise, tool-scoped message on the first violation.
  */
 export function validateToolArgs(tool: string, schema: ToolJsonSchema | undefined, args: unknown): void {
-  // Shape guard (review): a client sending null/array/string for `arguments`
-  // must get a precise validation error, not a TypeError or a silent pass.
-  if (typeof args !== "object" || args === null || Array.isArray(args)) {
+  // Shape guard (review): non-object `arguments` must get a precise
+  // validation error. Omitted arguments (undefined, or null as historically
+  // tolerated by the previous `?? {}` coercion) are legitimate for tools
+  // with no required properties (dao_help, dao_list, …) and mean {}.
+  if (args !== undefined && args !== null && (typeof args !== "object" || Array.isArray(args))) {
     throw new Error(`Invalid arguments for ${tool}: arguments must be an object`);
   }
-  const record = args as Record<string, unknown>;
+  const record: Record<string, unknown> = (args ?? {}) as Record<string, unknown>;
   if (!schema) return;
   for (const name of schema.required ?? []) {
     if (record[name] === undefined) {

@@ -140,4 +140,17 @@ describe("delegation-closed gate sees the persisted marker (issue #159)", () => 
       await fs.rm(daoRoot, { recursive: true, force: true });
     }
   });
+
+  test("a corrupt marker fails CLOSED, not open (review)", async () => {
+    const daoRoot = await fs.mkdtemp(path.join(tmpdir(), "delegation-gate-"));
+    try {
+      const marker = path.join(daoRoot, "delegations", "7.in-flight.json");
+      await fs.mkdir(path.dirname(marker), { recursive: true });
+      await fs.writeFile(marker, "{half-written", "utf8");
+      const result = runGates(proposal(), config, { daoRoot });
+      expect(result.gates.find((g) => g.gateId === "delegation-closed")?.passed).toBe(false);
+    } finally {
+      await fs.rm(daoRoot, { recursive: true, force: true });
+    }
+  });
 });

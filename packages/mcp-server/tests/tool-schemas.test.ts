@@ -76,14 +76,24 @@ describe("mcp tool argument validation (issue #161)", () => {
   });
 
   it("rejects malformed argument shapes with a precise message (review)", () => {
-    expect(() => validateToolArgs("dao_deliberate", schemas.dao_deliberate, null)).toThrow(
-      /arguments must be an object/,
-    );
     expect(() => validateToolArgs("dao_deliberate", schemas.dao_deliberate, [1, 2])).toThrow(
       /arguments must be an object/,
     );
     expect(() => validateToolArgs("dao_deliberate", schemas.dao_deliberate, "proposalId")).toThrow(
       /arguments must be an object/,
+    );
+    // null is tolerated as omitted: a required-args tool then fails on the
+    // missing property, matching the previous `?? {}` coercion.
+    expect(() => validateToolArgs("dao_deliberate", schemas.dao_deliberate, null)).toThrow(/'proposalId' is required/);
+  });
+
+  it("accepts omitted arguments for no-arg tools (MCP omits `arguments`)", () => {
+    expect(() => validateToolArgs("dao_help", schemas.dao_help, undefined)).not.toThrow();
+    expect(() => validateToolArgs("dao_list", schemas.dao_list, undefined)).not.toThrow();
+    expect(() => validateToolArgs("dao_agents", schemas.dao_agents, null)).not.toThrow();
+    // But a tool WITH required properties still fails on omitted arguments.
+    expect(() => validateToolArgs("dao_deliberate", schemas.dao_deliberate, undefined)).toThrow(
+      /'proposalId' is required/,
     );
   });
 
