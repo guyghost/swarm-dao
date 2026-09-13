@@ -23,7 +23,7 @@ jobs:
     # the hang is root-caused.
     timeout-minutes: 35
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           # Full history: the changeset-coverage step diffs the PR against its
           # merge-base with main (three-dot diff).
@@ -36,7 +36,7 @@ jobs:
 
       - name: Cache Bun install
         # Keyed on the lockfile: cold installs only when dependencies change.
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.bun/install/cache
           key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
@@ -59,7 +59,7 @@ jobs:
         run: bun run check:publish-manifests
 
       - name: Setup Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
@@ -122,7 +122,7 @@ jobs:
     # decoration.
     timeout-minutes: 35
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -145,7 +145,7 @@ jobs:
       # v2: re-baseline after 9eee0bf (inter-process persist lock) made the
       # persistence suite permanently slower than the pre-lock baseline.
       - name: Restore benchmark baseline
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: packages/benchmarks/benchmark-baseline.json
           key: benchmark-baseline-v2-${{ runner.os }}-${{ github.sha }}
@@ -159,13 +159,13 @@ jobs:
 
       - name: Save benchmark baseline
         if: github.ref == 'refs/heads/main'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: packages/benchmarks/benchmark-baseline.json
           key: benchmark-baseline-v2-${{ runner.os }}-${{ github.sha }}
 
       - name: Upload benchmark results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: benchmark-results
           path: packages/benchmarks/benchmark-results.json
