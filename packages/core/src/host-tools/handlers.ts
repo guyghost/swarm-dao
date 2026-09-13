@@ -1,4 +1,6 @@
+import path from "node:path";
 import { createExecutionWorkspace } from "../adapters/git-workspace.js";
+import { FileDaoStateRepository } from "../adapters/persistence/file-dao-state.repository.js";
 import { LegacyDaoStateRepository } from "../adapters/persistence/legacy-dao-state.repository.js";
 import { FsShipAuditStore } from "../adapters/ship-audit/fs-ship-audit.store.js";
 import { InitializeDaoUseCase } from "../application/initialize-dao.use-case.js";
@@ -42,7 +44,7 @@ function runtimeContextFrom(
 
 import { buildDispatchInstructions, createDispatchModelContext, formatDispatchPlan } from "../intelligence/swarm.js";
 import { recordProposalExecuted } from "../observability/metrics.js";
-import { getAllAuditLog, getOrCreateState, getProposal, getState, initStorage } from "../persistence.js";
+import { getAllAuditLog, getOrCreateState, getProposal, getState, initStorage, setRepository } from "../persistence.js";
 import { systemClock } from "../ports/clock.js";
 import type { DaoStateRepositoryPort } from "../ports/repository.js";
 import {
@@ -92,8 +94,34 @@ export interface RecordOutputInput {
   error?: string;
 }
 
+const fileRepos = new Map<string, Promise<FileDaoStateRepository>>();
+
 function repositoryOrLegacy(repository?: DaoStateRepositoryPort): DaoStateRepositoryPort {
   return repository ?? new LegacyDaoStateRepository();
+}
+
+async function resolveRepository(
+  workDir?: string,
+  repository?: DaoStateRepositoryPort,
+): Promise<DaoStateRepositoryPort> {
+  if (repository) return repository;
+  try {
+    getState();
+    return new LegacyDaoStateRepository();
+  } catch {
+    // No process-global repository yet.
+  }
+  if (!workDir) return new LegacyDaoStateRepository();
+  const key = path.resolve(workDir);
+  let pending = fileRepos.get(key);
+  if (!pending) {
+    pending = FileDaoStateRepository.open(key).then((repo) => {
+      setRepository(repo);
+      return repo;
+    });
+    fileRepos.set(key, pending);
+  }
+  return pending;
 }
 
 function requireInitialized(repository?: DaoStateRepositoryPort): string | null {
@@ -104,9 +132,10 @@ function requireInitialized(repository?: DaoStateRepositoryPort): string | null 
 
 export async function handleDaoSetup(ctx: DaoToolContext, useDefaults = true): Promise<string> {
   await initStorage(ctx.workDir);
+  const repository = await resolveRepository(ctx.workDir, ctx.repository);
   if (!ctx.repository) getOrCreateState(ctx.workDir);
   const agents = initializeAgents(useDefaults ? undefined : []);
-  const result = await new InitializeDaoUseCase({ repository: repositoryOrLegacy(ctx.repository) }).execute({ agents });
+  const result = await new InitializeDaoUseCase({ repository }).execute({ agents });
   return presentInitialization(result);
 }
 
@@ -131,9 +160,10 @@ export async function handleDaoPropose(args: DaoProposeArgs, repository?: DaoSta
 }
 
 export async function handleDaoDeliberate(ctx: DaoToolContext, proposalId: number): Promise<string> {
-  const notReady = requireInitialized(ctx.repository);
+  const repository = await resolveRepository(ctx.workDir, ctx.repository);
+  const notReady = requireInitialized(repository);
   if (notReady) return notReady;
-  const state = repositoryOrLegacy(ctx.repository).get();
+  const state = repository.get();
   const proposal = state.proposals.find((candidate) => candidate.id === proposalId);
   if (!proposal) return `Proposal #${proposalId} not found.`;
   if (proposal.status !== "open") return `Proposal #${proposal.id} is ${proposal.status}, must be open.`;
@@ -141,7 +171,7 @@ export async function handleDaoDeliberate(ctx: DaoToolContext, proposalId: numbe
   const agents = await loadAgentDefinitions(state.daoRoot, projectConfig);
   if (ctx.deliberationMode === "manual") {
     const deliberation = await new StartDeliberationUseCase({
-      repository: repositoryOrLegacy(ctx.repository),
+      repository,
       clock: systemClock,
     }).execute({ proposalId });
     if (!deliberation.ok) return `Cannot deliberate: ${deliberation.error}`;
@@ -162,7 +192,7 @@ export async function handleDaoDeliberate(ctx: DaoToolContext, proposalId: numbe
   }
   const startTime = Date.now();
   const useCase = new DeliberateProposalUseCase({
-    repository: repositoryOrLegacy(ctx.repository),
+    repository,
     worker: ctx.adapter,
     clock: systemClock,
   });
@@ -189,7 +219,7 @@ export async function handleDaoRecordOutputs(
   outputs: RecordOutputInput[],
 ): Promise<string> {
   const useCase = new RecordDeliberationOutputsUseCase({
-    repository: repositoryOrLegacy(ctx.repository),
+    repository: await resolveRepository(ctx.workDir, ctx.repository),
     clock: systemClock,
   });
   const result = await useCase.execute({ proposalId, outputs });
@@ -198,16 +228,17 @@ export async function handleDaoRecordOutputs(
 }
 
 export async function handleDaoControl(ctx: DaoToolContext, proposalId: number): Promise<string> {
-  const notReady = requireInitialized(ctx.repository);
+  const repository = await resolveRepository(ctx.workDir, ctx.repository);
+  const notReady = requireInitialized(repository);
   if (notReady) return notReady;
-  const useCase = new ControlProposalUseCase({ repository: repositoryOrLegacy(ctx.repository), clock: systemClock });
+  const useCase = new ControlProposalUseCase({ repository, clock: systemClock });
   const result = await useCase.execute({ proposalId, failOnGateFailure: ctx.failOnGateFailure });
   if (!result.ok) return result.error;
   return presentControl(result.control);
 }
 
 export async function handleDaoExecute(ctx: DaoToolContext, proposalId: number): Promise<string> {
-  const repository = repositoryOrLegacy(ctx.repository);
+  const repository = await resolveRepository(ctx.workDir, ctx.repository);
   const projectConfig = await loadConfig(repository.get().daoRoot);
   const workspace = createExecutionWorkspace(projectConfig.execution, ctx.adapter, ctx.workDir);
   const useCase = new ExecuteProposalUseCase({ repository, clock: systemClock, workspace });
@@ -222,9 +253,9 @@ export async function handleDaoShip(
   proposalId: number,
   options?: { cascade?: boolean; force?: boolean },
 ): Promise<string> {
-  const notReady = requireInitialized(ctx.repository);
+  const repository = await resolveRepository(ctx.workDir, ctx.repository);
+  const notReady = requireInitialized(repository);
   if (notReady) return notReady;
-  const repository = repositoryOrLegacy(ctx.repository);
   // Ship audit challenge (opt-in): the first call challenges instead of
   // executing; only an unchanged second call proceeds (models/ship-audit.md).
   const shipConfig = await loadConfig(repository.get().daoRoot);
@@ -279,17 +310,15 @@ Force with an explicit reason when genuinely required: re-run with \`force=true\
   });
   if (!result.ok) return result.error;
   for (const id of result.shipped) {
-    const proposal = repositoryOrLegacy(ctx.repository)
-      .get()
-      .proposals.find((candidate) => candidate.id === id);
+    const proposal = repository.get().proposals.find((candidate) => candidate.id === id);
     if (proposal) recordProposalExecuted(proposal.id, proposal.type);
   }
   return presentShip(result);
 }
 
 export async function handleDaoCheckEdit(ctx: DaoToolContext, paths: readonly string[]): Promise<string> {
-  const repository = repositoryOrLegacy(ctx.repository);
-  const notReady = requireInitialized(ctx.repository);
+  const repository = await resolveRepository(ctx.workDir, ctx.repository);
+  const notReady = requireInitialized(repository);
   if (notReady) return notReady;
 
   const cleaned = [...new Set(paths.map((path) => path.trim()).filter(Boolean))];
@@ -380,10 +409,11 @@ export async function handleDaoRollback(proposalId: number, repository?: DaoStat
 }
 
 export async function handleDaoReject(ctx: DaoToolContext, proposalId: number, reason: string): Promise<string> {
-  const notReady = requireInitialized(ctx.repository);
+  const repository = await resolveRepository(ctx.workDir, ctx.repository);
+  const notReady = requireInitialized(repository);
   if (notReady) return notReady;
   const result = await new RejectProposalUseCase({
-    repository: repositoryOrLegacy(ctx.repository),
+    repository,
     clock: systemClock,
   }).execute({ proposalId, actor: ctx.adapter.hostId, reason });
   if (!result.ok) return result.error;
@@ -406,13 +436,14 @@ export async function handleDaoDashboard(repository?: DaoStateRepositoryPort): P
 }
 
 export async function handleDaoRoundtable(ctx: DaoToolContext): Promise<string> {
-  const notReady = requireInitialized(ctx.repository);
+  const repository = await resolveRepository(ctx.workDir, ctx.repository);
+  const notReady = requireInitialized(repository);
   if (notReady) return notReady;
-  const state = getState();
+  const state = repository.get();
   const projectConfig = await loadConfig(state.daoRoot);
   const agents = await loadAgentDefinitions(state.daoRoot, projectConfig);
   const result = await new RoundTableUseCase({
-    repository: repositoryOrLegacy(ctx.repository),
+    repository,
     worker: ctx.adapter,
     clock: systemClock,
   }).execute({
@@ -540,7 +571,7 @@ export async function handleDaoConfigGithub(
   ctx: DaoToolContext,
   args: { owner: string; repo: string; issues?: boolean },
 ): Promise<string> {
-  const state = repositoryOrLegacy(ctx.repository).get();
+  const state = (await resolveRepository(ctx.workDir, ctx.repository)).get();
   await saveGitHubConfigToDaoRoot(state.daoRoot, args);
   return [
     `# GitHub Configured`,
@@ -555,8 +586,8 @@ export async function handleDaoConfigGithub(
 }
 
 export async function handleDaoGithubCreateBranch(ctx: DaoToolContext, proposalId: number): Promise<string> {
-  const repository = repositoryOrLegacy(ctx.repository);
-  const notReady = requireInitialized(ctx.repository);
+  const repository = await resolveRepository(ctx.workDir, ctx.repository);
+  const notReady = requireInitialized(repository);
   if (notReady) return notReady;
   const proposal = repository.get().proposals.find((candidate) => candidate.id === proposalId);
   if (!proposal) return `Proposal #${proposalId} not found.`;
@@ -575,8 +606,8 @@ export async function handleDaoGithubOpenPr(
   proposalId: number,
   headBranch: string,
 ): Promise<string> {
-  const repository = repositoryOrLegacy(ctx.repository);
-  const notReady = requireInitialized(ctx.repository);
+  const repository = await resolveRepository(ctx.workDir, ctx.repository);
+  const notReady = requireInitialized(repository);
   if (notReady) return notReady;
   const proposal = repository.get().proposals.find((candidate) => candidate.id === proposalId);
   if (!proposal) return `Proposal #${proposalId} not found.`;

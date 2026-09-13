@@ -25,7 +25,7 @@ describe("submitAiGraphSignal", () => {
       {
         runId: "run-1",
         type: "MODEL_DRAFTED",
-        producer: "claude",
+        producer: "modeler",
         payload: { modelHash: "deadbeef", patch: "models/run-1.json" },
         evidence: ["evidence/run-1/model.md"],
       },
@@ -38,7 +38,7 @@ describe("submitAiGraphSignal", () => {
       .split("\n")
       .map((line) => JSON.parse(line));
     expect(journal).toHaveLength(1);
-    expect(journal[0].signal).toMatchObject({ type: "MODEL_DRAFTED", source: "ai", producer: "claude" });
+    expect(journal[0].signal).toMatchObject({ type: "MODEL_DRAFTED", source: "ai", producer: "modeler" });
   });
 
   it("exposes only the AI-artifact event types", () => {

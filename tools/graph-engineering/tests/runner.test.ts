@@ -54,4 +54,28 @@ describe("graph runner", () => {
       await rm(evidenceRoot, { recursive: true, force: true });
     }
   });
+
+  it("fails fast instead of corrupting journal.ndjson when another runner advanced it", async () => {
+    const evidenceRoot = await mkdtemp(join(tmpdir(), "swarm-graph-concurrent-"));
+    try {
+      const a = await createGraphRunner({ evidenceRoot, runId: "graph-runner-test" });
+      await a.submit(signal("MODEL_DRAFTED", "ai", "modeler", { modelHash: "model-a" }, ["model"]));
+
+      const b = await createGraphRunner({ evidenceRoot, runId: "graph-runner-test" });
+      const rejected = await b.submit(signal("MODEL_DRAFTED", "human", "modeler", { modelHash: "model-b" }, ["forged"]));
+      expect(rejected.accepted).toBe(false);
+
+      await expect(a.submit(signal("MODEL_CONTRACT_VALID", "tool", "model-contract-validator", {}, ["ok"]))).rejects.toThrow(
+        /concurrent graph runner detected/,
+      );
+
+      const journal = (await readFile(join(evidenceRoot, "graph-runner-test", "journal.ndjson"), "utf8"))
+        .trim()
+        .split("\n");
+      expect(journal).toHaveLength(2);
+      expect(JSON.parse(journal[1])).toMatchObject({ sequence: 2, accepted: false });
+    } finally {
+      await rm(evidenceRoot, { recursive: true, force: true });
+    }
+  });
 });

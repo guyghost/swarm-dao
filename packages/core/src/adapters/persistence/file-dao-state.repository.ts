@@ -44,6 +44,11 @@ export class FileDaoStateRepository implements DaoStateRepositoryPort {
     this.rawStateOnDisk = rawStateOnDisk;
   }
 
+  /** Wrap already-loaded state so compatibility loaders share the locked persist path. */
+  public static fromLoaded(state: DAOState, rawStateOnDisk: string | null): FileDaoStateRepository {
+    return new FileDaoStateRepository(state, state.daoRoot, rawStateOnDisk);
+  }
+
   public static async open(cwd: string): Promise<FileDaoStateRepository> {
     const daoRoot = path.join(cwd, ".dao");
     await fs.mkdir(daoRoot, { recursive: true });
@@ -201,7 +206,7 @@ const LOCK_TIMEOUT_MS = 5000;
 const LOCK_RETRY_MS = 25;
 const LOCK_STALE_MS = 10000;
 
-async function withFileLock<T>(daoRoot: string, fn: () => Promise<T>): Promise<T> {
+export async function withFileLock<T>(daoRoot: string, fn: () => Promise<T>): Promise<T> {
   const lockPath = path.join(daoRoot, LOCK_FILE);
   // Callers are responsible for creating daoRoot before locking.
   const deadline = Date.now() + LOCK_TIMEOUT_MS;

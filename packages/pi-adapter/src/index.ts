@@ -5,7 +5,6 @@
 // Registers tools, commands, and event hooks.
 
 import { spawn } from "node:child_process";
-import path from "node:path";
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import type {
@@ -13,7 +12,6 @@ import type {
   AttentionSource,
   DaoStateRepositoryPort,
   HostAdapter,
-  Proposal,
   ProposalType,
 } from "@guyghost/swarm-dao-core";
 import {
@@ -77,10 +75,9 @@ import {
   submitAiProductSignal,
 } from "@guyghost/swarm-dao-product";
 import { Type } from "typebox";
+import { resolveContainedRoot } from "./contained-root.js";
 
 // ── Pi Host Adapter Implementation ───────────────────────────
-
-type SpawnAgentParams = Parameters<HostAdapter["spawnAgent"]>[0];
 
 /** Grace period before escalating a timed-out subprocess from SIGTERM to SIGKILL. */
 const PI_KILL_GRACE_MS = 5_000;
@@ -224,131 +221,6 @@ async function spawnPiSubprocess(
   });
 }
 
-function stableHash(input: string): number {
-  let hash = 0;
-  for (const char of input) {
-    hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
-  }
-  return hash;
-}
-
-function scoreFromSeed(seed: string, key: string, min: number, max: number): number {
-  const spread = max - min + 1;
-  return min + (stableHash(`${seed}:${key}`) % spread);
-}
-
-function clampScore(value: number): number {
-  return Math.max(0, Math.min(10, value));
-}
-
-/**
- * Marker embedded in canned fallback output so simulated content is never
- * mistaken for real agent work. Round-table parsing keeps it inside the
- * description (it travels into any proposal created from the suggestion);
- * deliberation parsing is heading-based and ignores the preamble.
- */
-const SIMULATED_OUTPUT_NOTICE = "> ⚠️ Simulated fallback output — no real agent spawn (reason in pi-adapter logs).";
-
-function pickRoundTableType(agentId: string): ProposalType {
-  switch (agentId) {
-    case "architect":
-      return "technical-change";
-    case "critic":
-      return "security-change";
-    case "delivery":
-      return "release-change";
-    case "prioritizer":
-      return "governance-change";
-    default:
-      return "product-feature";
-  }
-}
-
-function generateRoundTableSuggestion(params: SpawnAgentParams): string {
-  const suggestionType = pickRoundTableType(params.agent.id);
-  const title = `${params.agent.name}: ${params.proposal.type === "governance-change" ? "Tighten proposal quality gates" : "Improve developer workflow"}`;
-  const description =
-    suggestionType === "security-change"
-      ? "Introduce mandatory risk checks before execution to reduce regressions. This adds explicit guardrails while preserving delivery speed."
-      : "Standardize proposal intake with clearer acceptance criteria and measurable outcomes. This improves review quality and helps the swarm converge faster.";
-
-  return `## Suggested Proposal
-**Title:** ${title}
-**Type:** ${suggestionType}
-**Description:** ${SIMULATED_OUTPUT_NOTICE} ${description}`;
-}
-
-function decideFallbackVote(agentId: string, proposal: Proposal): "for" | "against" | "abstain" {
-  if (agentId === "critic" && (proposal.type === "security-change" || proposal.riskZone === "red")) {
-    return "against";
-  }
-  if (agentId === "delivery" && proposal.type === "security-change") {
-    return "abstain";
-  }
-  return "for";
-}
-
-function generateDeliberationOutput(params: SpawnAgentParams): string {
-  const proposal = params.proposal;
-  const vote = decideFallbackVote(params.agent.id, proposal);
-  const seed = `${proposal.id}:${params.agent.id}:${proposal.title}:${proposal.type}`;
-
-  const userImpactBase: Record<ProposalType, number> = {
-    "product-feature": 8,
-    "technical-change": 6,
-    "security-change": 7,
-    "release-change": 5,
-    "governance-change": 6,
-  };
-  const effortBase: Record<ProposalType, number> = {
-    "product-feature": 6,
-    "technical-change": 7,
-    "security-change": 8,
-    "release-change": 4,
-    "governance-change": 5,
-  };
-  const securityRiskBase: Record<ProposalType, number> = {
-    "product-feature": 3,
-    "technical-change": 4,
-    "security-change": 7,
-    "release-change": 2,
-    "governance-change": 4,
-  };
-
-  const userImpact = clampScore(userImpactBase[proposal.type] + scoreFromSeed(seed, "ui", -1, 1));
-  const businessImpact = clampScore(6 + scoreFromSeed(seed, "bi", -1, 2));
-  const effort = clampScore(effortBase[proposal.type] + scoreFromSeed(seed, "effort", -1, 1));
-  const securityRisk = clampScore(securityRiskBase[proposal.type] + scoreFromSeed(seed, "risk", -1, 1));
-  const confidence = clampScore(7 + scoreFromSeed(seed, "conf", -2, 1));
-  const riskScore = clampScore(Math.round((securityRisk + effort) / 2));
-
-  const voteReasoning =
-    vote === "for"
-      ? "The proposal is actionable and aligns with expected project outcomes."
-      : vote === "against"
-        ? "Risk exposure is too high for the current safeguards."
-        : "The direction is promising, but execution details need clarification first.";
-
-  return `${SIMULATED_OUTPUT_NOTICE}\n\n## Analysis
-${params.agent.name} reviewed proposal #${proposal.id} (${proposal.type}) and assessed implementation tradeoffs, risk profile, and expected impact.
-
-## Vote
-${vote}
-
-## Reasoning
-${voteReasoning}
-
-## Composite Score Inputs (0-10)
-- userImpact: ${userImpact}
-- businessImpact: ${businessImpact}
-- effort: ${effort}
-- securityRisk: ${securityRisk}
-- confidence: ${confidence}
-
-## Risk Score (1-10)
-${riskScore}`;
-}
-
 export function createPiHostAdapter(_pi: ExtensionAPI, ctx?: ExtensionCommandContext): HostAdapter {
   const parentSessionModel = detectParentSessionModel(ctx);
 
@@ -362,20 +234,22 @@ export function createPiHostAdapter(_pi: ExtensionAPI, ctx?: ExtensionCommandCon
     async spawnAgent(params): Promise<AgentOutput> {
       const startTime = Date.now();
       const model = params.model;
-      const isRoundTable = params.proposal.id === 0 && params.proposal.title === "Round Table Suggestions";
+      const failClosed = (error: string): AgentOutput => ({
+        agentId: params.agent.id,
+        agentName: params.agent.name,
+        role: params.agent.role,
+        content: "",
+        durationMs: Date.now() - startTime,
+        error,
+      });
 
       // E-host (models/agent-runtime.md): the pi host can only run the pi
       // harness. A resolved harness that is not "pi" is a typed per-agent
       // failure — never a spawn attempt, never a throw.
       if (params.harness && params.harness !== "pi") {
-        return {
-          agentId: params.agent.id,
-          agentName: params.agent.name,
-          role: params.agent.role,
-          content: "",
-          durationMs: Date.now() - startTime,
-          error: `harness '${params.harness}' cannot run on the pi host: this host only runs the pi harness (E-host)`,
-        };
+        return failClosed(
+          `harness '${params.harness}' cannot run on the pi host: this host only runs the pi harness (E-host)`,
+        );
       }
 
       // Real Pi subprocess spawning is the default so round tables and
@@ -383,40 +257,39 @@ export function createPiHostAdapter(_pi: ExtensionAPI, ctx?: ExtensionCommandCon
       // SWARM_DAO_DISABLE_PI_SPAWN=1 (legacy opt-out: SWARM_DAO_ENABLE_PI_SPAWN=0).
       const spawnDisabled =
         process.env.SWARM_DAO_DISABLE_PI_SPAWN === "1" || process.env.SWARM_DAO_ENABLE_PI_SPAWN === "0";
-      if (!spawnDisabled && model && model !== "default") {
-        const subprocess = await spawnPiSubprocess(params.systemPrompt, model, params.timeoutMs);
-        if (subprocess.content) {
-          return {
-            agentId: params.agent.id,
-            agentName: params.agent.name,
-            role: params.agent.role,
-            content: subprocess.content,
-            durationMs: Date.now() - startTime,
-          };
-        }
+      if (spawnDisabled) {
         await this.log({
           level: "warn",
           service: "pi-adapter",
-          message: `Pi subprocess spawn failed for ${params.agent.id} (${model}): ${subprocess.error ?? "empty output"}; using simulated fallback output`,
+          message: `Pi subprocess spawning disabled (SWARM_DAO_DISABLE_PI_SPAWN=1); failing closed for ${params.agent.id}`,
         });
-      } else {
+        return failClosed("Pi subprocess spawning is disabled");
+      }
+      if (!model || model === "default") {
         await this.log({
           level: "warn",
           service: "pi-adapter",
-          message: spawnDisabled
-            ? `Pi subprocess spawning disabled (SWARM_DAO_DISABLE_PI_SPAWN=1); using simulated fallback output for ${params.agent.id}`
-            : `No resolvable model for ${params.agent.id} (resolved: ${model ?? "undefined"}); using simulated fallback output`,
+          message: `No resolvable model for ${params.agent.id} (resolved: ${model ?? "undefined"}); failing closed`,
         });
+        return failClosed(`No resolvable model for ${params.agent.id} (resolved: ${model ?? "undefined"})`);
       }
 
-      const content = isRoundTable ? generateRoundTableSuggestion(params) : generateDeliberationOutput(params);
-      return {
-        agentId: params.agent.id,
-        agentName: params.agent.name,
-        role: params.agent.role,
-        content,
-        durationMs: Date.now() - startTime,
-      };
+      const subprocess = await spawnPiSubprocess(params.systemPrompt, model, params.timeoutMs);
+      if (subprocess.content) {
+        return {
+          agentId: params.agent.id,
+          agentName: params.agent.name,
+          role: params.agent.role,
+          content: subprocess.content,
+          durationMs: Date.now() - startTime,
+        };
+      }
+      await this.log({
+        level: "warn",
+        service: "pi-adapter",
+        message: `Pi subprocess spawn failed for ${params.agent.id} (${model}): ${subprocess.error ?? "empty output"}; failing closed`,
+      });
+      return failClosed(subprocess.error ?? "Pi subprocess spawn failed");
     },
 
     async spawnAgents(params): Promise<AgentOutput[]> {
@@ -1508,7 +1381,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
     }),
     async execute(_id, params: { runId: string; evidenceRoot?: string }) {
       const runner = await createGraphRunner({
-        evidenceRoot: path.resolve(process.cwd(), params.evidenceRoot ?? ".dao/graph-runs"),
+        evidenceRoot: await resolveContainedRoot(process.cwd(), params.evidenceRoot ?? ".dao/graph-runs"),
         runId: params.runId,
       });
       return toolResult(JSON.stringify(runner.snapshot(), null, 2));
@@ -1533,7 +1406,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
       const payload = parsePayloadParam(params.payload);
       if (typeof payload === "string") return toolResult(payload);
       const result = await submitAiGraphSignal(
-        { evidenceRoot: path.resolve(process.cwd(), params.evidenceRoot ?? ".dao/graph-runs") },
+        { evidenceRoot: await resolveContainedRoot(process.cwd(), params.evidenceRoot ?? ".dao/graph-runs") },
         {
           runId: params.runId,
           type: params.type as GraphAiEventType,
@@ -1557,7 +1430,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
     }),
     async execute(_id, params: { runId: string; evidenceRoot?: string }) {
       const runner = await createProductRunner({
-        evidenceRoot: path.resolve(process.cwd(), params.evidenceRoot ?? ".dao/product-loops"),
+        evidenceRoot: await resolveContainedRoot(process.cwd(), params.evidenceRoot ?? ".dao/product-loops"),
         runId: params.runId,
       });
       return toolResult(JSON.stringify(runner.snapshot(), null, 2));
@@ -1582,7 +1455,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
       const payload = parsePayloadParam(params.payload);
       if (typeof payload === "string") return toolResult(payload);
       const result = await submitAiProductSignal(
-        { evidenceRoot: path.resolve(process.cwd(), params.evidenceRoot ?? ".dao/product-loops") },
+        { evidenceRoot: await resolveContainedRoot(process.cwd(), params.evidenceRoot ?? ".dao/product-loops") },
         {
           runId: params.runId,
           type: params.type as ProductAiEventType,
@@ -1608,7 +1481,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
     async execute(_id, params: { seriesId: string; evidenceRoot?: string }) {
       const runner = await OrchestratorRunner.create({
         seriesId: params.seriesId,
-        evidenceRoot: path.resolve(process.cwd(), params.evidenceRoot ?? ".dao/improvement-series"),
+        evidenceRoot: await resolveContainedRoot(process.cwd(), params.evidenceRoot ?? ".dao/improvement-series"),
       });
       return toolResult(JSON.stringify(runner.snapshot(), null, 2));
     },

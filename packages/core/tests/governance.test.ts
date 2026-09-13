@@ -98,6 +98,28 @@ describe("governance/voting", () => {
     expect(tally.approved).toBe(true); // 6/9 = 66% > 55%
   });
 
+  it("applies type-specific approval thresholds (security-change requires 70%)", () => {
+    const proposal = {
+      id: 3,
+      title: "Tighten auth",
+      type: "security-change" as const,
+      description: "Security proposal",
+      proposedBy: "test",
+      status: "deliberating" as const,
+      votes: [
+        { agentId: "strategist", agentName: "Strategist", position: "for" as const, reasoning: "Good", weight: 3 },
+        { agentId: "architect", agentName: "Architect", position: "for" as const, reasoning: "OK", weight: 3 },
+        { agentId: "critic", agentName: "Critic", position: "against" as const, reasoning: "Risky", weight: 3 },
+      ],
+      agentOutputs: [],
+      createdAt: new Date().toISOString(),
+    };
+
+    const tally = tallyVotes(proposal, DEFAULT_CONFIG);
+    expect(tally.approvalScore).toBe(67);
+    expect(tally.approved).toBe(false);
+  });
+
   it("ignores invalid vote weights when tallying", () => {
     const proposal = {
       id: 2,

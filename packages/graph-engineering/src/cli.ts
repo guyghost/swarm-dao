@@ -8,6 +8,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
+import { GRAPH_EVIDENCE_FOLDER, resolveEvidenceRoot } from "./evidence-root.js";
 import { createGraphRunner } from "./runner.js";
 
 export interface GraphCliDefaults {
@@ -39,7 +40,7 @@ export const runGraphCli = async (argv: readonly string[], defaults: GraphCliDef
   const runId = values["run-id"];
   if (!runId) throw new Error(`--run-id is required\n${usage}`);
 
-  const evidenceRoot = resolve(values["evidence-root"] ?? defaults.evidenceRoot ?? ".dao/graph-runs");
+  const evidenceRoot = resolveEvidenceRoot(GRAPH_EVIDENCE_FOLDER, values["evidence-root"] ?? defaults.evidenceRoot);
   if (command === "submit" && !values.signal) throw new Error(`--signal is required\n${usage}`);
   const runner = await createGraphRunner({ evidenceRoot, runId });
 

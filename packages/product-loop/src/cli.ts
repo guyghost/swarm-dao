@@ -9,6 +9,7 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
+import { PRODUCT_EVIDENCE_FOLDER, resolveEvidenceRoot } from "./evidence-root.js";
 import { createProductRunner } from "./runner.js";
 
 export interface ProductCliDefaults {
@@ -40,7 +41,7 @@ export const runProductCli = async (argv: readonly string[], defaults: ProductCl
   const runId = values["run-id"];
   if (!runId) throw new Error(`--run-id is required\n${usage}`);
 
-  const evidenceRoot = resolve(values["evidence-root"] ?? defaults.evidenceRoot ?? ".dao/product-loops");
+  const evidenceRoot = resolveEvidenceRoot(PRODUCT_EVIDENCE_FOLDER, values["evidence-root"] ?? defaults.evidenceRoot);
   if (command === "submit" && !values.signal) throw new Error(`--signal is required\n${usage}`);
   const runner = await createProductRunner({ evidenceRoot, runId });
 

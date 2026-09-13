@@ -109,6 +109,9 @@ describe("opencode-adapter", () => {
         "dao_record_outputs",
         "dao_control",
         "dao_execute",
+        "dao_ship",
+        "dao_rate",
+        "dao_update_proposal",
         "dao_list",
         "dao_agents",
         "dao_plan",
@@ -487,6 +490,42 @@ describe("opencode-adapter", () => {
 
       const result = await plugin.tool.dao_dashboard.execute({}, {});
       expect(result).toContain("not initialized");
+    });
+  });
+
+  describe("parity tools and evidence roots", () => {
+    let testDir: string;
+
+    beforeEach(async () => {
+      testDir = path.join(tmpdir(), `swarm-oc-parity-${Date.now()}`);
+      await fs.mkdir(testDir, { recursive: true });
+    });
+
+    afterEach(async () => {
+      setState(null);
+      await fs.rm(testDir, { recursive: true, force: true });
+    });
+
+    it("dao_update_proposal updates an open proposal", async () => {
+      const { plugin } = await setupPlugin(testDir);
+      await plugin.tool.dao_setup.execute({}, { directory: testDir });
+      await plugin.tool.dao_propose.execute(
+        { title: "Parity Feature", type: "product-feature", description: "d" },
+        { directory: testDir },
+      );
+      const result = await plugin.tool.dao_update_proposal.execute(
+        { proposalId: 1, problemStatement: "Users cannot see dark mode" },
+        { directory: testDir },
+      );
+      expect(result).not.toContain("not found");
+      expect(result.toLowerCase()).toContain("updated");
+    });
+
+    it("rejects an absolute evidenceRoot on dao_graph_status", async () => {
+      const { plugin } = await setupPlugin(testDir);
+      await expect(
+        plugin.tool.dao_graph_status.execute({ runId: "g1", evidenceRoot: "/tmp/evil" }, { directory: testDir }),
+      ).rejects.toThrow(/absolute paths are not allowed/);
     });
   });
 });

@@ -71,6 +71,17 @@ export async function runRoundTable(
           timeoutMs: 60_000,
         });
 
+        if (output.error) {
+          const suggestion: RoundTableSuggestion = {
+            agentId: agent.id,
+            agentName: agent.name,
+            content: output.content,
+            error: output.error,
+          };
+          suggestions.push(suggestion);
+          return suggestion;
+        }
+
         const parsed = parseSuggestion(output.content);
         const suggestion: RoundTableSuggestion = {
           agentId: agent.id,

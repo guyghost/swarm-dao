@@ -278,6 +278,20 @@ describe("tmux host adapter", () => {
     await expect(adapter.readFile("/etc/passwd")).rejects.toThrow("escapes");
   });
 
+  test("symlinks cannot bypass workspace containment", async () => {
+    const fake = fakeTmux();
+    const adapter = createTmuxHostAdapter({ workDir, runner: fake.runner, command: "x" });
+    const outside = await fs.mkdtemp(path.join(tmpdir(), "swarm-dao-tmux-out-"));
+    try {
+      await fs.symlink(outside, path.join(workDir, "escape"));
+      await expect(adapter.readFile("escape/secret.txt")).rejects.toThrow("escapes");
+      await expect(adapter.writeFile("escape/secret.txt", "x")).rejects.toThrow("escapes");
+    } finally {
+      await fs.rm(path.join(workDir, "escape"), { force: true });
+      await fs.rm(outside, { recursive: true, force: true });
+    }
+  });
+
   test("spawnAgents fans out one session per agent", async () => {
     const fake = fakeTmux();
     fake.pane("## Analysis\na\n## Vote\nfor\n## Reasoning\nr");

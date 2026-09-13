@@ -10,9 +10,9 @@ export type RejectProposalResult =
 
 /**
  * Human rejection path: an auditable veto/withdrawal of a proposal.
- * The proposal machine decides which event applies (DISCARD from `open`,
- * REJECT from `deliberating`/`approved`/`failed`); this use case only picks
- * the event from the persisted status and records who rejected, and why.
+ * The proposal machine decides which event applies (DISCARD from `open` and
+ * `controlled`, REJECT from `deliberating`/`approved`/`failed`); this use case
+ * only picks the event from the persisted status and records who rejected, and why.
  * REJECT from `failed` is a closure annotation: the lifecycle is terminal,
  * but the machine keeps this one transition so a dead proposal can carry an
  * auditable reason instead of being an unannotatable zombie (issue #141).
@@ -40,7 +40,10 @@ export class RejectProposalUseCase {
       };
     }
 
-    const event = proposal.status === "open" ? ({ type: "DISCARD" } as const) : ({ type: "REJECT" } as const);
+    const event =
+      proposal.status === "open" || proposal.status === "controlled"
+        ? ({ type: "DISCARD" } as const)
+        : ({ type: "REJECT" } as const);
     const dispatched = dispatchProposalEvent(proposal, event, { clock: this.dependencies.clock });
     if (!dispatched.ok) return dispatched;
 

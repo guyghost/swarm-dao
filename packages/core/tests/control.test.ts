@@ -89,6 +89,59 @@ describe("control/gates", () => {
     const quorumGate = result.gates.find((g) => g.gateId === "quorum-quality");
     expect(quorumGate).toBeDefined();
     expect(quorumGate?.passed).toBe(true);
-    expect(quorumGate?.message).toContain("50% ≥ 40%");
+    expect(quorumGate?.message).toContain("50%");
+    expect(quorumGate?.message).toContain("40%");
+  });
+
+  it("fails type-specific-quality when approval is below the type bar", () => {
+    const proposal = {
+      id: 3,
+      title: "Auth change",
+      type: "security-change" as const,
+      description: "Security proposal",
+      proposedBy: "test",
+      status: "approved" as const,
+      votes: [
+        { agentId: "a", agentName: "A", position: "for" as const, reasoning: "ok", weight: 3 },
+        { agentId: "b", agentName: "B", position: "for" as const, reasoning: "ok", weight: 3 },
+        { agentId: "c", agentName: "C", position: "against" as const, reasoning: "no", weight: 3 },
+      ],
+      agentOutputs: [],
+      acceptanceCriteria: ["Reviewed"],
+      createdAt: new Date().toISOString(),
+    };
+
+    const result = runGates(proposal, DEFAULT_CONFIG);
+    const gate = result.gates.find((item) => item.gateId === "type-specific-quality");
+    expect(gate?.passed).toBe(false);
+    expect(gate?.severity).toBe("blocker");
+    expect(result.blockerCount).toBeGreaterThan(0);
+  });
+
+  it("fails dependency-conflict when in-flight proposals share affected paths", () => {
+    const proposal = {
+      id: 4,
+      title: "Touch auth",
+      type: "technical-change" as const,
+      description: "desc",
+      proposedBy: "test",
+      status: "approved" as const,
+      votes: [{ agentId: "a", agentName: "A", position: "for" as const, reasoning: "ok", weight: 3 }],
+      agentOutputs: [],
+      affectedPaths: ["src/auth/login.ts"],
+      acceptanceCriteria: ["ok"],
+      createdAt: new Date().toISOString(),
+    };
+    const other = {
+      ...proposal,
+      id: 5,
+      title: "Other auth work",
+      status: "controlled" as const,
+    };
+
+    const result = runGates(proposal, DEFAULT_CONFIG, { allProposals: [proposal, other] });
+    const gate = result.gates.find((item) => item.gateId === "dependency-conflict");
+    expect(gate?.passed).toBe(false);
+    expect(gate?.message).toContain("#5");
   });
 });

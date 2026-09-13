@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -376,6 +376,31 @@ describe("product runner — observation rollback scenario (scenario 2)", () => 
       );
       expect(threeSampleEval.accepted).toBe(true);
       expect(runner.snapshot().state).toBe("validated");
+    } finally {
+      await rm(evidenceRoot, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("product runner — concurrent writers", () => {
+  it("fails fast instead of corrupting journal.ndjson when another runner advanced it", async () => {
+    const evidenceRoot = await mkdtemp(join(tmpdir(), "product-runner-concurrent-"));
+    const runId = "product-runner-concurrent";
+    try {
+      const a = await createProductRunner({ evidenceRoot, runId });
+      await a.submit(signal(runId, "PROPOSAL_DRAFTED", "ai", "proposer", draftPayload, ["benchmark"]));
+
+      const b = await createProductRunner({ evidenceRoot, runId });
+      const rejected = await b.submit(signal(runId, "PROPOSAL_DRAFTED", "human", "proposer", draftPayload, ["forged"]));
+      expect(rejected.accepted).toBe(false);
+
+      await expect(a.submit(signal(runId, "OPEN_PROPOSITION", "tool", "proposition-gate"))).rejects.toThrow(
+        /concurrent product runner detected/,
+      );
+
+      const journal = (await readFile(join(evidenceRoot, runId, "journal.ndjson"), "utf8")).trim().split("\n");
+      expect(journal).toHaveLength(2);
+      expect(JSON.parse(journal[1])).toMatchObject({ sequence: 2, accepted: false });
     } finally {
       await rm(evidenceRoot, { recursive: true, force: true });
     }

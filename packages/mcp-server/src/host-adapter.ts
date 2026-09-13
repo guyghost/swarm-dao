@@ -1,8 +1,35 @@
+import { existsSync, realpathSync, statSync } from "node:fs";
+import path from "node:path";
 import type { HostAdapter } from "@guyghost/swarm-dao-core";
 import { execCommand, readFileContained, writeFileContained } from "@guyghost/swarm-dao-core";
 
 export function resolveDaoRoot(): string {
-  return process.env.DAO_ROOT?.trim() || process.cwd();
+  const raw = process.env.DAO_ROOT;
+  if (raw == null) {
+    return process.cwd();
+  }
+  const trimmed = raw.trim();
+  if (trimmed === "") {
+    throw new Error("DAO_ROOT is empty");
+  }
+  if (trimmed.includes("\0")) {
+    throw new Error("DAO_ROOT contains a null byte");
+  }
+  const resolved = path.resolve(trimmed);
+  if (!path.isAbsolute(resolved)) {
+    throw new Error("DAO_ROOT must resolve to an absolute path");
+  }
+  if (!existsSync(resolved)) {
+    throw new Error(`DAO_ROOT does not exist: ${resolved}`);
+  }
+  const real = realpathSync(resolved);
+  if (!path.isAbsolute(real)) {
+    throw new Error("DAO_ROOT must resolve to an absolute real path");
+  }
+  if (!statSync(real).isDirectory()) {
+    throw new Error(`DAO_ROOT is not a directory: ${real}`);
+  }
+  return real;
 }
 
 /**

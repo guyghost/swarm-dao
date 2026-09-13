@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import {
+  PRODUCT_MEMBER_QUOTA_RENEWAL_MINUTES,
   PRODUCT_OBSERVATION_CONSECUTIVE_MEASUREMENTS,
   PRODUCT_VOTE_EXPIRY_HOURS,
   REQUIRED_PRODUCT_ANCHORS,
@@ -149,6 +150,9 @@ export const validateProductContract = async (rootDirectory: string): Promise<Pr
   }
   if (graph.observationConsecutiveMeasurements !== PRODUCT_OBSERVATION_CONSECUTIVE_MEASUREMENTS) {
     issues.push("observation threshold drifted from the XState model");
+  }
+  if (graph.memberQuotaRenewalMinutes !== PRODUCT_MEMBER_QUOTA_RENEWAL_MINUTES) {
+    issues.push("member quota renewal drifted from the XState model");
   }
 
   const anchors = strings(graph.requiredAnchors);

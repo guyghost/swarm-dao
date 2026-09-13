@@ -126,14 +126,31 @@ export function createTmuxHostAdapter(options: TmuxAdapterOptions): HostAdapter 
   const prefix = sanitizeSessionName(options.sessionPrefix ?? "swarm-dao");
   const keepSessions = options.keepSessions === true;
 
-  /** Resolve adapter file access against workDir, contained (like other hosts). */
-  const containedPath = (file: string): string => {
-    const resolved = path.resolve(options.workDir, file);
-    const root = path.resolve(options.workDir);
+  /** Containment must hold even for files that do not exist yet. */
+  const realPathOf = async (target: string): Promise<string> => {
+    let current = target;
+    const tail: string[] = [];
+    for (;;) {
+      const real = await fs.realpath(current).catch(() => null);
+      if (real !== null) {
+        return tail.length === 0 ? real : path.join(real, ...[...tail].reverse());
+      }
+      const parent = path.dirname(current);
+      if (parent === current) return target;
+      tail.push(path.basename(current));
+      current = parent;
+    }
+  };
+
+  /** Resolve adapter file access against workDir, contained (like other hosts).
+   * Symlinks are resolved: a repo symlink cannot escape the root. */
+  const containedPath = async (file: string): Promise<string> => {
+    const root = await fs.realpath(path.resolve(options.workDir)).catch(() => path.resolve(options.workDir));
+    const resolved = await realPathOf(path.resolve(root, file));
     if (resolved !== root && !resolved.startsWith(`${root}${path.sep}`)) {
       throw new Error(`path escapes the working directory: ${file}`);
     }
-    return resolved;
+    return path.resolve(root, file);
   };
 
   const prepare = async (proposal: Proposal, agent: DAOAgent, prompt: string): Promise<PreparedRun> => {
@@ -281,8 +298,8 @@ export function createTmuxHostAdapter(options: TmuxAdapterOptions): HostAdapter 
       await fs.appendFile(path.join(options.workDir, ".dao", "tmux.log"), `${line}\n`, "utf8").catch(() => undefined);
     },
     getWorkingDirectory: () => options.workDir,
-    readFile: async (file) => fs.readFile(containedPath(file), "utf8"),
-    writeFile: async (file, content) => fs.writeFile(containedPath(file), content, "utf8"),
+    readFile: async (file) => fs.readFile(await containedPath(file), "utf8"),
+    writeFile: async (file, content) => fs.writeFile(await containedPath(file), content, "utf8"),
     exec: (command, execOptions) =>
       execAsync(command, { cwd: execOptions?.cwd, timeout: execOptions?.timeout })
         .then(({ stdout, stderr }) => ({ stdout: String(stdout), stderr: String(stderr), exitCode: 0 }))

@@ -1,4 +1,3 @@
-import path from "node:path";
 import type {
   AttentionSource,
   DaoStateRepositoryPort,
@@ -46,6 +45,7 @@ import { advanceSeriesOnce, OrchestratorRunner } from "@guyghost/swarm-dao-impro
 import { createProductRunner, PRODUCT_AI_EVENT_TYPES, submitAiProductSignal } from "@guyghost/swarm-dao-product";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { resolveContainedRoot } from "./contained-root.js";
 import { createMcpHostAdapter, resolveDaoRoot } from "./host-adapter.js";
 
 type TextResult = { content: Array<{ type: "text"; text: string }>; isError?: boolean };
@@ -590,7 +590,7 @@ export function createSwarmDaoMcpServer(workDir = resolveDaoRoot(), repository?:
           if (!seriesId) throw new Error("seriesId is required");
           const runner = await OrchestratorRunner.create({
             seriesId,
-            evidenceRoot: path.resolve(
+            evidenceRoot: await resolveContainedRoot(
               ctx.workDir,
               typeof args.evidenceRoot === "string" ? args.evidenceRoot : ".dao/improvement-series",
             ),
@@ -613,7 +613,7 @@ export function createSwarmDaoMcpServer(workDir = resolveDaoRoot(), repository?:
           const runId = String(args.runId ?? "").trim();
           if (!runId) throw new Error("runId is required");
           const runner = await createGraphRunner({
-            evidenceRoot: path.resolve(
+            evidenceRoot: await resolveContainedRoot(
               ctx.workDir,
               typeof args.evidenceRoot === "string" ? args.evidenceRoot : ".dao/graph-runs",
             ),
@@ -625,7 +625,7 @@ export function createSwarmDaoMcpServer(workDir = resolveDaoRoot(), repository?:
           const parsed = parseRunSubmitArgs(args);
           // The package-level AI channel owns the source: AI artifacts only.
           const result = await submitAiGraphSignal(
-            { evidenceRoot: path.resolve(ctx.workDir, parsed.evidenceRoot ?? ".dao/graph-runs") },
+            { evidenceRoot: await resolveContainedRoot(ctx.workDir, parsed.evidenceRoot ?? ".dao/graph-runs") },
             {
               runId: parsed.runId,
               type: args.type as (typeof GRAPH_AI_EVENT_TYPES)[number],
@@ -641,7 +641,7 @@ export function createSwarmDaoMcpServer(workDir = resolveDaoRoot(), repository?:
           const runId = String(args.runId ?? "").trim();
           if (!runId) throw new Error("runId is required");
           const runner = await createProductRunner({
-            evidenceRoot: path.resolve(
+            evidenceRoot: await resolveContainedRoot(
               ctx.workDir,
               typeof args.evidenceRoot === "string" ? args.evidenceRoot : ".dao/product-loops",
             ),
@@ -652,7 +652,7 @@ export function createSwarmDaoMcpServer(workDir = resolveDaoRoot(), repository?:
         case "dao_product_submit": {
           const parsed = parseRunSubmitArgs(args);
           const result = await submitAiProductSignal(
-            { evidenceRoot: path.resolve(ctx.workDir, parsed.evidenceRoot ?? ".dao/product-loops") },
+            { evidenceRoot: await resolveContainedRoot(ctx.workDir, parsed.evidenceRoot ?? ".dao/product-loops") },
             {
               runId: parsed.runId,
               type: args.type as (typeof PRODUCT_AI_EVENT_TYPES)[number],

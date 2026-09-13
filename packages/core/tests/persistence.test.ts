@@ -162,6 +162,18 @@ describe("persistence", () => {
     }
   });
 
+  it("loadState throws on invalid JSON instead of pretending the DAO is empty", async () => {
+    const cwd = `/tmp/dao-corrupt-json-test-${Date.now()}`;
+    try {
+      await initStorage(cwd);
+      await fs.writeFile(`${getDaoRoot(cwd)}/state.json`, "{not-json", "utf-8");
+      await expect(loadState(cwd)).rejects.toThrow(/Corrupt DAO state/);
+    } finally {
+      setState(null);
+      await fs.rm(cwd, { recursive: true, force: true }).catch(() => {});
+    }
+  });
+
   it("loadState repairs corrupted state.json missing proposals, agents, and auditLog", async () => {
     const cwd = `/tmp/dao-corruption-test-${Date.now()}`;
 
@@ -420,18 +432,21 @@ describe("persistence", () => {
       await saveState();
 
       const writeSpy = spyOn(fs, "writeFile");
+      const contentWrites = () =>
+        writeSpy.mock.calls.filter((call) => typeof call[0] === "string" && !call[0].endsWith("state.lock"));
 
-      // 1) No-op save: nothing changed since the previous save -> no writes.
+      // 1) No-op save: nothing changed since the previous save -> no content writes
+      //    (the inter-process lock may still touch state.lock).
       writeSpy.mockClear();
       await saveState();
-      expect(writeSpy.mock.calls.length).toBe(0);
+      expect(contentWrites().length).toBe(0);
 
       // 2) Mutating save via recordAudit: only auditLog changes, which lives in
       //    state.json. Without dedup this rewrites state.json + every sidecar +
       //    every decision file; with dedup it writes just state.json.
       writeSpy.mockClear();
       await recordAudit(p1.id, "governance", "perf_probe", "user", "noop");
-      expect(writeSpy.mock.calls.length).toBe(1);
+      expect(contentWrites().length).toBe(1);
 
       writeSpy.mockRestore();
     } finally {

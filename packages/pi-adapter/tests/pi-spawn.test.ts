@@ -207,18 +207,18 @@ describe("pi adapter spawnAgent default-on", () => {
     expect(grounded.length).toBe(8);
   });
 
-  it("SWARM_DAO_DISABLE_PI_SPAWN=1 skips spawning and marks output simulated", async () => {
+  it("SWARM_DAO_DISABLE_PI_SPAWN=1 skips spawning and fails closed", async () => {
     process.env.SWARM_DAO_DISABLE_PI_SPAWN = "1";
     const { run, getState } = await setupRoundtable();
 
     const output = await run();
 
     expect(spawnCalls.length).toBe(0);
-    expect(output).toContain("Simulated fallback output");
-    expect(output).toContain("Tighten proposal quality gates");
-    // The marker travels into proposals created from simulated suggestions.
+    expect(output).not.toContain("## Vote");
+    expect(output).not.toContain("Simulated fallback output");
+    expect(output).not.toMatch(/^##[ \t]*vote[ \t]*$/im);
     const canned = getState().proposals.filter((p) => p.description.includes("Simulated fallback output"));
-    expect(canned.length).toBe(8);
+    expect(canned.length).toBe(0);
   });
 
   it("legacy SWARM_DAO_ENABLE_PI_SPAWN=0 still disables spawning", async () => {
@@ -228,19 +228,47 @@ describe("pi adapter spawnAgent default-on", () => {
     const output = await run();
 
     expect(spawnCalls.length).toBe(0);
-    expect(output).toContain("Simulated fallback output");
+    expect(output).not.toContain("## Vote");
+    expect(output).not.toContain("Simulated fallback output");
   });
 
-  it("marks output simulated when the subprocess fails", async () => {
+  it("fails closed when the subprocess fails and does not produce a vote-parseable body", async () => {
     spawnExit = { code: 1, stderr: "pi: model unavailable" };
     const { run, getState } = await setupRoundtable();
 
     const output = await run();
 
     expect(spawnCalls.length).toBe(8);
-    expect(output).toContain("Simulated fallback output");
-    expect(output).toContain("Tighten proposal quality gates");
+    expect(output).not.toContain("## Vote");
+    expect(output).not.toContain("Simulated fallback output");
+    expect(output).not.toMatch(/^##[ \t]*vote[ \t]*$/im);
     const grounded = getState().proposals.filter((p) => p.title.startsWith("Grounded fix from live spawn"));
     expect(grounded.length).toBe(0);
+  });
+
+  it("spawn failure on deliberation does not produce a vote-parseable body", async () => {
+    spawnExit = { code: 1, stderr: "pi: model unavailable" };
+    const { createPiHostAdapter } = await import("@guyghost/swarm-dao-pi-adapter");
+    const { parseVoteFromOutput } = await import("@guyghost/swarm-dao-core");
+    const adapter = createPiHostAdapter(createMockPi().pi);
+    const output = await adapter.spawnAgent({
+      agent: { id: "critic", name: "Critic", role: "reviewer", description: "", weight: 1, systemPrompt: "s" },
+      proposal: {
+        id: 1,
+        title: "Ship feature",
+        type: "product-feature",
+        description: "d",
+        proposedBy: "t",
+        status: "deliberating",
+        votes: [],
+        agentOutputs: [],
+        createdAt: new Date().toISOString(),
+      },
+      systemPrompt: "prompt",
+      model: "test/model",
+    });
+    expect(output.error).toBeTruthy();
+    expect(output.content).not.toMatch(/^##[ \t]*vote[ \t]*$/im);
+    expect(parseVoteFromOutput(output.agentId, output.agentName, 1, output.content)).toBeUndefined();
   });
 });

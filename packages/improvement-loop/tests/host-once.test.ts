@@ -103,6 +103,22 @@ describe("advanceSeriesOnce", () => {
     expect(snapshot.cycleId).toBe("s-cyc-1-c1");
   });
 
+  it("rejects an absolute evidence root", async () => {
+    const root = await gitRepo("absroot");
+    roots.push(root);
+    await expect(
+      advanceSeriesOnce({ seriesId: "s-abs", workDir: root, evidenceRoot: "/tmp/evil-evidence" }),
+    ).rejects.toThrow(/absolute paths are not allowed/);
+  });
+
+  it("rejects an evidence root that escapes the workDir", async () => {
+    const root = await gitRepo("escroot");
+    roots.push(root);
+    await expect(advanceSeriesOnce({ seriesId: "s-esc", workDir: root, evidenceRoot: "../outside" })).rejects.toThrow(
+      /Path traversal denied/,
+    );
+  });
+
   it("throws outside a git repository", async () => {
     // Outside any repo (os tmpdir): inside the swarm-dao checkout, git would
     // discover the parent repository and carve worktrees into it.

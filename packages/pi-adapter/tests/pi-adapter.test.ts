@@ -273,7 +273,7 @@ describe("swarmDaoExtension", () => {
       const result = await tool?.execute("test-id", {
         runId: "g2",
         type: "MODEL_DRAFTED",
-        producer: "claude",
+        producer: "modeler",
         payload: JSON.stringify({ modelHash: "deadbeef" }),
         evidence: ["evidence/g2/model.md"],
       });
@@ -286,7 +286,7 @@ describe("swarmDaoExtension", () => {
         .trim()
         .split("\n")
         .map((line) => JSON.parse(line));
-      expect(journal[0].signal).toMatchObject({ type: "MODEL_DRAFTED", source: "ai", producer: "claude" });
+      expect(journal[0].signal).toMatchObject({ type: "MODEL_DRAFTED", source: "ai", producer: "modeler" });
     });
 
     it("dao_graph_submit reports invalid payload JSON instead of throwing", async () => {
@@ -316,6 +316,17 @@ describe("swarmDaoExtension", () => {
       const snapshot = JSON.parse(text) as { seriesId: string; state: string };
       expect(snapshot.seriesId).toBe("probe");
       expect(snapshot.state).toBe("idle");
+    });
+
+    it("dao_graph_status rejects an absolute evidenceRoot", async () => {
+      const mod = await import("@guyghost/swarm-dao-pi-adapter");
+      const pi = createMockPi();
+      mod.default(pi);
+
+      const tool = pi.tools.find((t) => t.name === "dao_graph_status");
+      await expect(tool?.execute("test-id", { runId: "g-escape", evidenceRoot: "/tmp/evil" })).rejects.toThrow(
+        /absolute paths are not allowed/,
+      );
     });
 
     it("dao_improve_once is a no-op for a fresh idle series", async () => {
@@ -683,7 +694,9 @@ describe("swarmDaoExtension", () => {
       expect(result).toContain("Proposal #1 not found");
     });
 
-    it("/dao roundtable executes the tool and creates proposals", async () => {
+    it("/dao roundtable executes the tool and fails closed without canned proposals", async () => {
+      const previousSpawn = process.env.SWARM_DAO_DISABLE_PI_SPAWN;
+      process.env.SWARM_DAO_DISABLE_PI_SPAWN = "1";
       const { initStorage, setState, getOrCreateState, initializeAgents, getState } = await import(
         "@guyghost/swarm-dao-core"
       );
@@ -699,11 +712,16 @@ describe("swarmDaoExtension", () => {
 
       const daoCommand = pi.commands.find((c) => c.name === "dao");
       const commandCtx = createMockCommandContext();
-      await daoCommand?.handler("roundtable", commandCtx.ctx);
-      const result = commandCtx.rendered();
-      expect(result).toContain("# 🎯 Round Table Results");
-      // The slash command mutated state exactly like the dao_roundtable tool.
-      expect(getState().proposals.length).toBe(8);
+      try {
+        await daoCommand?.handler("roundtable", commandCtx.ctx);
+        const result = commandCtx.rendered();
+        expect(result).toContain("# 🎯 Round Table Results");
+        expect(result).not.toContain("## Vote");
+        expect(getState().proposals.length).toBe(0);
+      } finally {
+        if (previousSpawn === undefined) delete process.env.SWARM_DAO_DISABLE_PI_SPAWN;
+        else process.env.SWARM_DAO_DISABLE_PI_SPAWN = previousSpawn;
+      }
     });
 
     it("/dao propose executes the propose tool with quoted arguments", async () => {
@@ -1356,10 +1374,9 @@ describe("swarmDaoExtension", () => {
   // ── dao_deliberate tool ──────────────────────────────────
 
   describe("dao_deliberate tool", () => {
-    it("produces agent votes instead of failing with unimplemented spawning", async () => {
-      const { initStorage, setState, getOrCreateState, initializeAgents, getProposal } = await import(
-        "@guyghost/swarm-dao-core"
-      );
+    it("fails closed on spawn failure without a vote-parseable body", async () => {
+      const { initStorage, setState, getOrCreateState, initializeAgents, getProposal, parseVoteFromOutput } =
+        await import("@guyghost/swarm-dao-core");
       await initStorage(process.cwd());
       const state = getOrCreateState(process.cwd());
       state.initialized = true;
@@ -1384,10 +1401,15 @@ describe("swarmDaoExtension", () => {
       const text = result.content[0]?.text ?? "";
 
       expect(text).toContain("Deliberation Complete");
-      expect(text).not.toContain("Votes Cast:** 0 /");
+      expect(text).toContain("Votes Cast:** 0 /");
+      expect(text).toContain("Errors:** 8");
 
       const proposal = getProposal(1);
-      expect(proposal?.votes.length).toBeGreaterThan(0);
+      expect(proposal?.votes.length).toBe(0);
+      for (const output of proposal?.agentOutputs ?? []) {
+        expect(output.error).toBeTruthy();
+        expect(parseVoteFromOutput(output.agentId, output.agentName, 1, output.content)).toBeUndefined();
+      }
     });
   });
 

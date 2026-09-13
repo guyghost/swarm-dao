@@ -4,6 +4,7 @@
 
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { writeAtomic } from "./persistence.js";
 import { composeSystemPrompt } from "./governance/charter.js";
 import type { RuntimeConfig } from "./intelligence/runtime.js";
 import { isValidHarnessId, isValidModelFlag } from "./intelligence/runtime.js";
@@ -344,7 +345,7 @@ export async function saveConfig(daoRoot: string, config: ProjectConfig): Promis
   const configPath = getConfigPath(daoRoot);
   const redacted = redactSensitiveFields(config);
   await fs.mkdir(daoRoot, { recursive: true });
-  await fs.writeFile(configPath, JSON.stringify(redacted, null, 2), "utf-8");
+  await writeAtomic(configPath, `${JSON.stringify(redacted, null, 2)}\n`);
 }
 
 export function mergeConfig(base: DAOConfig, overrides: Partial<DAOConfig>): DAOConfig {

@@ -122,7 +122,7 @@ export const DAO_COMMANDS: readonly DaoCommand[] = [
     tool: "dao_ship",
     mutating: true,
     args: "proposalId [cascade] [force]",
-    hosts: ["mcp", "claude", "copilot", "codex", "pi"],
+    hosts: ["mcp", "claude", "copilot", "codex", "pi", "opencode"],
   },
   {
     id: "rollback",
@@ -284,7 +284,7 @@ export const DAO_COMMANDS: readonly DaoCommand[] = [
     tool: "dao_rate",
     mutating: true,
     args: "proposalId score comment",
-    hosts: ["mcp", "claude", "copilot", "codex", "pi"],
+    hosts: ["mcp", "claude", "copilot", "codex", "pi", "opencode"],
   },
   {
     id: "update-proposal",
@@ -293,7 +293,7 @@ export const DAO_COMMANDS: readonly DaoCommand[] = [
     tool: "dao_update_proposal",
     mutating: true,
     args: "proposalId [problemStatement] [acceptanceCriteria] [successMetrics] [rollbackConditions]",
-    hosts: ["mcp", "claude", "copilot", "codex", "pi"],
+    hosts: ["mcp", "claude", "copilot", "codex", "pi", "opencode"],
   },
   {
     id: "check-edit",

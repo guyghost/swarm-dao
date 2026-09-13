@@ -3,6 +3,7 @@
 // ============================================================
 
 import { allCoordinatorsClosed } from "../governance/delegation.utils.js";
+import { resolveTypeThresholds, tallyVotes } from "../governance/voting.js";
 import type { ChecklistItem, ControlCheckResult, DAOConfig, GateResult, Proposal } from "../types/index.js";
 import { PROPOSAL_TYPE, TYPE_QUORUM } from "../types/index.js";
 
@@ -25,21 +26,20 @@ const GATES: GateDefinition[] = [
     name: "Quorum Quality",
     severity: "blocker",
     check: (proposal, config) => {
-      const votes = proposal.votes || [];
-      const eligibleAgents = (proposal.agentOutputs || []).filter((o) => !o.error);
-      const totalAgents = Math.max(eligibleAgents.length, votes.length, 1);
-      const quorumRequired =
-        config.typeQuorum[proposal.type]?.quorumPercent ??
-        TYPE_QUORUM[proposal.type]?.quorumPercent ??
-        config.quorumPercent;
-      const votingPercent = (votes.length / totalAgents) * 100;
-      const quorumMet = votes.length > 0 && votingPercent >= quorumRequired;
+      const tally = tallyVotes(proposal, config);
+      const required = resolveTypeThresholds(proposal, config).quorumPercent;
       return {
-        passed: quorumMet,
-        message: quorumMet
-          ? `Quorum met (${votes.length}/${totalAgents} agents voted — ${votingPercent.toFixed(0)}% ≥ ${quorumRequired}%)`
-          : `Quorum not met (${votes.length}/${totalAgents} agents voted — ${votingPercent.toFixed(0)}% < ${quorumRequired}%)`,
-        details: { votes: votes.length, totalAgents, votingPercent, quorumRequired },
+        passed: tally.quorumMet,
+        message: tally.quorumMet
+          ? `Quorum met (${tally.quorumPercent}% weighted participation ≥ ${required}%)`
+          : `Quorum not met (${tally.quorumPercent}% weighted participation < ${required}%)`,
+        details: {
+          quorumPercent: tally.quorumPercent,
+          quorumRequired: required,
+          votingAgents: tally.votingAgents,
+          totalAgents: tally.totalAgents,
+          totalVotingWeight: tally.totalVotingWeight,
+        },
       };
     },
   },
@@ -157,8 +157,40 @@ const GATES: GateDefinition[] = [
     id: "dependency-conflict",
     name: "Dependency Conflict",
     severity: "warning",
-    check: (_proposal, _config) => {
-      return { passed: true, message: "No dependency conflicts detected" };
+    check: (proposal, _config, allProposals) => {
+      const mine = new Set(
+        (proposal.affectedPaths ?? []).map((entry) => entry.trim().replace(/\\/g, "/")).filter(Boolean),
+      );
+      if (mine.size === 0) {
+        return { passed: true, message: "No affected paths declared" };
+      }
+      if (!allProposals) {
+        return {
+          passed: true,
+          message: "Dependency conflicts could not be verified — please verify manually",
+          details: { verifyManually: true },
+        };
+      }
+
+      const conflicts: string[] = [];
+      for (const other of allProposals) {
+        if (other.id === proposal.id) continue;
+        if (other.status === "rejected" || other.status === "executed") continue;
+        const overlap = (other.affectedPaths ?? [])
+          .map((entry) => entry.trim().replace(/\\/g, "/"))
+          .filter((entry) => mine.has(entry));
+        if (overlap.length > 0) {
+          conflicts.push(`#${other.id} (${other.status}): ${overlap.join(", ")}`);
+        }
+      }
+      if (conflicts.length > 0) {
+        return {
+          passed: false,
+          message: `Overlapping affected paths with in-flight proposals: ${conflicts.join("; ")}`,
+          details: { conflicts },
+        };
+      }
+      return { passed: true, message: "No overlapping affected paths with in-flight proposals" };
     },
   },
   {
@@ -179,13 +211,23 @@ const GATES: GateDefinition[] = [
   {
     id: "type-specific-quality",
     name: "Type-Specific Quality",
-    severity: "warning",
-    check: (proposal, _config) => {
-      const typeQuorum = TYPE_QUORUM[proposal.type];
+    severity: "blocker",
+    check: (proposal, config) => {
+      const typeQuorum = config.typeQuorum[proposal.type] ?? TYPE_QUORUM[proposal.type];
       if (!typeQuorum) return { passed: true, message: "No type-specific requirements" };
+      const tally = tallyVotes(proposal, config);
+      const passed = tally.quorumMet && tally.approvalScore >= typeQuorum.approvalPercent;
       return {
-        passed: true,
-        message: `${proposal.type}: quorum=${typeQuorum.quorumPercent}%, approval=${typeQuorum.approvalPercent}%`,
+        passed,
+        message: passed
+          ? `${proposal.type}: approval ${tally.approvalScore}% ≥ ${typeQuorum.approvalPercent}%, quorum ${tally.quorumPercent}% ≥ ${typeQuorum.quorumPercent}%`
+          : `${proposal.type}: approval ${tally.approvalScore}% / quorum ${tally.quorumPercent}% below type thresholds (approval ${typeQuorum.approvalPercent}%, quorum ${typeQuorum.quorumPercent}%)`,
+        details: {
+          approvalScore: tally.approvalScore,
+          approvalRequired: typeQuorum.approvalPercent,
+          quorumPercent: tally.quorumPercent,
+          quorumRequired: typeQuorum.quorumPercent,
+        },
       };
     },
   },

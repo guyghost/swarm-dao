@@ -174,6 +174,14 @@ async function resolveContainedPath(filePath: string, baseDir: string): Promise<
   return resolvedPath;
 }
 
+/**
+ * Resolve a caller-supplied root (evidence, cycle, series) so it cannot escape
+ * `workDir`. Absolute paths, `..` segments, and symlink escapes are refused.
+ */
+export async function resolveContainedRoot(workDir: string, root: string): Promise<string> {
+  return resolveContainedPath(root, workDir);
+}
+
 /** Read a file as UTF-8, with optional path containment enforcement. */
 export async function readFileContained(filePath: string, baseDir?: string): Promise<string> {
   if (baseDir) {

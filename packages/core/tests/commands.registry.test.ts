@@ -113,12 +113,11 @@ describe("getDaoCommands / getDaoCommandsByPhase", () => {
     expect(mcp.some((c) => c.id === "github-config")).toBe(true);
   });
 
-  it("filters OpenCode commands correctly (excludes rate, update-proposal, ship)", () => {
+  it("filters OpenCode commands correctly (includes ship / rate / update-proposal)", () => {
     const opencode = getDaoCommands("opencode");
-    // OpenCode does NOT have these tools
-    expect(opencode.some((c) => c.id === "rate")).toBe(false);
-    expect(opencode.some((c) => c.id === "update-proposal")).toBe(false);
-    expect(opencode.some((c) => c.id === "ship")).toBe(false);
+    expect(opencode.some((c) => c.id === "rate")).toBe(true);
+    expect(opencode.some((c) => c.id === "update-proposal")).toBe(true);
+    expect(opencode.some((c) => c.id === "ship")).toBe(true);
     // GitHub integration is exposed on every host surface
     expect(opencode.some((c) => c.id === "github-config")).toBe(true);
     expect(opencode.some((c) => c.id === "github-branch")).toBe(true);
