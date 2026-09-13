@@ -123,12 +123,14 @@ jobs:
 
       # Runner timings are not comparable across machines, so the baseline is
       # the previous run of this job, restored from cache.
+      # v2: re-baseline after 9eee0bf (inter-process persist lock) made the
+      # persistence suite permanently slower than the pre-lock baseline.
       - name: Restore benchmark baseline
         uses: actions/cache/restore@v4
         with:
           path: packages/benchmarks/benchmark-baseline.json
-          key: benchmark-baseline-${{ runner.os }}-${{ github.sha }}
-          restore-keys: benchmark-baseline-${{ runner.os }}-
+          key: benchmark-baseline-v2-${{ runner.os }}-${{ github.sha }}
+          restore-keys: benchmark-baseline-v2-${{ runner.os }}-
 
       - name: Run benchmarks
         run: bun run bench:ci
@@ -141,7 +143,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: packages/benchmarks/benchmark-baseline.json
-          key: benchmark-baseline-${{ runner.os }}-${{ github.sha }}
+          key: benchmark-baseline-v2-${{ runner.os }}-${{ github.sha }}
 
       - name: Upload benchmark results
         uses: actions/upload-artifact@v4

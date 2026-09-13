@@ -33,23 +33,31 @@ export class FileDaoStateRepository implements DaoStateRepositoryPort {
   private readonly writeCache = new Map<string, string>();
   private writeQueue: Promise<void> = Promise.resolve();
 
+  /** Last state.json content this instance read or wrote, for cheap divergence checks. */
+  private rawStateOnDisk: string | null;
+
   private constructor(
     private readonly state: DAOState,
     private readonly daoRoot: string,
-  ) {}
+    rawStateOnDisk: string | null,
+  ) {
+    this.rawStateOnDisk = rawStateOnDisk;
+  }
 
   public static async open(cwd: string): Promise<FileDaoStateRepository> {
     const daoRoot = path.join(cwd, ".dao");
     await fs.mkdir(daoRoot, { recursive: true });
     const statePath = path.join(daoRoot, "state.json");
     let state = createInitialState(daoRoot);
+    let rawState: string | null = null;
     try {
-      const parsed = JSON.parse(await fs.readFile(statePath, "utf8")) as Partial<DAOState>;
-      state = repairState(parsed, daoRoot);
+      rawState = await fs.readFile(statePath, "utf8");
+      state = repairState(JSON.parse(rawState) as Partial<DAOState>, daoRoot);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      rawState = null;
     }
-    return new FileDaoStateRepository(state, daoRoot);
+    return new FileDaoStateRepository(state, daoRoot, rawState);
   }
 
   public get(): DAOState {
@@ -58,10 +66,15 @@ export class FileDaoStateRepository implements DaoStateRepositoryPort {
 
   public async persist(): Promise<void> {
     const task = async (): Promise<void> => {
+      // No-op persist: nothing to write means no writer, so neither the
+      // inter-process lock nor the on-disk concurrency check is needed.
+      if (!this.hasPendingWrites()) return;
       await fs.mkdir(this.daoRoot, { recursive: true });
       await withFileLock(this.daoRoot, async () => {
         await this.checkNoConcurrentModification();
-        await this.writeIfChanged(path.join(this.daoRoot, "state.json"), this.state);
+        const statePath = path.join(this.daoRoot, "state.json");
+        await this.writeIfChanged(statePath, this.state);
+        this.rawStateOnDisk = this.writeCache.get(statePath) ?? null;
         await this.persistDecisions();
       });
     };
@@ -71,18 +84,41 @@ export class FileDaoStateRepository implements DaoStateRepositoryPort {
   }
 
   /**
+   * Whether persist() would write anything. Mirrors the per-file decisions in
+   * writeIfChanged/persistDecisions: when every serialized payload matches the
+   * write cache, persist is a no-op and can skip lock, check and I/O.
+   */
+  private hasPendingWrites(): boolean {
+    if (this.writeCache.get(path.join(this.daoRoot, "state.json")) !== formatJson(this.state)) return true;
+    const decisions = this.closedDecisions();
+    if (this.writeCache.get(path.join(this.daoRoot, "decisions", "index.json")) !== formatJson(decisions)) {
+      return true;
+    }
+    return decisions.some(
+      (decision) =>
+        this.writeCache.get(path.join(this.daoRoot, "decisions", `${decision.id.toString().padStart(3, "0")}.json`)) !==
+        formatJson(decision),
+    );
+  }
+
+  /**
    * Fail-fast optimistic concurrency: if another process persisted a state
    * with proposals/ids we don't know about, refuse to overwrite it instead
    * of silently dropping votes/proposals (last-writer-wins).
    */
   private async checkNoConcurrentModification(): Promise<void> {
-    let onDisk: Partial<DAOState> | null = null;
+    let raw: string;
     try {
-      onDisk = JSON.parse(await fs.readFile(path.join(this.daoRoot, "state.json"), "utf8")) as Partial<DAOState>;
+      raw = await fs.readFile(path.join(this.daoRoot, "state.json"), "utf8");
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
       throw error;
     }
+    // Byte-identical to what this instance last read or wrote: no other
+    // writer touched the file. Avoids a full JSON.parse of a potentially
+    // large state on every persist.
+    if (raw === this.rawStateOnDisk) return;
+    const onDisk = JSON.parse(raw) as Partial<DAOState>;
     if (!onDisk || !Array.isArray(onDisk.proposals)) return;
     const diskIds = new Set(onDisk.proposals.map((p) => (p as { id?: unknown }).id));
     const memIds = new Set(this.state.proposals.map((p) => p.id));
@@ -103,10 +139,9 @@ export class FileDaoStateRepository implements DaoStateRepositoryPort {
     }
   }
 
-  private async persistDecisions(): Promise<void> {
-    const decisionsDir = path.join(this.daoRoot, "decisions");
-    await fs.mkdir(decisionsDir, { recursive: true });
-    const decisions = this.state.proposals
+  /** Decisions to persist: closed proposals only, ordered by id. Single source for persistDecisions and hasPendingWrites. */
+  private closedDecisions(): DecisionRecord[] {
+    return this.state.proposals
       .filter((proposal) => proposal.status !== "open" && proposal.status !== "deliberating")
       .map(
         (proposal): DecisionRecord => ({
@@ -120,6 +155,12 @@ export class FileDaoStateRepository implements DaoStateRepositoryPort {
         }),
       )
       .sort((left, right) => left.id - right.id);
+  }
+
+  private async persistDecisions(): Promise<void> {
+    const decisionsDir = path.join(this.daoRoot, "decisions");
+    await fs.mkdir(decisionsDir, { recursive: true });
+    const decisions = this.closedDecisions();
     await this.writeIfChanged(path.join(decisionsDir, "index.json"), decisions);
     await Promise.all(
       decisions.map((decision) =>
@@ -162,7 +203,7 @@ const LOCK_STALE_MS = 10000;
 
 async function withFileLock<T>(daoRoot: string, fn: () => Promise<T>): Promise<T> {
   const lockPath = path.join(daoRoot, LOCK_FILE);
-  await fs.mkdir(daoRoot, { recursive: true });
+  // Callers are responsible for creating daoRoot before locking.
   const deadline = Date.now() + LOCK_TIMEOUT_MS;
   for (;;) {
     try {
