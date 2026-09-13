@@ -58,41 +58,39 @@ jobs:
       - name: Type check
         run: bun run typecheck
 
-      - name: Test (per-file bisect)
-        # TEMPORARY (test-hang diagnosis): run each test file isolated with a
-        # hard timeout, then the full parallel run below. Bounded and additive.
-        run: |
-          set -u
-          hung=0; failed=0
-          for f in $(git ls-files '*.test.ts' | sort); do
-            if timeout 45 bun test "$f" > "/tmp/bisect.log" 2>&1; then
-              echo "ok        $f"
-            else
-              rc=$?
-              if [ "$rc" = "124" ]; then hung=1; echo "HANG(45s) $f"; else failed=1; echo "FAIL($rc)  $f"; fi
-              tail -25 /tmp/bisect.log | sed 's/^/    | /'
-            fi
-          done
-          echo "bisect summary: hung=$hung failed=$failed"
-
       - name: Test
+        # TEMPORARY (test-hang diagnosis): bun's stdout is block-buffered when
+        # piped, so the visible tail of a hung run may lag the real freeze
+        # point. Run under a PTY (script) for unbuffered output, and dump
+        # thread diagnostics from a watchdog WHILE bun is still alive (a
+        # post-timeout dump is useless: SIGTERM has already killed the
+        # process). Also print the runner's readdir order (find, unsorted).
         run: |
+          echo "readdir order:"; find packages -name '*.test.ts' | sed 's/^/  /'
           ( while :; do sleep 30; echo "[heartbeat] bun test still running $(date -u +%H:%M:%SZ)"; done ) &
           wd=$!
-          rc=0
-          timeout 420 bun test || rc=$?
-          kill $wd 2>/dev/null || true
-          if [ "$rc" = "124" ]; then
-            echo "bun test TIMED OUT after 420s; diagnostics:"
-            ps -ef --forest | head -80 || true
+          dump() {
+            echo "=== alive-dump $1 $(date -u +%H:%M:%SZ) ==="
+            ps auxww --forest || true
             for p in $(pgrep -f "bun test" || true); do
-              echo "--- pid $p status/wchan/fd ---"
-              grep -E "State|Threads" "/proc/$p/status" 2>/dev/null || true
-              ls -l "/proc/$p/fd" 2>/dev/null | head -30 || true
+              echo "--- pid $p ---"
+              tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null; echo
+              grep -E "State|Threads|VmRSS" "/proc/$p/status" 2>/dev/null || true
+              echo "fds:"; ls -l "/proc/$p/fd" 2>/dev/null || true
               for t in /proc/$p/task/*; do
-                echo "thread $(basename "$t"): $(cat "$t/wchan" 2>/dev/null || echo '?') $(grep State "$t/status" 2>/dev/null || true)"
+                echo "thread $(basename "$t"): wchan=$(cat "$t/wchan" 2>/dev/null || echo '?') $(grep State "$t/status" 2>/dev/null || true)"
               done
             done
+          }
+          ( sleep 90;  dump T90   ) &
+          d90=$!
+          ( sleep 300; dump T300 ) &
+          d300=$!
+          rc=0
+          TERM=dumb script -qec "timeout 420 bun test" /dev/null || rc=$?
+          kill $wd $d90 $d300 2>/dev/null || true
+          if [ "$rc" = "124" ]; then
+            echo "bun test TIMED OUT after 420s (unbuffered PTY output above shows the true freeze point)"
           fi
           exit $rc
 
