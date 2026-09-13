@@ -22,7 +22,7 @@
     },
     "packages/benchmarks": {
       "name": "@guyghost/swarm-dao-benchmarks",
-      "version": "0.2.2",
+      "version": "0.2.3",
       "dependencies": {
         "@guyghost/swarm-dao-core": "workspace:*",
       },
@@ -33,7 +33,7 @@
     },
     "packages/claude-adapter": {
       "name": "@guyghost/swarm-dao-claude-adapter",
-      "version": "0.4.3",
+      "version": "0.4.4",
       "bin": {
         "swarm-dao-claude": "./dist/cli.js",
       },
@@ -47,7 +47,7 @@
     },
     "packages/cli": {
       "name": "@guyghost/swarm-dao-cli",
-      "version": "0.11.1",
+      "version": "0.12.0",
       "bin": {
         "swarm-dao": "./dist/cli.js",
       },
@@ -65,7 +65,7 @@
     },
     "packages/codex-adapter": {
       "name": "@guyghost/swarm-dao-codex-adapter",
-      "version": "0.2.17",
+      "version": "0.2.18",
       "bin": {
         "swarm-dao-codex": "./dist/cli.js",
       },
@@ -79,7 +79,7 @@
     },
     "packages/copilot-adapter": {
       "name": "@guyghost/swarm-dao-copilot-adapter",
-      "version": "0.4.3",
+      "version": "0.4.4",
       "bin": {
         "swarm-dao-copilot": "dist/cli.js",
       },
@@ -93,7 +93,7 @@
     },
     "packages/core": {
       "name": "@guyghost/swarm-dao-core",
-      "version": "0.16.3",
+      "version": "1.0.0",
       "dependencies": {
         "xstate": "^5.32.2",
       },
@@ -104,7 +104,7 @@
     },
     "packages/graph-engineering": {
       "name": "@guyghost/swarm-dao-graph",
-      "version": "0.3.5",
+      "version": "0.3.6",
       "dependencies": {
         "@guyghost/swarm-dao-core": "workspace:*",
       },
@@ -115,7 +115,7 @@
     },
     "packages/herdr-adapter": {
       "name": "@guyghost/swarm-dao-herdr-adapter",
-      "version": "0.4.3",
+      "version": "0.5.0",
       "dependencies": {
         "@guyghost/swarm-dao-core": "workspace:*",
       },
@@ -126,7 +126,7 @@
     },
     "packages/improvement-loop": {
       "name": "@guyghost/swarm-dao-improvement",
-      "version": "0.6.5",
+      "version": "0.6.6",
       "dependencies": {
         "@guyghost/swarm-dao-core": "workspace:*",
         "@guyghost/swarm-dao-herdr-adapter": "workspace:*",
@@ -138,7 +138,7 @@
     },
     "packages/integration-tests": {
       "name": "@guyghost/swarm-dao-integration-tests",
-      "version": "0.1.24",
+      "version": "0.1.25",
       "dependencies": {
         "@guyghost/swarm-dao-claude-adapter": "workspace:*",
         "@guyghost/swarm-dao-codex-adapter": "workspace:*",
@@ -155,7 +155,7 @@
     },
     "packages/mcp-server": {
       "name": "@guyghost/swarm-dao-mcp",
-      "version": "0.8.3",
+      "version": "0.9.0",
       "bin": {
         "swarm-dao-mcp": "./dist/cli.js",
       },
@@ -173,7 +173,7 @@
     },
     "packages/opencode-adapter": {
       "name": "@guyghost/swarm-dao-opencode-adapter",
-      "version": "0.5.3",
+      "version": "0.6.0",
       "dependencies": {
         "@guyghost/swarm-dao-core": "workspace:*",
         "@guyghost/swarm-dao-graph": "workspace:*",
@@ -192,7 +192,7 @@
     },
     "packages/pi-adapter": {
       "name": "@guyghost/swarm-dao-pi-adapter",
-      "version": "0.7.4",
+      "version": "0.8.0",
       "dependencies": {
         "@guyghost/swarm-dao-core": "workspace:*",
         "@guyghost/swarm-dao-graph": "workspace:*",
@@ -214,7 +214,7 @@
     },
     "packages/product-loop": {
       "name": "@guyghost/swarm-dao-product",
-      "version": "0.3.5",
+      "version": "0.3.6",
       "dependencies": {
         "@guyghost/swarm-dao-core": "workspace:*",
       },
@@ -225,7 +225,7 @@
     },
     "packages/tmux-adapter": {
       "name": "@guyghost/swarm-dao-tmux-adapter",
-      "version": "0.3.1",
+      "version": "0.4.0",
       "dependencies": {
         "@guyghost/swarm-dao-core": "workspace:*",
       },
