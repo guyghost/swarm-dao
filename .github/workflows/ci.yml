@@ -59,26 +59,28 @@ jobs:
         run: bun run typecheck
 
       - name: Test
-        # TEMPORARY (test-hang diagnosis): the freeze happens at a constant
-        # WALL-CLOCK point (~2.5s in, right after dry-run.test.ts) on 4/4
-        # fresh runners, while bun spins at 100% CPU with zero allocation.
-        # Discriminating experiments, each under its own timeout:
-        #   A: full readdir order WITHOUT dry-run.test.ts  -> hang follows the
-        #      file, or just the clock?
-        #   B: only the first 10 files (dry-run included)  -> is the short
-        #      sequence enough?
-        #   C: only the first 9 files (no dry-run)         -> baseline.
-        # The step fails if any experiment hangs, but runs them all first.
+        # TEMPORARY (test-hang diagnosis): the freeze is deterministic on
+        # GitHub runners, right after the last test of dry-run.test.ts, when
+        # dry-run runs as the 10th file. It does NOT reproduce in docker with
+        # the same files/order/bun version. Pairwise bisection on the runner:
+        #   E0: the 10-file prefix (known hang)          -> revalidate
+        #   E1: dry-run alone                            -> file-intrinsic?
+        #   E2..E10: each earlier file paired w/ dry-run -> find the couple.
+        # Each experiment is capped at 20s (the hang hits ~1s in).
         run: |
-          mapfile -t ALL < <(find packages -name '*.test.ts')
-          echo "total files: ${#ALL[@]}"
+          set +e
           DRY=packages/core/tests/dry-run.test.ts
-          di=-1
-          for i in "${!ALL[@]}"; do [ "${ALL[$i]}" = "$DRY" ] && di=$i; done
-          echo "dry-run index: $di"
-          A=(); for f in "${ALL[@]}"; do [ "$f" != "$DRY" ] && A+=("$f"); done
-          B=("${ALL[@]:0:di+1}")
-          C=("${ALL[@]:0:di}")
+          PRE=(
+            packages/copilot-adapter/tests/copilot-adapter.test.ts
+            packages/tmux-adapter/tests/adapter.test.ts
+            packages/tmux-adapter/tests/integration.tmux.test.ts
+            packages/codex-adapter/tests/codex-adapter.test.ts
+            packages/graph-engineering/tests/ai-channel.test.ts
+            packages/product-loop/tests/ai-channel.test.ts
+            packages/pi-adapter/tests/pi-adapter.test.ts
+            packages/pi-adapter/tests/pi-spawn.test.ts
+            packages/core/tests/governance.test.ts
+          )
           hang=0
           exp() {
             name=$1; shift
@@ -87,14 +89,19 @@ jobs:
             printf '  %s\n' "$@"
             echo "===== begin $name $(date -u +%H:%M:%S.%3NZ) ====="
             rc=0
-            TERM=dumb script -qec "timeout 150 bun test $*" /dev/null || rc=$?
+            TERM=dumb script -qec "timeout 20 bun test $*" /dev/null || rc=$?
             echo "===== end $name rc=$rc $(date -u +%H:%M:%S.%3NZ) ====="
-            [ "$rc" = "124" ] && { echo ">>> $name HUNG <<<"; hang=1; }
+            if [ "$rc" = "124" ]; then echo ">>> $name HUNG <<<"; hang=1; fi
+            return 0
           }
-          exp B "${B[@]}"
-          exp C "${C[@]}"
-          exp A "${A[@]}"
-          [ "$hang" = "0" ] || exit 99
+          exp E0 "${PRE[@]}" "$DRY"
+          exp E1 "$DRY"
+          i=2
+          for f in "${PRE[@]}"; do
+            exp "E$i" "$f" "$DRY"
+            i=$((i+1))
+          done
+          exit 99
 
       - name: Integration tests
         run: bun run test:integration
