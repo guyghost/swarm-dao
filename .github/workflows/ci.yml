@@ -59,106 +59,13 @@ jobs:
         run: bun run typecheck
 
       - name: Test
-        # TEMPORARY (test-hang diagnosis): the minimal faulty pair is
-        # pi-spawn.test.ts + dry-run.test.ts — deterministic freeze on the
-        # runner, passing locally (arm64 + amd64 docker, same bun). gdb
-        # showed a pure userspace JS spin (main thread, no allocation, also
-        # in LLInt with useJIT=0), and the CDP inspector cannot pause a
-        # synchronous spin. So we run the pair with a preload watchdog that:
-        #   - traces every child_process spawn/close (unbuffered, sync)
-        #   - logs an afterEach hook per test (exact test position)
-        #   - beats a heartbeat from a worker thread into /tmp/hb.log
-        #     (immune to a main-thread event-loop hang -> proves the
-        #     process is alive while the main thread is silent)
-        # If the pair is still running after 75s (normal: ~2s), we dump the
-        # last 150 log lines and fail with 99.
-        run: |
-          set +e
-          PAIR="packages/pi-adapter/tests/pi-spawn.test.ts packages/core/tests/dry-run.test.ts"
-
-          cat > /tmp/wd-preload.js <<'WD'
-          const fs = require("node:fs");
-          const log = (m) => { try { fs.writeSync(2, "[wd " + Date.now() + "] " + m + "\n"); } catch {} };
-          log("preload up");
-          try {
-            const { afterEach } = require("bun:test");
-            afterEach(() => { log("afterEach"); });
-          } catch (e) { log("hook fail " + e); }
-          try {
-            const cp = require("node:child_process");
-            const origSpawn = cp.spawn.bind(cp);
-            cp.spawn = (...a) => {
-              log("spawn " + a[0]);
-              const c = origSpawn(...a);
-              try { c.on("close", (code) => log("close " + a[0] + " code=" + code)); } catch {}
-              return c;
-            };
-          } catch (e) { log("cp patch fail " + e); }
-          try {
-            const { Worker } = require("node:worker_threads");
-            const w = new Worker(
-              'const fs=require("node:fs");setInterval(()=>{try{fs.appendFileSync("/tmp/hb.log",Date.now()+" beat\\n")}catch{}},500);',
-              { eval: true }
-            );
-            if (w.unref) w.unref();
-          } catch (e) { log("worker fail " + e); }
-          WD
-
-          : > /tmp/hb.log
-          echo "===== pair + watchdog preload: start $(date -u +%H:%M:%S) ====="
-          TERM=dumb bun test --preload /tmp/wd-preload.js $PAIR >/tmp/pair.log 2>&1 &
-          BPID=$!
-          # /proc child watcher: ESM imports bypass the CJS spawn patch, so
-          # trace child processes of the bun pid directly (appear/gone +
-          # state). Catches git/pi spawned through any API.
-          : > /tmp/children.log
-          (
-            SEEN="|"
-            PREV=" "
-            END=$((SECONDS + 80))
-            while [ $SECONDS -lt $END ] && kill -0 $BPID 2>/dev/null; do
-              CUR=" "
-              for C in $(pgrep -P $BPID 2>/dev/null); do
-                CUR="$CUR$C "
-                case "$SEEN" in *"|$C|"*) ;; *)
-                  SEEN="$SEEN$C|"
-                  COMM=$(cat /proc/$C/comm 2>/dev/null)
-                  ST=$(awk '{print $3}' /proc/$C/stat 2>/dev/null)
-                  echo "$(date -u +%H:%M:%S.%3N) child pid=$C comm=$COMM state=$ST" >> /tmp/children.log
-                ;; esac
-              done
-              for C in $PREV; do
-                case "$CUR" in *" $C "*) ;; *)
-                  echo "$(date -u +%H:%M:%S.%3N) gone pid=$C" >> /tmp/children.log
-                ;; esac
-              done
-              PREV="$CUR"
-              sleep 0.2
-            done
-          ) &
-          WPID=$!
-          DEADLINE=$((SECONDS + 75))
-          while [ $SECONDS -lt $DEADLINE ] && kill -0 $BPID 2>/dev/null; do
-            sleep 2
-          done
-          if kill -0 $BPID 2>/dev/null; then
-            echo "===== FROZEN after ${SECONDS}s — last 150 lines of /tmp/pair.log:"
-            tail -150 /tmp/pair.log
-            echo "===== children trace (appear/gone):"
-            cat /tmp/children.log
-            echo "===== heartbeat tail (process still alive proof):"
-            tail -3 /tmp/hb.log
-            kill -9 $BPID 2>/dev/null
-            wait $BPID 2>/dev/null
-            exit 99
-          fi
-          wait $BPID; RC=$?
-          wait $WPID 2>/dev/null
-          echo "===== pair FINISHED rc=$RC after ${SECONDS}s — tail:"
-          tail -40 /tmp/pair.log
-          echo "===== children trace (appear/gone):"
-          cat /tmp/children.log
-          exit $RC
+        # Run per-package so each package's bun test process is isolated.
+        # `bun test` at the workspace root runs all test files in a single
+        # process, which lets a mock.module installed by pi-spawn.test.ts
+        # leak into dry-run.test.ts and trigger an infinite spawn-delegation
+        # loop (JS spin, 100% CPU, no children spawned). `bun run test` uses
+        # --filter '*' which invokes each package's own `bun test` separately.
+        run: bun run test
 
       - name: Integration tests
         run: bun run test:integration
