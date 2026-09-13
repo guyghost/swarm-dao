@@ -1,5 +1,17 @@
 # @guyghost/swarm-dao-mcp
 
+## 0.9.1
+
+### Patch Changes
+
+- 4184177: Fix published manifests: internal dependencies were declared with the `workspace:*` protocol, which `npm publish` does not resolve (only pnpm does). Every install of the affected packages failed with `EUNSUPPORTEDPROTOCOL Unsupported URL Type "workspace:"`. Restore `^` semver ranges, which changesets bumps automatically on release.
+- Updated dependencies [4184177]
+- Updated dependencies [527195a]
+  - @guyghost/swarm-dao-graph@0.3.7
+  - @guyghost/swarm-dao-improvement@0.6.7
+  - @guyghost/swarm-dao-product@0.3.7
+  - @guyghost/swarm-dao-core@1.0.1
+
 ## 0.9.0
 
 ### Minor Changes

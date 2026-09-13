@@ -1,5 +1,11 @@
 # @guyghost/swarm-dao-core
 
+## 1.0.1
+
+### Patch Changes
+
+- 527195a: Close vote-tally poisoning (charter placeholders, fenced decoys, delegated-child hijack), apply council weights on the CLI, add `swarm-dao control`, and fail-close unknown gates / cascade+force / shell-free improvement anchors.
+
 ## 1.0.0
 
 ### Major Changes
