@@ -2,7 +2,12 @@
 // Swarm DAO Core — Swarm Dispatch
 // ============================================================
 
-import { clearProposalCoordinators, registerProposalCoordinators } from "../governance/delegation.utils.js";
+import {
+  clearDelegationInFlight,
+  clearProposalCoordinators,
+  markDelegationInFlight,
+  registerProposalCoordinators,
+} from "../governance/delegation.utils.js";
 import type { AgentWorkerPort } from "../ports/host.js";
 import type { AgentOutput, DAOAgent, DAOConfig, Proposal } from "../types/index.js";
 import { drainDelegations, runDelegations } from "./delegation.js";
@@ -160,7 +165,9 @@ export async function dispatchSwarm(
   maxConcurrent: number,
   modelContext: ModelResolutionContext,
   onUpdate?: (update: SwarmProgressUpdate) => void,
-  delegation?: { config: DAOConfig },
+  /** `daoRoot` persists a cross-process in-flight marker so the
+   *  delegation-closed gate can actually block while delegations run (#159). */
+  delegation?: { config: DAOConfig; daoRoot?: string },
   options?: { projectBrief?: string; runtime?: RuntimeResolutionContext },
 ): Promise<AgentOutput[]> {
   const instructions = buildDispatchInstructions(proposal, agents, modelContext, options);
@@ -174,6 +181,9 @@ export async function dispatchSwarm(
   // gate can observe in-flight coordinators as they are pushed during dispatch.
   if (delegationEnabled) {
     registerProposalCoordinators(proposal.id, allCoordinators);
+    if (delegation?.daoRoot) {
+      await markDelegationInFlight(delegation.daoRoot, proposal.id);
+    }
   }
 
   try {
@@ -286,6 +296,9 @@ export async function dispatchSwarm(
     if (delegationEnabled) {
       drainDelegations(allCoordinators, allRequests);
       clearProposalCoordinators(proposal.id);
+      if (delegation?.daoRoot) {
+        await clearDelegationInFlight(delegation.daoRoot, proposal.id);
+      }
     }
   }
 

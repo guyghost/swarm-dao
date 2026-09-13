@@ -30,6 +30,7 @@ export type ProposalEvent =
   | { type: "EXECUTE_SUCCESS" }
   | { type: "FAIL" }
   | { type: "DISCARD" }
+  | { type: "ABORT_DELIBERATION" }
   | { type: "ERROR"; message: string };
 
 // `failed` is deliberately NOT final (issue #141): a gate failure is by
@@ -81,11 +82,17 @@ export function createProposalMachine(initial: ProposalStatus = "open") {
       expectedGatesPass: input.expectedGatesPass,
     }),
     states: {
-      open: { on: { DELIBERATE: { target: "deliberating", actions: "recordTransition" }, ...escapeHatches } },
+      open: {
+        on: { DELIBERATE: { target: "deliberating", actions: "recordTransition" }, ...escapeHatches },
+      },
       deliberating: {
         on: {
           APPROVE: { target: "approved", guard: "tallyApproved", actions: "recordTransition" },
           REJECT: { target: "rejected", actions: "recordTransition" },
+          // Deliberation interrupted (worker failure, dead host, Ctrl-C):
+          // return to open so the proposal can be re-deliberated instead of
+          // forcing a terminal DISCARD/ERROR (issue #160).
+          ABORT_DELIBERATION: { target: "open", actions: "recordTransition" },
           ...escapeHatches,
         },
       },

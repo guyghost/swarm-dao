@@ -2,7 +2,7 @@
 // Swarm DAO Core — Quality Control Gates
 // ============================================================
 
-import { allCoordinatorsClosed } from "../governance/delegation.utils.js";
+import { allCoordinatorsClosed, isDelegationInFlightOnDisk } from "../governance/delegation.utils.js";
 import { type Electorate, resolveTypeThresholds, tallyVotes } from "../governance/voting.js";
 import type { ChecklistItem, ControlCheckResult, DAOConfig, GateResult, Proposal } from "../types/index.js";
 import { PROPOSAL_TYPE, TYPE_QUORUM } from "../types/index.js";
@@ -249,14 +249,18 @@ const GATES: GateDefinition[] = [
   },
   {
     // INV-8 (ordering): no APPROVE while a delegation is in flight. Opt-in via
-    // `config.requiredGates` (NOT in DEFAULT_CONFIG.requiredGates). The
-    // deliberation orchestrator registers live coordinator states for the
-    // proposal; this gate refuses to pass until every coordinator is closed.
+    // `config.requiredGates` (NOT in DEFAULT_CONFIG.requiredGates).
+    // Two observation layers (issue #159): the in-process coordinator
+    // registry, AND a persisted in-flight marker written by the deliberation
+    // orchestrator — the registry alone can never block because it is
+    // process-local and cleared before dao_control runs.
     id: "delegation-closed",
     name: "Delegation Closed",
     severity: "blocker",
-    check: (proposal, _config) => {
-      const closed = allCoordinatorsClosed(proposal.id);
+    check: (proposal, _config, context) => {
+      const closed =
+        allCoordinatorsClosed(proposal.id) &&
+        !(context.daoRoot && isDelegationInFlightOnDisk(context.daoRoot, proposal.id));
       return {
         passed: closed,
         message: closed ? "All delegation coordinators closed" : "Delegation in flight — tally must wait",

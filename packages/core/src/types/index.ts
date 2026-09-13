@@ -462,6 +462,10 @@ export interface Proposal {
   dryRunAt?: string;
   dryRunCanProceed?: boolean;
 
+  /** Set when the proposal enters `deliberating`; lets operators detect
+   *  deliberations stalled by a dead worker/host (issue #160). */
+  deliberationStartedAt?: string;
+
   createdAt: string;
   resolvedAt?: string;
 }

@@ -102,6 +102,11 @@ export function dispatchProposalEvent(
   if (isProposalFinal(status) && !proposal.resolvedAt) {
     proposal.resolvedAt = transitionTime;
   }
+  // Track deliberation start so stalled deliberations (dead worker/host)
+  // can be detected and aborted instead of staying invisible (issue #160).
+  if (status === "deliberating") {
+    proposal.deliberationStartedAt = transitionTime;
+  }
 
   return { ok: true, status };
 }
