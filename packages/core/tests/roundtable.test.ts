@@ -92,13 +92,9 @@ describe("intelligence/roundtable", () => {
       spawnAgents: async (): Promise<AgentOutput[]> => [],
     };
 
-    const suggestions = await runRoundTable(
-      adapter,
-      [agent],
-      1,
-      buildModelResolutionContext("dao-default", {}),
-      { now: () => "2031-01-01T00:00:00.000Z" },
-    );
+    const suggestions = await runRoundTable(adapter, [agent], 1, buildModelResolutionContext("dao-default", {}), {
+      now: () => "2031-01-01T00:00:00.000Z",
+    });
 
     expect(suggestions).toEqual([
       {

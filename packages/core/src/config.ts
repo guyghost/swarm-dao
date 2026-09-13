@@ -4,10 +4,10 @@
 
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { writeAtomic } from "./persistence.js";
 import { composeSystemPrompt } from "./governance/charter.js";
 import type { RuntimeConfig } from "./intelligence/runtime.js";
 import { isValidHarnessId, isValidModelFlag } from "./intelligence/runtime.js";
+import { writeAtomic } from "./persistence.js";
 import type { DAOAgent, DAOConfig, DelegationConfig } from "./types/index.js";
 import { redactSensitiveFields } from "./utils/security.js";
 

@@ -172,8 +172,7 @@ export class GraphRunner {
       .filter((line) => line.trim().length > 0)
       .at(-1);
     if (lastLine === undefined) {
-      if (expectedLast !== 0)
-        throw new Error(`graph journal is empty while run state is at sequence ${expectedLast}`);
+      if (expectedLast !== 0) throw new Error(`graph journal is empty while run state is at sequence ${expectedLast}`);
       return;
     }
     let last: unknown;

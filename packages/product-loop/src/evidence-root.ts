@@ -11,11 +11,7 @@ export const PRODUCT_EVIDENCE_FOLDER = "product-loops";
  * 3. `.dao/<name>` if it already exists
  * 4. otherwise the frozen model path `evidence/<name>`
  */
-export const resolveEvidenceRoot = (
-  folderName: string,
-  explicit?: string,
-  cwd: string = process.cwd(),
-): string => {
+export const resolveEvidenceRoot = (folderName: string, explicit?: string, cwd: string = process.cwd()): string => {
   if (explicit !== undefined && explicit.trim().length > 0) return resolve(cwd, explicit);
   const modelRoot = resolve(cwd, "evidence", folderName);
   const daoRoot = resolve(cwd, ".dao", folderName);
