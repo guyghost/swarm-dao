@@ -79,12 +79,20 @@ jobs:
         run: |
           ( while :; do sleep 30; echo "[heartbeat] bun test still running $(date -u +%H:%M:%SZ)"; done ) &
           wd=$!
-          timeout 420 bun test
-          rc=$?
+          rc=0
+          timeout 420 bun test || rc=$?
           kill $wd 2>/dev/null || true
           if [ "$rc" = "124" ]; then
-            echo "bun test TIMED OUT after 420s; process tree at timeout:"
-            ps -ef --forest | head -80
+            echo "bun test TIMED OUT after 420s; diagnostics:"
+            ps -ef --forest | head -80 || true
+            for p in $(pgrep -f "bun test" || true); do
+              echo "--- pid $p status/wchan/fd ---"
+              grep -E "State|Threads" "/proc/$p/status" 2>/dev/null || true
+              ls -l "/proc/$p/fd" 2>/dev/null | head -30 || true
+              for t in /proc/$p/task/*; do
+                echo "thread $(basename "$t"): $(cat "$t/wchan" 2>/dev/null || echo '?') $(grep State "$t/status" 2>/dev/null || true)"
+              done
+            done
           fi
           exit $rc
 
