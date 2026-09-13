@@ -5,5 +5,6 @@
 
 export * from "./ai-channel.js";
 export * from "./cli.js";
+export * from "./evidence-root.js";
 export * from "./runner.js";
 export * from "./signal.js";

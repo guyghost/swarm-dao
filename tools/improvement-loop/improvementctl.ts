@@ -2,6 +2,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
+import { CYCLE_EVIDENCE_FOLDER, resolveEvidenceRoot } from "../../packages/improvement-loop/src/evidence-root.js";
 import { createImprovementRunner } from "./runner.js";
 
 const usage = `Usage:
@@ -27,7 +28,7 @@ const main = async (): Promise<void> => {
   const cycleId = values["cycle-id"];
   if (!cycleId) throw new Error(`--cycle-id is required\n${usage}`);
 
-  const evidenceRoot = resolve(values["evidence-root"] ?? "evidence/improvement-cycles");
+  const evidenceRoot = resolveEvidenceRoot(CYCLE_EVIDENCE_FOLDER, values["evidence-root"]);
   if (command === "submit" && !values.signal) throw new Error(`--signal is required\n${usage}`);
 
   let referenceHash = values["reference-hash"] ?? "";

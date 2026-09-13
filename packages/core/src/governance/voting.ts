@@ -2,7 +2,26 @@
 // Swarm DAO Core — Vote Parsing & Tally
 // ============================================================
 
-import type { AgentOutput, DAOConfig, Proposal, TallyResult, Vote, VotePosition } from "../types/index.js";
+import type {
+  AgentOutput,
+  DAOConfig,
+  Proposal,
+  TallyResult,
+  TypeQuorumConfig,
+  Vote,
+  VotePosition,
+} from "../types/index.js";
+import { TYPE_QUORUM } from "../types/index.js";
+
+/** Resolve the quorum/approval bar for a proposal type (config override, then TYPE_QUORUM, then globals). */
+export function resolveTypeThresholds(proposal: Proposal, config: DAOConfig): TypeQuorumConfig {
+  const typed = config.typeQuorum[proposal.type] ?? TYPE_QUORUM[proposal.type];
+  return {
+    quorumPercent: typed?.quorumPercent ?? config.quorumPercent,
+    approvalPercent: typed?.approvalPercent ?? config.approvalThreshold,
+    description: typed?.description ?? proposal.type,
+  };
+}
 
 // ── Vote Parsing ─────────────────────────────────────────────
 
@@ -119,13 +138,14 @@ export function tallyVotes(proposal: Proposal, config: DAOConfig): TallyResult {
 
   const quorumPercent = totalPossibleWeight > 0 ? Math.round((totalVotingWeight / totalPossibleWeight) * 100) : 0;
 
-  const quorumMet = quorumPercent >= config.quorumPercent;
+  const thresholds = resolveTypeThresholds(proposal, config);
+  const quorumMet = quorumPercent >= thresholds.quorumPercent;
 
   // Approval: % of non-abstain weight that voted for
   const decisiveWeight = weightedFor + weightedAgainst;
   const approvalScore = decisiveWeight > 0 ? Math.round((weightedFor / decisiveWeight) * 100) : 0;
 
-  const approved = quorumMet && approvalScore >= config.approvalThreshold;
+  const approved = quorumMet && approvalScore >= thresholds.approvalPercent;
 
   return {
     proposalId: proposal.id,

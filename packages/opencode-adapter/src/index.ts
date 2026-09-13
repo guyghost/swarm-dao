@@ -35,11 +35,14 @@ import {
   handleDaoGithubOpenPr,
   handleDaoPropose,
   handleDaoProposeAmendment,
+  handleDaoRate,
   handleDaoRecordOutputs,
   handleDaoReject,
   handleDaoRollback,
   handleDaoRoundtable,
   handleDaoSetup,
+  handleDaoShip,
+  handleDaoUpdateProposal,
   logger,
   migrateFromLegacy,
   PROPOSAL_TYPES,
@@ -54,6 +57,7 @@ import type { ProductAiEventType } from "@guyghost/swarm-dao-product";
 import { createProductRunner, PRODUCT_AI_EVENT_TYPES, submitAiProductSignal } from "@guyghost/swarm-dao-product";
 import type { Plugin, PluginInput } from "@opencode-ai/plugin";
 import { tool } from "@opencode-ai/plugin";
+import { resolveContainedRoot } from "./contained-root.js";
 
 const schema = tool.schema;
 
@@ -267,7 +271,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
 
       // ── dao_setup ────────────────────────────────────────
       dao_setup: tool({
-        description: "Initialize the DAO with default 7 product agents",
+        description: "Initialize the DAO with default 8 product agents",
         args: {
           useDefaults: schema.boolean({ description: "Use default agents (default: true)" }),
         },
@@ -402,6 +406,74 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
               repository,
             },
             args.proposalId,
+          );
+        },
+      }),
+
+      // ── dao_ship ─────────────────────────────────────────
+      dao_ship: tool({
+        description: "Ship a controlled proposal (optionally cascade dependencies)",
+        args: {
+          proposalId: schema.number(),
+          cascade: schema.boolean().optional(),
+          force: schema.boolean().optional(),
+        },
+        // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
+        async execute(args: any, _context: any) {
+          return handleDaoShip(
+            {
+              adapter: createOpenCodeHostAdapter(ctx),
+              workDir: directory,
+              deliberationMode: "manual",
+              controlToolName: "dao_control",
+              repository,
+            },
+            args.proposalId,
+            { cascade: args.cascade === true, force: args.force === true },
+          );
+        },
+      }),
+
+      // ── dao_rate ─────────────────────────────────────────
+      dao_rate: tool({
+        description: "Rate a proposal outcome post-execution (1-5 stars)",
+        args: {
+          proposalId: schema.number(),
+          score: schema.number(),
+          comment: schema.string(),
+        },
+        // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
+        async execute(args: any, _context: any) {
+          return handleDaoRate(
+            Number(args.proposalId),
+            Number(args.score) as 1 | 2 | 3 | 4 | 5,
+            String(args.comment),
+            repository,
+          );
+        },
+      }),
+
+      // ── dao_update_proposal ──────────────────────────────
+      dao_update_proposal: tool({
+        description: "Update structured fields on an open proposal",
+        args: {
+          proposalId: schema.number(),
+          problemStatement: schema.string().optional(),
+          acceptanceCriteria: schema.array(schema.string()).optional(),
+          successMetrics: schema.array(schema.string()).optional(),
+          rollbackConditions: schema.array(schema.string()).optional(),
+        },
+        // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
+        async execute(args: any, _context: any) {
+          return handleDaoUpdateProposal(
+            Number(args.proposalId),
+            {
+              problemStatement: args.problemStatement !== undefined ? String(args.problemStatement) : undefined,
+              acceptanceCriteria: args.acceptanceCriteria as string[] | undefined,
+              successMetrics: args.successMetrics as string[] | undefined,
+              rollbackConditions: args.rollbackConditions as string[] | undefined,
+            },
+            repository,
           );
         },
       }),
@@ -706,7 +778,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
         // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
         async execute(args: any, context: any) {
           const runner = await createGraphRunner({
-            evidenceRoot: path.resolve(context.directory, args.evidenceRoot ?? ".dao/graph-runs"),
+            evidenceRoot: await resolveContainedRoot(context.directory, args.evidenceRoot ?? ".dao/graph-runs"),
             runId: String(args.runId),
           });
           return JSON.stringify(runner.snapshot(), null, 2);
@@ -731,7 +803,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
           if (typeof payload === "string") return payload;
           const result = await submitAiGraphSignal(
             {
-              evidenceRoot: path.resolve(context.directory, args.evidenceRoot ?? ".dao/graph-runs"),
+              evidenceRoot: await resolveContainedRoot(context.directory, args.evidenceRoot ?? ".dao/graph-runs"),
             },
             {
               runId: String(args.runId),
@@ -755,7 +827,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
         // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
         async execute(args: any, context: any) {
           const runner = await createProductRunner({
-            evidenceRoot: path.resolve(context.directory, args.evidenceRoot ?? ".dao/product-loops"),
+            evidenceRoot: await resolveContainedRoot(context.directory, args.evidenceRoot ?? ".dao/product-loops"),
             runId: String(args.runId),
           });
           return JSON.stringify(runner.snapshot(), null, 2);
@@ -780,7 +852,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
           if (typeof payload === "string") return payload;
           const result = await submitAiProductSignal(
             {
-              evidenceRoot: path.resolve(context.directory, args.evidenceRoot ?? ".dao/product-loops"),
+              evidenceRoot: await resolveContainedRoot(context.directory, args.evidenceRoot ?? ".dao/product-loops"),
             },
             {
               runId: String(args.runId),
@@ -806,7 +878,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
         async execute(args: any, context: any) {
           const runner = await OrchestratorRunner.create({
             seriesId: String(args.seriesId),
-            evidenceRoot: path.resolve(context.directory, args.evidenceRoot ?? ".dao/improvement-series"),
+            evidenceRoot: await resolveContainedRoot(context.directory, args.evidenceRoot ?? ".dao/improvement-series"),
           });
           return JSON.stringify(runner.snapshot(), null, 2);
         },

@@ -62,6 +62,9 @@ const snapshotChanged = (before: PersistedGraphSnapshot, after: PersistedGraphSn
   before.status !== after.status ||
   JSON.stringify(before.context) !== JSON.stringify(after.context);
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
 export class GraphRunner {
   readonly #runId: string;
   readonly #runDirectory: string;
@@ -124,6 +127,7 @@ export class GraphRunner {
     }
 
     const after = serializeSnapshot(this.#actor);
+    await this.#assertJournalAtSequence(this.#sequence);
     const entry: JournalEntry = {
       sequence: ++this.#sequence,
       runId: this.#runId,
@@ -144,6 +148,45 @@ export class GraphRunner {
 
   async #persistSnapshot(snapshot: PersistedGraphSnapshot): Promise<void> {
     await writeFile(resolve(this.#runDirectory, "snapshot.json"), `${JSON.stringify(snapshot, null, 2)}\n`, "utf8");
+  }
+
+  /** Concurrency guard: the sequence lives in this process's memory, so two
+   * runners on the same run interleave appends and corrupt journal.ndjson
+   * with a duplicate sequence. Re-read the tail before each append; a
+   * mismatch means another writer advanced the file — fail fast instead of
+   * bricking the run. */
+  async #assertJournalAtSequence(expectedLast: number): Promise<void> {
+    let content: string;
+    try {
+      content = await readFile(resolve(this.#runDirectory, "journal.ndjson"), "utf8");
+    } catch (error) {
+      if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") {
+        if (expectedLast !== 0)
+          throw new Error(`graph journal vanished while run state is at sequence ${expectedLast}`);
+        return;
+      }
+      throw error;
+    }
+    const lastLine = content
+      .split("\n")
+      .filter((line) => line.trim().length > 0)
+      .at(-1);
+    if (lastLine === undefined) {
+      if (expectedLast !== 0) throw new Error(`graph journal is empty while run state is at sequence ${expectedLast}`);
+      return;
+    }
+    let last: unknown;
+    try {
+      last = JSON.parse(lastLine);
+    } catch {
+      throw new Error("graph journal tail is not valid JSON — refusing to append (inspect the journal manually)");
+    }
+    const lastSequence = isRecord(last) && typeof last.sequence === "number" ? last.sequence : Number.NaN;
+    if (lastSequence !== expectedLast) {
+      throw new Error(
+        `concurrent graph runner detected: journal is at sequence ${lastSequence}, this runner holds ${expectedLast} — nothing was written; re-run the command to reload the run state`,
+      );
+    }
   }
 
   async #restoreJournal(): Promise<void> {

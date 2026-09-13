@@ -34,6 +34,7 @@ import {
   arbitratePairedSignals,
   createOrchestratorActor,
   isRequiredImprovementAnchor,
+  ORCHESTRATOR_MAX_WORKER_RETRIES,
   ORCHESTRATOR_MIN_COOLDOWN_MS,
   ORCHESTRATOR_TERMINAL_STATES,
   type OrchestratorActor,
@@ -41,6 +42,7 @@ import {
   type OrchestratorEvent,
   type WorkerPhase,
 } from "@guyghost/swarm-dao-core/models/improvement";
+import { CYCLE_EVIDENCE_FOLDER, resolveEvidenceRoot, SERIES_EVIDENCE_FOLDER } from "./evidence-root.js";
 import { createImprovementRunner, type ImprovementRunner } from "./runner.js";
 
 // Re-exported for CLI hosts: init validates the cooldown floor.
@@ -139,6 +141,9 @@ export interface OrchestratorOnceDeps {
    * only — never model state. */
   worker?: { kind?: string; agentArgs?: readonly string[] };
 }
+
+const resolvedCycleEvidenceRoot = (deps: OrchestratorOnceDeps): string =>
+  resolve(deps.cycleEvidenceRoot ?? resolveEvidenceRoot(CYCLE_EVIDENCE_FOLDER));
 
 export type OrchestratorOnceResult = Readonly<{
   seriesId: string;
@@ -312,6 +317,7 @@ export class OrchestratorRunner {
   readonly #clock: () => string;
   readonly #actor: OrchestratorActor;
   #sequence = 0;
+  #workerRetries = 0;
   #cooldownEnteredAt: string | null = null;
   #tail: Promise<void> = Promise.resolve();
 
@@ -435,6 +441,11 @@ export class OrchestratorRunner {
     const source = isRecord(input) && typeof input.source === "string" ? input.source : null;
     if (!type || !source || !(source === "tool" || source === "human" || source === "system")) {
       issues = ["event must be an object with a type and a tool|human|system source"];
+    } else if (type === "RETRY_WORKERS" && this.#workerRetries >= ORCHESTRATOR_MAX_WORKER_RETRIES) {
+      event = input as Record<string, unknown>;
+      issues = [
+        `RETRY_WORKERS exhausted: ${this.#workerRetries} of ${ORCHESTRATOR_MAX_WORKER_RETRIES} worker retries already used`,
+      ];
     } else {
       event = input as Record<string, unknown>;
       this.#actor.send(event as OrchestratorEvent);
@@ -442,6 +453,8 @@ export class OrchestratorRunner {
       accepted =
         candidate.state !== before.state || JSON.stringify(candidate.context) !== JSON.stringify(before.context);
       if (!accepted) issues = ["machine rejected event for the current state or guards"];
+      if (accepted && type === "RETRY_WORKERS") this.#workerRetries += 1;
+      if (accepted && (type === "START_SERIES" || type === "RESTART_SERIES")) this.#workerRetries = 0;
     }
 
     const after = this.#serialize();
@@ -547,6 +560,8 @@ export class OrchestratorRunner {
       if (!isRecord(entry.event) || typeof entry.event.type !== "string") {
         throw new Error(`accepted series journal line ${index + 1} has no event`);
       }
+      if (entry.event.type === "RETRY_WORKERS") this.#workerRetries += 1;
+      if (entry.event.type === "START_SERIES" || entry.event.type === "RESTART_SERIES") this.#workerRetries = 0;
       const before = this.#serialize();
       this.#actor.send(entry.event as OrchestratorEvent);
       const after = this.#serialize();
@@ -619,7 +634,7 @@ export class OrchestratorRunner {
     if (!context.scope || !context.referenceHash) throw new Error("series identity is incomplete");
     const cycleId = `${this.#seriesId}-c${context.cycleSequence + 1}`;
     await createImprovementRunner({
-      evidenceRoot: resolve(deps.cycleEvidenceRoot ?? DEFAULT_CYCLE_EVIDENCE_ROOT),
+      evidenceRoot: resolvedCycleEvidenceRoot(deps),
       cycleId,
       scope: context.scope,
       referenceHash: context.referenceHash,
@@ -680,7 +695,7 @@ export class OrchestratorRunner {
     deps: OrchestratorOnceDeps,
   ): Promise<OrchestratorOnceResult> {
     const context = this.#actor.getSnapshot().context;
-    const runner = await this.#cycleRunner(deps.cycleEvidenceRoot ?? DEFAULT_CYCLE_EVIDENCE_ROOT);
+    const runner = await this.#cycleRunner(resolvedCycleEvidenceRoot(deps));
     const cycleId = context.improvementCycleId as string;
 
     const sensor = await this.#readWorkAnswer("sensor");
@@ -724,7 +739,7 @@ export class OrchestratorRunner {
     deps: OrchestratorOnceDeps,
   ): Promise<OrchestratorOnceResult> {
     const context = this.#actor.getSnapshot().context;
-    const runner = await this.#cycleRunner(deps.cycleEvidenceRoot ?? DEFAULT_CYCLE_EVIDENCE_ROOT);
+    const runner = await this.#cycleRunner(resolvedCycleEvidenceRoot(deps));
     const cycleId = context.improvementCycleId as string;
 
     const drift = await this.#readWorkAnswer("drift-auditor");
@@ -760,7 +775,7 @@ export class OrchestratorRunner {
     deps: OrchestratorOnceDeps,
   ): Promise<OrchestratorOnceResult> {
     const workDir = resolve(deps.workDir ?? process.cwd());
-    const runner = await this.#cycleRunner(deps.cycleEvidenceRoot ?? DEFAULT_CYCLE_EVIDENCE_ROOT);
+    const runner = await this.#cycleRunner(resolvedCycleEvidenceRoot(deps));
     const context = this.#actor.getSnapshot().context;
     const cycleId = context.improvementCycleId as string;
 
@@ -836,7 +851,7 @@ export class OrchestratorRunner {
     deps: OrchestratorOnceDeps,
   ): Promise<OrchestratorOnceResult> {
     const context = this.#actor.getSnapshot().context;
-    const runner = await this.#cycleRunner(deps.cycleEvidenceRoot ?? DEFAULT_CYCLE_EVIDENCE_ROOT);
+    const runner = await this.#cycleRunner(resolvedCycleEvidenceRoot(deps));
     const rejected = await this.#submitSignal(runner, {
       cycleId: context.improvementCycleId,
       type: "EVALUATE",
@@ -854,7 +869,7 @@ export class OrchestratorRunner {
     const cycleId = this.#actor.getSnapshot().context.improvementCycleId;
     if (!cycleId) throw new Error("series has no active improvement cycle to observe");
     const parsed: unknown = JSON.parse(
-      await readFile(resolve(deps.cycleEvidenceRoot ?? DEFAULT_CYCLE_EVIDENCE_ROOT, cycleId, "snapshot.json"), "utf8"),
+      await readFile(resolve(resolvedCycleEvidenceRoot(deps), cycleId, "snapshot.json"), "utf8"),
     );
     if (!isRecord(parsed) || typeof parsed.state !== "string") {
       throw new Error(`cycle snapshot for ${cycleId} is malformed`);
@@ -976,7 +991,7 @@ export const runSeriesCliInner = async (argv: string[]): Promise<number> => {
 
   const seriesId = values["series-id"];
   if (!seriesId) throw new Error(`--series-id is required\n${usage}`);
-  const evidenceRoot = resolve(values["evidence-root"] ?? DEFAULT_SERIES_EVIDENCE_ROOT);
+  const evidenceRoot = resolveEvidenceRoot(SERIES_EVIDENCE_FOLDER, values["evidence-root"]);
 
   if (command === "init") {
     const scope = values.scope;

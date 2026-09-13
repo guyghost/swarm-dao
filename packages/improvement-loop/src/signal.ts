@@ -210,7 +210,9 @@ export const validateImprovementSignal = (input: unknown): ImprovementSignalVali
   }
 
   const type = input.type;
-  const knownType = typeof type === "string" && type in EVENT_SOURCES ? (type as KnownEventType) : null;
+  // Use an own-property lookup so an unknown event whose type collides with an
+  // inherited key (e.g. "toString", "__proto__") is never misclassified as known.
+  const knownType = typeof type === "string" && Object.hasOwn(EVENT_SOURCES, type) ? (type as KnownEventType) : null;
   if (!knownType) issues.push("type must be a known improvement event");
 
   const source: ImprovementSignalSource | null =

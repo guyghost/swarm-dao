@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { execCommand, readFileContained, writeFileContained } from "../src/utils/host.js";
+import { execCommand, readFileContained, resolveContainedRoot, writeFileContained } from "../src/utils/host.js";
 
 describe("utils/host.ts", () => {
   it("executes safe commands", async () => {
@@ -47,6 +47,17 @@ describe("utils/host.ts", () => {
       const message = result.error instanceof Error ? result.error.message : String(result.error);
       expect(message).not.toContain("Path traversal denied");
     }
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  it("refuses absolute and escaping evidence roots", async () => {
+    const root = path.join(tmpdir(), `swarm-host-${Date.now()}`);
+    await fs.mkdir(root, { recursive: true });
+    await expect(resolveContainedRoot(root, "/tmp/evil")).rejects.toThrow("Path traversal denied");
+    await expect(resolveContainedRoot(root, "../outside")).rejects.toThrow("Path traversal denied");
+    const contained = await resolveContainedRoot(root, ".dao/graph-runs");
+    const resolvedRoot = await fs.realpath(root);
+    expect(contained === resolvedRoot || contained.startsWith(`${resolvedRoot}${path.sep}`)).toBe(true);
     await fs.rm(root, { recursive: true, force: true });
   });
 

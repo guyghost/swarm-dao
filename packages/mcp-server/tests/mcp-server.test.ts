@@ -44,6 +44,32 @@ describe("mcp-server", () => {
     }
   });
 
+  it("resolveDaoRoot rejects empty, null-byte, missing, and non-directory values", async () => {
+    const prev = process.env.DAO_ROOT;
+    const missing = path.join(tmpdir(), `swarm-dao-root-missing-${Date.now()}`);
+    const fileRoot = path.join(tmpdir(), `swarm-dao-root-file-${Date.now()}`);
+    const dirRoot = path.join(tmpdir(), `swarm-dao-root-dir-${Date.now()}`);
+    await fs.writeFile(fileRoot, "not a directory", "utf8");
+    await fs.mkdir(dirRoot, { recursive: true });
+    try {
+      process.env.DAO_ROOT = "   ";
+      expect(() => resolveDaoRoot()).toThrow(/empty/);
+      process.env.DAO_ROOT = "foo\0bar";
+      expect(() => resolveDaoRoot()).toThrow(/null byte/);
+      process.env.DAO_ROOT = missing;
+      expect(() => resolveDaoRoot()).toThrow(/does not exist/);
+      process.env.DAO_ROOT = fileRoot;
+      expect(() => resolveDaoRoot()).toThrow(/not a directory/);
+      process.env.DAO_ROOT = dirRoot;
+      expect(resolveDaoRoot()).toBe(await fs.realpath(dirRoot));
+    } finally {
+      if (prev !== undefined) process.env.DAO_ROOT = prev;
+      else delete process.env.DAO_ROOT;
+      await fs.rm(fileRoot, { force: true });
+      await fs.rm(dirRoot, { recursive: true, force: true });
+    }
+  });
+
   it("creates a Swarm DAO MCP server", () => {
     const server = createSwarmDaoMcpServer("/tmp/dao");
     expect(server).toBeDefined();

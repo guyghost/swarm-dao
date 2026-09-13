@@ -32,6 +32,33 @@ const EVENT_SOURCES = {
 
 type KnownEventType = keyof typeof EVENT_SOURCES;
 
+// System-emitted events have no graph producer node (the runner emits them
+// after recording evidence). Every other event must come from a declared
+// producer node whose authority is bound in models/graph-engineering.graph.json.
+const SYSTEM_EVENTS = new Set<KnownEventType>(["START_IMPLEMENTATION", "EVALUATE"]);
+
+// Producer node -> { declared source, emitted event types }. Mirrors the frozen
+// graph so a signal's authority is bound to its producer's declared node, not to
+// a caller-supplied `source` label. An AI producer ("modeler") therefore can
+// never emit a human-authority event (MODEL_APPROVED / MODEL_REJECTED / CANCEL).
+const PRODUCER_EMISSIONS: Readonly<
+  Record<string, Readonly<{ source: GraphSignalSource; emits: ReadonlySet<string> }>>
+> = {
+  modeler: { source: "ai", emits: new Set(["MODEL_DRAFTED"]) },
+  implementer: { source: "ai", emits: new Set(["IMPLEMENTATION_READY", "IMPLEMENTATION_FAILED"]) },
+  "model-contract-validator": {
+    source: "tool",
+    emits: new Set(["MODEL_CONTRACT_VALID", "MODEL_CONTRACT_INVALID", "PERMISSION_DENIED"]),
+  },
+  "runtime-verifier": { source: "tool", emits: new Set(["ANCHOR_RECORDED", "PERMISSION_DENIED"]) },
+  "architecture-watcher": { source: "tool", emits: new Set(["ANCHOR_RECORDED", "PERMISSION_DENIED"]) },
+  "regression-watcher": { source: "tool", emits: new Set(["ANCHOR_RECORDED", "PERMISSION_DENIED"]) },
+  "human-owner": {
+    source: "human",
+    emits: new Set(["MODEL_APPROVED", "MODEL_REJECTED", "RETRY_AUTHORIZED", "CANCEL"]),
+  },
+};
+
 const FORBIDDEN_TRANSITION_KEYS = new Set(["nextState", "targetState", "transition"]);
 const FORBIDDEN_AI_AUTHORITY_KEYS = new Set([
   "command",
@@ -147,7 +174,9 @@ export const validateGraphSignal = (input: unknown): GraphSignalValidation => {
   }
 
   const type = input.type;
-  const knownType = typeof type === "string" && type in EVENT_SOURCES ? (type as KnownEventType) : null;
+  // Use an own-property lookup so an unknown event whose type collides with an
+  // inherited key (e.g. "toString", "__proto__") is never misclassified as known.
+  const knownType = typeof type === "string" && Object.hasOwn(EVENT_SOURCES, type) ? (type as KnownEventType) : null;
   if (!knownType) issues.push("type must be a known graph event");
 
   const source = input.source;
@@ -155,6 +184,23 @@ export const validateGraphSignal = (input: unknown): GraphSignalValidation => {
   if (!validSource) issues.push("source must be ai, tool, human, or system");
   if (knownType && validSource && EVENT_SOURCES[knownType] !== source) {
     issues.push(`source for ${knownType} must be ${EVENT_SOURCES[knownType]}`);
+  }
+
+  // Bind the event's authority to the producer's declared graph node. System
+  // evaluation events are emitted by the runner and have no producer node.
+  const producer = typeof input.producer === "string" ? input.producer : "";
+  if (knownType && !SYSTEM_EVENTS.has(knownType)) {
+    const declared = Object.hasOwn(PRODUCER_EMISSIONS, producer) ? PRODUCER_EMISSIONS[producer] : null;
+    if (!declared) {
+      issues.push(`producer ${producer || "?"} is not a declared graph producer for ${knownType}`);
+    } else {
+      if (!declared.emits.has(knownType)) {
+        issues.push(`producer ${producer} is not declared to emit ${knownType}`);
+      }
+      if (validSource && declared.source !== source) {
+        issues.push(`producer ${producer} must use source ${declared.source}, not ${source}`);
+      }
+    }
   }
 
   issues.push(...findForbiddenKeys(input, FORBIDDEN_TRANSITION_KEYS));

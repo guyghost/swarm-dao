@@ -33,6 +33,21 @@ export class RecordDeliberationOutputsUseCase {
       return { ok: false, error: `Expected deliberating (current: ${proposal.status})` };
     }
 
+    if (command.outputs.length === 0) {
+      return { ok: false, error: "No agent outputs provided." };
+    }
+    const unknownIds = [
+      ...new Set(
+        command.outputs.map((raw) => raw.agentId).filter((id) => !state.agents.some((agent) => agent.id === id)),
+      ),
+    ];
+    if (unknownIds.length > 0) {
+      return {
+        ok: false,
+        error: `Unknown agent id(s): ${unknownIds.join(", ")}. Outputs were not recorded.`,
+      };
+    }
+
     const votes: Vote[] = [];
     const outputs: AgentOutput[] = [];
     for (const raw of command.outputs) {

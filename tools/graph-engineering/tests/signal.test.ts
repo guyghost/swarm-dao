@@ -56,4 +56,17 @@ describe("graph signal validation", () => {
     });
     expect(noEvidence.ok).toBe(false);
   });
+
+  it("rejects an AI producer emitting MODEL_APPROVED", () => {
+    const forged = validateGraphSignal({
+      ...validModelSignal,
+      type: "MODEL_APPROVED",
+      source: "human",
+      producer: "modeler",
+      payload: { modelHash: "model-sha256" },
+    });
+    expect(forged.ok).toBe(false);
+    if (forged.ok) return;
+    expect(forged.issues.join("\n")).toMatch(/modeler is not declared to emit MODEL_APPROVED/);
+  });
 });

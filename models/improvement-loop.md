@@ -54,8 +54,10 @@ The human owner is outside the worker graph. Only the owner approves or rejects
 a reference change, owns the frozen set, authorizes a retry, or cancels a cycle.
 All nodes and edges are declared in `models/improvement-loop.graph.json`; prose
 cannot invent an edge. The `reference-owner` role (the slower loop that holds
-target values) is represented by the human owner: target values enter the cycle
-only through a human `REFERENCE_CHANGE_APPROVED` event.
+target values) is represented by the human owner: the sealed `referenceHash` is
+set at init, and `REFERENCE_CHANGE_APPROVED` only re-affirms that existing hash
+so sampling can restart after detached drift. Changing the reference requires
+re-init.
 
 ## Mapping to the loop-to-graph argument
 
@@ -94,7 +96,7 @@ sampling
 | `ARBITRATION` | `tool` | `arbitrating` | `grounding`; record the deterministic arbitration outcome |
 | `ANCHOR_RECORDED` | `tool` | `grounding` | Record one anchor result (`passed \| failed \| blocked`); immutable within the current attempt, refreshable across an authorized retry. `blocked` means the anchor could not be measured: the verification command did not run to a verdict (execution-environment failure), which is different from the measured code failing |
 | `EVALUATE` | `system` | `grounding` | `succeeded`, `adjusting`, `retrying`, `failed`, or `blocked` per anchors, drift, and retry budget |
-| `REFERENCE_CHANGE_APPROVED` | `human` | `adjusting` | `sampling`; apply the new reference and clear cycle evidence |
+| `REFERENCE_CHANGE_APPROVED` | `human` | `adjusting` | `sampling`; re-affirm the existing sealed `referenceHash` (does not accept a new hash) and clear cycle evidence so sampling can restart after detached drift |
 | `REFERENCE_CHANGE_REJECTED` | `human` | `adjusting` | `failed`; record the reason |
 | `RETRY_AUTHORIZED` | `human` | `retrying` | `sampling`; increment attempt and clear attempt-scoped evidence |
 | `PERMISSION_DENIED` | `tool` | any active state | `blocked` |
@@ -206,8 +208,10 @@ command.
 2. Cycle signals cannot contain `nextState`, `targetState`, `transition`,
    `reference`/`target` values, anchor commands, approval, retry authorization,
    cancellation, or permission grants.
-3. `REFERENCE_CHANGE_APPROVED.referenceHash` must exactly match the reviewed
-   reference hash for the current scope.
+3. `REFERENCE_CHANGE_APPROVED.referenceHash` must exactly match the already
+   sealed `referenceHash` for the current cycle. The event re-affirms that
+   existing hash after detached drift; it does not accept a new hash. Changing
+   the reference requires re-init.
 4. A cycle cannot leave `sampling` without both the metric and its counter-metric
    sampled (Goodhart).
 5. A cycle cannot reach `succeeded` without all six required anchors passed for

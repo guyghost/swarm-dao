@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { GRAPH_EVIDENCE_FOLDER, resolveEvidenceRoot } from "../../packages/graph-engineering/src/evidence-root.js";
 import { validateGraphContract } from "../../tools/graph-engineering/contract.js";
 import { evaluateStopGate } from "../../tools/graph-engineering/stop-gate.js";
 
@@ -30,7 +31,7 @@ const main = async (): Promise<void> => {
     return;
   }
 
-  const evidenceRoot = resolve(root, "evidence/graph-runs");
+  const evidenceRoot = resolveEvidenceRoot(GRAPH_EVIDENCE_FOLDER, undefined, root);
   const active = await readJsonOrNull(resolve(evidenceRoot, "active-run.json"));
   if (!active || typeof active !== "object" || !("runId" in active) || typeof active.runId !== "string") {
     process.stdout.write(`${JSON.stringify(evaluateStopGate(null))}\n`);

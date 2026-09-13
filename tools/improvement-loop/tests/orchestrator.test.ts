@@ -243,6 +243,48 @@ describe("improvement-orchestrator wiring — human gates", () => {
     }
   });
 
+  it("rejects RETRY_WORKERS after ORCHESTRATOR_MAX_WORKER_RETRIES", async () => {
+    const evidenceRoot = await mkdtemp(join(tmpdir(), "orchestrator-retry-cap-"));
+    const cycleRoot = await mkdtemp(join(tmpdir(), "orchestrator-retry-cap-cycles-"));
+    const workDir = await makeWorkDir();
+    try {
+      const runner = await OrchestratorRunner.create({ seriesId: "series-retry-cap", evidenceRoot });
+      await startSeries(runner);
+      await runner.once({ cycleEvidenceRoot: cycleRoot });
+
+      const failing = {
+        cycleEvidenceRoot: cycleRoot,
+        workDir,
+        runWorker: fakeWorker({ sensor: { ok: false, error: "herdr agent blocked" } }),
+      };
+      for (let attempt = 0; attempt < ORCHESTRATOR_MAX_WORKER_RETRIES; attempt += 1) {
+        const failed = await runner.once(failing);
+        expect(failed.event).toBe("WORKERS_FAILED");
+        expect(runner.snapshot().state).toBe("workerFailed");
+        const retry = await runner.submit({ type: "RETRY_WORKERS", source: "human" });
+        expect(retry.accepted).toBe(true);
+        expect(runner.snapshot().state).toBe("sampling");
+      }
+
+      const lastFail = await runner.once(failing);
+      expect(lastFail.event).toBe("WORKERS_FAILED");
+      expect(runner.snapshot().state).toBe("workerFailed");
+      const exhausted = await runner.submit({ type: "RETRY_WORKERS", source: "human" });
+      expect(exhausted.accepted).toBe(false);
+      expect(exhausted.issues.join("\n")).toMatch(/RETRY_WORKERS exhausted/);
+      expect(runner.snapshot().state).toBe("workerFailed");
+
+      const restored = await OrchestratorRunner.create({ seriesId: "series-retry-cap", evidenceRoot });
+      const restoredRetry = await restored.submit({ type: "RETRY_WORKERS", source: "human" });
+      expect(restoredRetry.accepted).toBe(false);
+      expect(restoredRetry.issues.join("\n")).toMatch(/RETRY_WORKERS exhausted/);
+    } finally {
+      await rm(evidenceRoot, { recursive: true, force: true });
+      await rm(cycleRoot, { recursive: true, force: true });
+      await rm(workDir, { recursive: true, force: true });
+    }
+  });
+
   it("routes a runner-rejected sample signal to the sampling phase with the runner's issues", async () => {
     const evidenceRoot = await mkdtemp(join(tmpdir(), "orchestrator-reject-"));
     const cycleRoot = await mkdtemp(join(tmpdir(), "orchestrator-reject-cycles-"));

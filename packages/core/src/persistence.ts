@@ -4,6 +4,7 @@
 
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { FileDaoStateRepository, withFileLock } from "./adapters/persistence/file-dao-state.repository.js";
 import { logger } from "./observability/logging.js";
 import { recordVoteCast } from "./observability/metrics.js";
 import type { DaoStateRepositoryPort } from "./ports/repository.js";
@@ -141,7 +142,7 @@ async function writeJsonFile(filePath: string, value: unknown): Promise<void> {
  * content — never a partial write. The temp file lives in the same directory
  * to guarantee a same-filesystem rename.
  */
-async function writeAtomic(filePath: string, content: string): Promise<void> {
+export async function writeAtomic(filePath: string, content: string): Promise<void> {
   const tmpPath = `${filePath}.tmp-${process.pid}-${randomToken()}`;
   try {
     await fs.writeFile(tmpPath, content, "utf-8");
@@ -364,13 +365,20 @@ export async function loadState(cwd: string, options?: { legacyDirectories?: str
   const daoRoot = await initStorage(cwd);
   const statePath = path.join(daoRoot, STATE_FILE);
 
-  let loaded: DAOState | null = null;
+  let raw: string;
   try {
-    loaded = await readJsonFile<DAOState>(statePath);
-  } catch {
-    return null;
+    raw = await fs.readFile(statePath, "utf-8");
+  } catch (error) {
+    if (hasErrorCode(error, "ENOENT")) return null;
+    throw new Error(`Failed to read DAO state at ${statePath}: ${getErrorMessage(error)}`);
   }
-  if (!loaded) return null;
+
+  let loaded: DAOState;
+  try {
+    loaded = parseJsonText<DAOState>(raw, statePath);
+  } catch (error) {
+    throw new Error(`Corrupt DAO state at ${statePath}: ${getErrorMessage(error)}`);
+  }
 
   // Ensure state shape exists (guard against corrupted/legacy state.json)
   if (!Array.isArray(loaded.proposals)) loaded.proposals = [];
@@ -404,7 +412,7 @@ export async function loadState(cwd: string, options?: { legacyDirectories?: str
   }, 0);
   if (loaded.nextAuditId <= highestAuditId) loaded.nextAuditId = highestAuditId + 1;
 
-  activeRepository = new CompatibilityFileRepository(loaded);
+  activeRepository = FileDaoStateRepository.fromLoaded(loaded, raw);
   // Disk is now the source of truth for the freshly loaded state; reset the
   // cache so the first subsequent save reflects the real on-disk content.
   resetWriteCache();
@@ -465,9 +473,10 @@ async function persistState(state: DAOState): Promise<void> {
   const statePath = path.join(daoRoot, STATE_FILE);
 
   await fs.mkdir(daoRoot, { recursive: true });
-  await writeJsonFileIfChanged(statePath, state);
-
-  await persistDecisions(state);
+  await withFileLock(daoRoot, async () => {
+    await writeJsonFileIfChanged(statePath, state);
+    await persistDecisions(state);
+  });
 }
 
 export async function saveDecisions(): Promise<void> {

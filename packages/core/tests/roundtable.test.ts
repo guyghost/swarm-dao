@@ -70,4 +70,39 @@ describe("intelligence/roundtable", () => {
     }
     expect(suggestions.length).toBe(2);
   });
+
+  it("surfaces spawnAgent error fields instead of treating them as empty suggestions", async () => {
+    const agent: DAOAgent = {
+      id: "strategist",
+      name: "Strategist",
+      role: "r",
+      description: "d",
+      systemPrompt: "sp",
+      weight: 1,
+    };
+    const adapter = {
+      spawnAgent: async (): Promise<AgentOutput> => ({
+        agentId: "strategist",
+        agentName: "Strategist",
+        role: "r",
+        content: "",
+        durationMs: 1,
+        error: "manual sub-agent dispatch required",
+      }),
+      spawnAgents: async (): Promise<AgentOutput[]> => [],
+    };
+
+    const suggestions = await runRoundTable(adapter, [agent], 1, buildModelResolutionContext("dao-default", {}), {
+      now: () => "2031-01-01T00:00:00.000Z",
+    });
+
+    expect(suggestions).toEqual([
+      {
+        agentId: "strategist",
+        agentName: "Strategist",
+        content: "",
+        error: "manual sub-agent dispatch required",
+      },
+    ]);
+  });
 });

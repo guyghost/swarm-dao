@@ -7,6 +7,7 @@
 
 import { promises as fs } from "node:fs";
 import { join, resolve, sep } from "node:path";
+import { writeAtomic } from "../../persistence.js";
 import type { ShipAuditSnapshot, ShipAuditStorePort } from "../../ports/ship-audit.js";
 
 const SAFE_ID = /^\d+$/;
@@ -37,7 +38,7 @@ export class FsShipAuditStore implements ShipAuditStorePort {
   public async save(snapshot: ShipAuditSnapshot): Promise<void> {
     const file = this.#fileFor(snapshot.proposalId);
     await fs.mkdir(this.#directory, { recursive: true });
-    await fs.writeFile(file, `${JSON.stringify(snapshot, null, 2)}\n`, "utf8");
+    await writeAtomic(file, `${JSON.stringify(snapshot, null, 2)}\n`);
   }
 
   public async claim(proposalId: number): Promise<{ acquired: boolean; release: () => Promise<void> }> {
