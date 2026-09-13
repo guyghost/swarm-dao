@@ -17,6 +17,10 @@ bun install
 # prunes the symlinks it manages.
 bun run setup-workspace
 
+# Build the workspace packages once (tests import the built dist;
+# `prepare` deliberately does not build on every install).
+bun run build
+
 # Run tests
 bun test
 

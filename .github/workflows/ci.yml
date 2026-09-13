@@ -130,6 +130,11 @@ jobs:
       - name: Set up workspace links and optional peer stubs
         run: bun run setup-workspace
 
+      - name: Build
+        # Internal deps are workspace:* (issue #169.6) and `prepare` no longer
+        # builds on install (issue #169.4): benchmarks import the local dist.
+        run: bun run build
+
       # Runner timings are not comparable across machines, so the baseline is
       # the previous run of this job, restored from cache.
       # v2: re-baseline after 9eee0bf (inter-process persist lock) made the
