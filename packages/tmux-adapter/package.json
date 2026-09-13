@@ -1,7 +1,7 @@
 {
   "name": "@guyghost/swarm-dao-tmux-adapter",
-  "version": "0.3.1",
-  "description": "Swarm DAO tmux host \u2014 each deliberation agent runs as its own watchable tmux pane",
+  "version": "0.4.0",
+  "description": "Swarm DAO tmux host — each deliberation agent runs as its own watchable tmux pane",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

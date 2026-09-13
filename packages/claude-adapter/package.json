@@ -1,7 +1,7 @@
 {
   "name": "@guyghost/swarm-dao-claude-adapter",
-  "version": "0.4.3",
-  "description": "Swarm DAO governance adapter for Claude Code \u2014 MCP server, native config, slash commands, and CLAUDE.md",
+  "version": "0.4.4",
+  "description": "Swarm DAO governance adapter for Claude Code — MCP server, native config, slash commands, and CLAUDE.md",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

@@ -1,7 +1,7 @@
 {
   "name": "@guyghost/swarm-dao-herdr-adapter",
-  "version": "0.4.3",
-  "description": "Swarm DAO herdr host \u2014 each deliberation agent runs as a real coding agent in a herdr workspace",
+  "version": "0.5.0",
+  "description": "Swarm DAO herdr host — each deliberation agent runs as a real coding agent in a herdr workspace",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

@@ -1,5 +1,42 @@
 # @guyghost/swarm-dao-pi-adapter
 
+## 0.8.0
+
+### Minor Changes
+
+- 2da3218: Agent runtime configuration: per-agent LLM model and harness (pi, claude, codex, copilot, opencode).
+
+  - Core: `runtime.defaultHarness` / `runtime.harnessModelFlag` project config, `harness` agent frontmatter, deterministic resolution (D1: agent → project → host default), typed E1–E5 failures surfaced per-agent instead of throwing. Runtime resolution activates only when a signal exists — hosts that never opted in keep the legacy dispatch.
+  - Adapters: herdr spawns `harness <kind> -- <args> --model <model>`; tmux supports per-agent `agentCommands`; pi enforces the host boundary (only "pi" harness); opencode/mcp declare their host default.
+  - CLI: `dao child` gains `--harness-model-flag`, tmux `agentCommands`, and the kind fallback chain `--kind` → `herdr.kind` → `runtime.defaultHarness` → `pi`.
+
+- 98b5956: pi adapter spawns real agent subprocesses by default; simulated fallback is marked
+
+  `/dao roundtable` and deliberation produced canned, generic proposals because
+  real Pi subprocess spawning was opt-in behind the undocumented
+  `SWARM_DAO_ENABLE_PI_SPAWN=1` — the grounded project brief never reached a
+  model. Spawning is now the default (disable with `SWARM_DAO_DISABLE_PI_SPAWN=1`;
+  legacy `SWARM_DAO_ENABLE_PI_SPAWN=0` still disables). Whenever the simulated
+  fallback is used, its output is explicitly marked "⚠️ Simulated fallback
+  output" (round-table proposals created from it carry the marker) and a warn
+  log names the reason: spawning disabled, unresolvable model, or spawn failure.
+
+### Patch Changes
+
+- 96cf36b: Enforce type-specific vote thresholds, contain evidence roots, fail closed on Pi spawn fallback, and lock cycle journals against concurrent writers.
+- Updated dependencies [2da3218]
+- Updated dependencies [96cf36b]
+- Updated dependencies [f8d6167]
+- Updated dependencies [9eee0bf]
+- Updated dependencies [6487091]
+- Updated dependencies [0a96294]
+- Updated dependencies [f8d6167]
+- Updated dependencies [72ad3ed]
+  - @guyghost/swarm-dao-core@1.0.0
+  - @guyghost/swarm-dao-graph@0.3.6
+  - @guyghost/swarm-dao-improvement@0.6.6
+  - @guyghost/swarm-dao-product@0.3.6
+
 ## 0.7.4
 
 ### Patch Changes

@@ -1,7 +1,7 @@
 {
   "name": "@guyghost/swarm-dao-graph",
-  "version": "0.3.5",
-  "description": "Swarm DAO Graph Engineering run executor \u2014 journal-replayed change-control runs with strict signal validation",
+  "version": "0.3.6",
+  "description": "Swarm DAO Graph Engineering run executor — journal-replayed change-control runs with strict signal validation",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

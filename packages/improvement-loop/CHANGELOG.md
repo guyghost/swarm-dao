@@ -1,5 +1,21 @@
 # @guyghost/swarm-dao-improvement
 
+## 0.6.6
+
+### Patch Changes
+
+- 96cf36b: Enforce type-specific vote thresholds, contain evidence roots, fail closed on Pi spawn fallback, and lock cycle journals against concurrent writers.
+- Updated dependencies [2da3218]
+- Updated dependencies [96cf36b]
+- Updated dependencies [f8d6167]
+- Updated dependencies [9eee0bf]
+- Updated dependencies [6487091]
+- Updated dependencies [0a96294]
+- Updated dependencies [f8d6167]
+- Updated dependencies [72ad3ed]
+  - @guyghost/swarm-dao-core@1.0.0
+  - @guyghost/swarm-dao-herdr-adapter@0.5.0
+
 ## 0.6.5
 
 ### Patch Changes
