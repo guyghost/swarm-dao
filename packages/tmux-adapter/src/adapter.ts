@@ -150,7 +150,9 @@ export function createTmuxHostAdapter(options: TmuxAdapterOptions): HostAdapter 
     if (resolved !== root && !resolved.startsWith(`${root}${path.sep}`)) {
       throw new Error(`path escapes the working directory: ${file}`);
     }
-    return path.resolve(root, file);
+    // Return the path that was checked — not the lexical `root/file` — so a
+    // symlink swapped after the check cannot redirect the subsequent I/O.
+    return resolved;
   };
 
   const prepare = async (proposal: Proposal, agent: DAOAgent, prompt: string): Promise<PreparedRun> => {

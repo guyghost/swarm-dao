@@ -292,6 +292,20 @@ describe("tmux host adapter", () => {
     }
   });
 
+  test("writes through an in-workspace symlink land on the checked canonical path", async () => {
+    const fake = fakeTmux();
+    const adapter = createTmuxHostAdapter({ workDir, runner: fake.runner, command: "x" });
+    const target = path.join(workDir, "canonical");
+    await fs.mkdir(target, { recursive: true });
+    await fs.symlink(target, path.join(workDir, "alias"));
+    await adapter.writeFile("alias/note.txt", "bound");
+    expect(await fs.readFile(path.join(target, "note.txt"), "utf8")).toBe("bound");
+    // I/O used the resolved target: replacing the symlink afterwards cannot
+    // redirect a path the adapter already returned.
+    await fs.rm(path.join(workDir, "alias"), { force: true });
+    expect(await fs.readFile(path.join(target, "note.txt"), "utf8")).toBe("bound");
+  });
+
   test("spawnAgents fans out one session per agent", async () => {
     const fake = fakeTmux();
     fake.pane("## Analysis\na\n## Vote\nfor\n## Reasoning\nr");

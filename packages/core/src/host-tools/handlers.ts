@@ -100,23 +100,38 @@ function repositoryOrLegacy(repository?: DaoStateRepositoryPort): DaoStateReposi
   return repository ?? new LegacyDaoStateRepository();
 }
 
+/** True when the process-global repo already owns this workspace.
+ * Tests often set daoRoot === workDir; file repos use workDir/.dao. */
+function globalRepoOwnsWorkDir(workDir: string): boolean {
+  try {
+    const daoRoot = path.resolve(getState().daoRoot);
+    const cwd = path.resolve(workDir);
+    return daoRoot === cwd || daoRoot === path.join(cwd, ".dao");
+  } catch {
+    return false;
+  }
+}
+
 async function resolveRepository(
   workDir?: string,
   repository?: DaoStateRepositoryPort,
 ): Promise<DaoStateRepositoryPort> {
   if (repository) return repository;
-  try {
-    getState();
-    return new LegacyDaoStateRepository();
-  } catch {
-    // No process-global repository yet.
-  }
   if (!workDir) return new LegacyDaoStateRepository();
+  if (globalRepoOwnsWorkDir(workDir)) return new LegacyDaoStateRepository();
   const key = path.resolve(workDir);
   let pending = fileRepos.get(key);
   if (!pending) {
     pending = FileDaoStateRepository.open(key).then((repo) => {
-      setRepository(repo);
+      // Promote only when nothing is installed yet. Never overwrite another
+      // workspace's process-global repository (MCP/OpenCode/Pi are long-lived).
+      if (!globalRepoOwnsWorkDir(key)) {
+        try {
+          getState();
+        } catch {
+          setRepository(repo);
+        }
+      }
       return repo;
     });
     fileRepos.set(key, pending);
