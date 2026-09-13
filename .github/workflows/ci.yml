@@ -59,48 +59,85 @@ jobs:
         run: bun run typecheck
 
       - name: Test
-        # TEMPORARY (test-hang diagnosis): the freeze is deterministic on
-        # GitHub runners, right after the last test of dry-run.test.ts, when
-        # dry-run runs as the 10th file. It does NOT reproduce in docker with
-        # the same files/order/bun version. Pairwise bisection on the runner:
-        #   E0: the 10-file prefix (known hang)          -> revalidate
-        #   E1: dry-run alone                            -> file-intrinsic?
-        #   E2..E10: each earlier file paired w/ dry-run -> find the couple.
-        # Each experiment is capped at 20s (the hang hits ~1s in).
+        # TEMPORARY (test-hang diagnosis): the minimal faulty pair is
+        # pi-spawn.test.ts + dry-run.test.ts — deterministic freeze on the
+        # runner right after dry-run's last test (~1s in), passing locally
+        # (docker arm64 AND amd64 emulation, same bun). Since it only
+        # reproduces on the runner, this step captures forensics from the
+        # frozen process ON the runner:
+        #   run 1: revalidate the pair in foreground (timeout 25)
+        #   run 2: background run; if frozen, gdb attach x3 backtrace
+        #          samples + per-thread CPU ticks delta + kernel stack
+        #   run 3: same with BUN_JSC_useJIT=0 to classify a JIT bug
         run: |
           set +e
-          DRY=packages/core/tests/dry-run.test.ts
-          PRE=(
-            packages/copilot-adapter/tests/copilot-adapter.test.ts
-            packages/tmux-adapter/tests/adapter.test.ts
-            packages/tmux-adapter/tests/integration.tmux.test.ts
-            packages/codex-adapter/tests/codex-adapter.test.ts
-            packages/graph-engineering/tests/ai-channel.test.ts
-            packages/product-loop/tests/ai-channel.test.ts
-            packages/pi-adapter/tests/pi-adapter.test.ts
-            packages/pi-adapter/tests/pi-spawn.test.ts
-            packages/core/tests/governance.test.ts
-          )
-          hang=0
-          exp() {
-            name=$1; shift
+          PAIR="packages/pi-adapter/tests/pi-spawn.test.ts packages/core/tests/dry-run.test.ts"
+
+          sudo apt-get update -qq >/dev/null 2>&1
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq gdb >/dev/null 2>&1
+          echo "gdb: $(command -v gdb || echo MISSING)"
+
+          thread_ticks() {
+            for T in /proc/$1/task/*; do
+              awk '{printf "  tid=%s comm=%-16s state=%s utime=%s stime=%s\n", $1, $2, $3, $14, $15}' "$T/stat" 2>/dev/null
+            done
+          }
+
+          capture_forensics() {
+            BPID=$1
+            echo ">>> FROZEN (pid $BPID) — forensics:"
+            echo "--- wchan: $(sudo cat /proc/$BPID/wchan 2>/dev/null)"
+            echo "--- kernel stack (main):"; sudo cat /proc/$BPID/stack 2>/dev/null || echo "  (unavailable)"
+            grep -E 'Threads|voluntary_ctxt' /proc/$BPID/status 2>/dev/null || true
+            echo "--- thread ticks sample A:"; thread_ticks "$BPID"
+            sleep 2
+            echo "--- thread ticks sample B (+2s; spinning thread's utime jumps):"; thread_ticks "$BPID"
+            for s in 1 2 3; do
+              echo "--- gdb backtrace sample $s:"
+              sudo gdb -p "$BPID" -batch -ex "thread apply all bt 25" 2>&1 \
+                | grep -vE 'Downloading|Missing separate|warning:|\[Thread|Reading symbols|no debugging' \
+                | head -100
+              sleep 2
+            done
+          }
+
+          run_bg() {
+            label=$1
+            LOG=/tmp/bun-$label.log
             echo ""
-            echo "===== EXPERIMENT $name: $# files ====="
-            printf '  %s\n' "$@"
-            echo "===== begin $name $(date -u +%H:%M:%S.%3NZ) ====="
-            rc=0
-            TERM=dumb script -qec "timeout 20 bun test $*" /dev/null || rc=$?
-            echo "===== end $name rc=$rc $(date -u +%H:%M:%S.%3NZ) ====="
-            if [ "$rc" = "124" ]; then echo ">>> $name HUNG <<<"; hang=1; fi
+            echo "===== $label: starting $(date -u +%H:%M:%S.%3NZ) ====="
+            TERM=dumb bun test $PAIR >"$LOG" 2>&1 &
+            BPID=$!
+            frozen=0
+            for i in $(seq 1 45); do
+              kill -0 $BPID 2>/dev/null || break
+              sleep 1
+            done
+            if kill -0 $BPID 2>/dev/null; then
+              frozen=1
+              echo "===== $label last log lines:"
+              tail -15 "$LOG"
+              capture_forensics "$BPID"
+              sudo kill -9 $BPID 2>/dev/null
+              wait $BPID 2>/dev/null
+            else
+              wait $BPID; rc=$?
+              echo "===== $label FINISHED rc=$rc after ${i}s:"
+              tail -5 "$LOG"
+            fi
+            echo ">>> $label frozen=$frozen <<<"
             return 0
           }
-          exp E0 "${PRE[@]}" "$DRY"
-          exp E1 "$DRY"
-          i=2
-          for f in "${PRE[@]}"; do
-            exp "E$i" "$f" "$DRY"
-            i=$((i+1))
-          done
+
+          echo "===== run 1: foreground revalidation ====="
+          rc=0
+          TERM=dumb timeout 25 bun test $PAIR || rc=$?
+          echo "===== run 1 rc=$rc (124 = frozen) ====="
+
+          run_bg pair
+          export BUN_JSC_useJIT=0
+          run_bg nojit
+          unset BUN_JSC_useJIT
           exit 99
 
       - name: Integration tests
