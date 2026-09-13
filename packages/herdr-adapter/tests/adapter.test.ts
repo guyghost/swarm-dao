@@ -445,7 +445,7 @@ describe("herdr host adapter", () => {
       "[Your analysis]", // echoed charter template
       "",
       "## Vote",
-      "for | against | abstain", // ← the tally would parse this as "for"!
+      "for | against | abstain", // echoed charter placeholder — must not vote
       "",
       "## Reasoning",
       "[Why you voted this way]",

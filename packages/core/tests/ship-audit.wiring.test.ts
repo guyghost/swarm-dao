@@ -282,6 +282,24 @@ describe("ship-audit wiring", () => {
     expect(repository.get().proposals.find((p) => p.id === proposalId)?.status).toBe("controlled");
   });
 
+  test("a change to agent outputs or dry-run invalidates the fingerprint", () => {
+    const proposal = repository.get().proposals.find((p) => p.id === proposalId);
+    if (!proposal) throw new Error("missing");
+    const baseline = computeShipFingerprint(proposal);
+    const withOutputs = {
+      ...proposal,
+      agentOutputs: [
+        ...(proposal.agentOutputs ?? []),
+        { agentId: "critic", agentName: "Critic", role: "risk", content: "## Risk Score (1-10)\n9", durationMs: 1 },
+      ],
+    };
+    expect(computeShipFingerprint(withOutputs)).not.toBe(baseline);
+    const withDryRun = { ...proposal, dryRunAt: "2026-01-01T00:00:00.000Z" };
+    expect(computeShipFingerprint(withDryRun)).not.toBe(baseline);
+    const reorderedVotes = { ...proposal, votes: [...(proposal.votes ?? [])].reverse() };
+    expect(computeShipFingerprint(reorderedVotes)).toBe(baseline);
+  });
+
   test("the audited force path still enforces dependencies", async () => {
     // Give the proposal an unexecuted dependency.
     const state = repository.get();

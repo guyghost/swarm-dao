@@ -80,13 +80,11 @@ export class DeliberateProposalUseCase {
     } catch (error) {
       // Rollback (issue #160): without this, a worker/host failure left the
       // proposal stuck in `deliberating` with no recovery path — DELIBERATE is
-      // not accepted again from there, and only terminal DISCARD/ERROR remain.
+      // not accepted again from there. ABORT_DELIBERATION returns to `open`
+      // so the proposal can be re-deliberated; ERROR would strand it in
+      // `failed` with only REJECT as an exit.
       const message = error instanceof Error ? error.message : String(error);
-      dispatchProposalEvent(
-        proposal,
-        { type: "ERROR", message: `Deliberation failed: ${message}` },
-        { clock: this.dependencies.clock },
-      );
+      dispatchProposalEvent(proposal, { type: "ABORT_DELIBERATION" }, { clock: this.dependencies.clock });
       this.audit(state, proposal.id, "intelligence", "deliberation_failed", "system", message);
       await this.dependencies.repository.persist();
       return { ok: false, error: `Deliberation failed: ${message}` };

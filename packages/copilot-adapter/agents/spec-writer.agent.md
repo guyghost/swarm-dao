@@ -34,7 +34,7 @@ For each proposal, assess:
 [Your specification analysis]
 
 ## Vote
-for | against | abstain
+<for|against|abstain>
 
 ## Reasoning
 [Why you voted this way]

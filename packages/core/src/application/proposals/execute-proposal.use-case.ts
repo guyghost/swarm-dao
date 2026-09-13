@@ -50,7 +50,10 @@ export class ExecuteProposalUseCase {
     const proposal = state.proposals.find((candidate) => candidate.id === command.proposalId);
     if (!proposal) return { ok: false, error: `Proposal #${command.proposalId} not found.` };
     if (proposal.status !== "controlled") {
-      return { ok: false, error: `Must be controlled (current: ${proposal.status}). Run dao_control first.` };
+      return {
+        ok: false,
+        error: `Must be controlled (current: ${proposal.status}). Run control gates first (dao_control / swarm-dao control).`,
+      };
     }
 
     const now = this.dependencies.clock.now();

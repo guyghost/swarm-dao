@@ -147,13 +147,14 @@ export function herdrAgentName(prefix: string, proposalId: number, agentId: stri
 /**
  * Terminals ECHO the submitted prompt, so the harvested transcript contains
  * the charter's output-format template — including the literal line
- * `for | against | abstain`, which the tally's vote parser would read as a
- * vote for "for". Strip those template lines: a real vote line never
- * contains pipes. Character classes are [ \t]-only so no quantifier can
- * cross a newline (polynomial ReDoS under the /m anchors).
+ * `for | against | abstain` or `<for|against|abstain>`. A real vote line is
+ * exclusively one word. Character classes are [ \t]-only so no quantifier
+ * can cross a newline (polynomial ReDoS under the /m anchors).
  */
 export function stripEchoedVoteTemplates(content: string): string {
-  return content.replace(/^[ \t]*for[ \t]*\|[ \t]*against[ \t]*\|[ \t]*abstain[ \t]*$/gim, "");
+  return content
+    .replace(/^[ \t]*for[ \t]*\|[ \t]*against[ \t]*\|[ \t]*abstain[ \t]*$/gim, "")
+    .replace(/^[ \t]*<for\|against\|abstain>[ \t]*$/gim, "");
 }
 
 export interface HerdrAdapterOptions {

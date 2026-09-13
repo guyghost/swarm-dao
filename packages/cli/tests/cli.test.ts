@@ -242,3 +242,25 @@ describe("cli.ts — product runs", () => {
     }
   });
 });
+
+describe("cli.ts — vote weights and control", () => {
+  it("uses the council agent's registry weight and rejects unknown agents", async () => {
+    const tmp = await fs.mkdtemp(path.join(tmpdir(), "swarm-cli-vote-"));
+    try {
+      await main(["init"], tmp);
+      await main(["setup"], tmp);
+      expect(
+        await main(["propose", "--title", "Dark", "--type", "product-feature", "--description", "theme"], tmp),
+      ).toBe(0);
+      expect(await main(["vote", "1", "--position", "for", "--reasoning", "ok", "--agent", "critic"], tmp)).toBe(0);
+      const state = JSON.parse(await fs.readFile(path.join(tmp, ".dao/state.json"), "utf8")) as {
+        proposals: Array<{ votes: Array<{ agentId: string; weight: number }> }>;
+      };
+      expect(state.proposals[0]?.votes).toEqual([expect.objectContaining({ agentId: "critic", weight: 3 })]);
+      expect(await main(["vote", "1", "--position", "for", "--reasoning", "ok", "--agent", "nobody"], tmp)).toBe(1);
+      expect(await main(["control", "1"], tmp)).toBe(1);
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
+});

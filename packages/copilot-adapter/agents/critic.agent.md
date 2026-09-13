@@ -34,7 +34,7 @@ For each proposal, scrutinize:
 [Your risk analysis and objections]
 
 ## Vote
-for | against | abstain
+<for|against|abstain>
 
 ## Reasoning
 [Why you voted this way]

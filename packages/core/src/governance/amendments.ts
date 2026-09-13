@@ -2,6 +2,7 @@
 // Swarm DAO Core — Self-Amending DAO
 // ============================================================
 
+import { GATE_IDS } from "../control/gates.js";
 import { getState } from "../persistence.js";
 import {
   type AmendmentPayload,
@@ -96,6 +97,10 @@ export function validateAmendmentPayload(payload: AmendmentPayload): AmendmentVa
         (!payload.removeGates || payload.removeGates.length === 0)
       ) {
         errors.push("At least one gate to add or remove is required");
+      }
+      const known = new Set(GATE_IDS);
+      for (const gate of payload.addGates ?? []) {
+        if (!known.has(gate)) errors.push(`Unknown gate '${gate}'`);
       }
       break;
     }

@@ -32,7 +32,10 @@ export class ShipProposalUseCase {
     if (!proposal) return { ok: false, error: `Proposal #${command.proposalId} not found.`, shipped: [] };
 
     const pending: number[] = [];
-    if (!command.force) {
+    // `--force` without `--cascade` skips dependency checks and ships only
+    // the target. `--cascade` always resolves the chain — including when
+    // combined with `--force` — so force-cascade cannot silently drop deps.
+    if (!(command.force && !command.cascade)) {
       const resolution = getUnexecutedDependencies(proposal.id, state.proposals);
       if (resolution.error) return { ok: false, error: resolution.error, shipped: [] };
       pending.push(...(resolution.order ?? []));
