@@ -56,7 +56,8 @@ describe("Compatibility: MCP graph & product run surface", () => {
   it("rejects an unknown attention source", async () => {
     const result = await client.callTool({ name: "dao_attention", arguments: { sources: ["vibes"] } });
     expect(result.isError).toBe(true);
-    expect(textOf(result)).toContain("invalid source");
+    // Enforced by the schema validation layer (issue #161).
+    expect(textOf(result)).toMatch(/invalid source|sources\[0\] must be one of/);
   });
 
   it("reads an improvement series snapshot read-only", async () => {

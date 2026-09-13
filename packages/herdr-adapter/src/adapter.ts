@@ -306,6 +306,35 @@ function agentState(result: HerdrJson["result"]): string | null {
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
+/** Resolve adapter file access against workDir, contained (like other hosts).
+ * Symlinks are resolved: a repo symlink cannot escape the root. Returns the
+ * RESOLVED path — the lexical path could be re-symlinked between this check
+ * and the actual read/write (TOCTOU symlink escape, issue #162). */
+export async function resolveHerdrContainedPath(workDir: string, file: string): Promise<string> {
+  const root = await fs.realpath(path.resolve(workDir)).catch(() => path.resolve(workDir));
+  // Deepest EXISTING ancestor's realpath, then rejoin the rest — containment
+  // must hold even for files that do not exist yet.
+  const realPathOf = async (target: string): Promise<string> => {
+    let current = target;
+    const tail: string[] = [];
+    for (;;) {
+      const real = await fs.realpath(current).catch(() => null);
+      if (real !== null) {
+        return tail.length === 0 ? real : path.join(real, ...[...tail].reverse());
+      }
+      const parent = path.dirname(current);
+      if (parent === current) return target;
+      tail.push(path.basename(current));
+      current = parent;
+    }
+  };
+  const resolved = await realPathOf(path.resolve(root, file));
+  if (resolved !== root && !resolved.startsWith(`${root}${path.sep}`)) {
+    throw new Error(`path escapes the working directory: ${file}`);
+  }
+  return resolved;
+}
+
 /** herdr machine-readable error code from a failed command response, if any. */
 export function herdrErrorCode(stderr: string, stdout: string): string | null {
   const parsed = parseHerdrJson(stderr.trim()) ?? parseHerdrJson(stdout.trim());
@@ -496,33 +525,7 @@ export function createHerdrHostAdapter(options: HerdrAdapterOptions): HostAdapte
   const parentWorkspaceId = options.parentWorkspaceId ?? herdrParentWorkspaceId();
   const agentArgs = options.agentArgs ?? [];
 
-  /** Resolve the deepest EXISTING ancestor's realpath, then rejoin the rest —
-   * containment must hold even for files that do not exist yet. */
-  const realPathOf = async (target: string): Promise<string> => {
-    let current = target;
-    const tail: string[] = [];
-    for (;;) {
-      const real = await fs.realpath(current).catch(() => null);
-      if (real !== null) {
-        return tail.length === 0 ? real : path.join(real, ...[...tail].reverse());
-      }
-      const parent = path.dirname(current);
-      if (parent === current) return target;
-      tail.push(path.basename(current));
-      current = parent;
-    }
-  };
-
-  /** Resolve adapter file access against workDir, contained (like other hosts).
-   * Symlinks are resolved: a repo symlink cannot escape the root. */
-  const containedPath = async (file: string): Promise<string> => {
-    const root = await fs.realpath(path.resolve(options.workDir)).catch(() => path.resolve(options.workDir));
-    const resolved = await realPathOf(path.resolve(root, file));
-    if (resolved !== root && !resolved.startsWith(`${root}${path.sep}`)) {
-      throw new Error(`path escapes the working directory: ${file}`);
-    }
-    return path.resolve(root, file);
-  };
+  const containedPath = (file: string): Promise<string> => resolveHerdrContainedPath(options.workDir, file);
 
   const harvest = async (
     proposal: Proposal,

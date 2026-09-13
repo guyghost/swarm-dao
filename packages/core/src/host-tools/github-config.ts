@@ -1,6 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { configureGitHub, isGitHubEnabled } from "../integrations/github.js";
+import { configureGitHub, isGitHubEnabled, validateGitHubSlug } from "../integrations/github.js";
 import { logger } from "../observability/logging.js";
 import { writeAtomic } from "../persistence.js";
 
@@ -37,6 +37,14 @@ export async function loadGitHubConfigFromDaoRoot(daoRoot: string): Promise<bool
 }
 
 export async function saveGitHubConfigToDaoRoot(daoRoot: string, githubConfig: DaoGitHubConfig): Promise<void> {
+  // Validate BEFORE persisting (issue #166): invalid owner/repo must never
+  // reach .dao/config.json, where they would be re-loaded and interpolated
+  // into `gh api` routes on every later run.
+  const ownerError = validateGitHubSlug("owner", githubConfig.owner);
+  if (ownerError) throw new Error(ownerError);
+  const repoError = validateGitHubSlug("repo", githubConfig.repo);
+  if (repoError) throw new Error(repoError);
+
   await fs.mkdir(daoRoot, { recursive: true });
   const configPath = path.join(daoRoot, "config.json");
   let configData: Record<string, unknown> = {};

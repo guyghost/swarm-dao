@@ -8,6 +8,7 @@
 // are managed entirely by `gh`.
 
 import { spawn } from "node:child_process";
+import { validateGitRef } from "../delivery/execution-isolation.js";
 import { logger } from "../observability/logging.js";
 import type { Proposal } from "../types/index.js";
 import { slugify } from "./utils.js";
@@ -23,7 +24,38 @@ interface GitHubConfig {
 
 let config: GitHubConfig | null = null;
 
+/** GitHub owner/repo charset (issue #166): values are interpolated into
+ *  `gh api repos/${owner}/${repo}/…` routes run with the user's credentials.
+ *  Alphanumeric plus `.`, `_`, `-`; `/`, `\`, control characters and `..`
+ *  are rejected so route routing cannot be manipulated. */
+const GITHUB_SLUG = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+export function validateGitHubSlug(kind: "owner" | "repo", value: string): string | null {
+  if (typeof value !== "string" || value.length === 0) return `${kind} must not be empty`;
+  if (value.length > 100) return `${kind} is too long (max 100 characters)`;
+  if (!GITHUB_SLUG.test(value)) {
+    return `${kind} '${value}' must match ${GITHUB_SLUG.toString()} (no '/', '\\', '..', or control characters)`;
+  }
+  if (value.includes("..")) return `${kind} must not contain '..'`;
+  return null;
+}
+
 export function configureGitHub(cfg: Partial<GitHubConfig>): void {
+  // Validate at the chokepoint (issue #166): every persistence path (save,
+  // load from .dao/config.json, CLI flags) funnels through here, and these
+  // values reach `gh api` route interpolation with the user's credentials.
+  if (cfg.owner !== undefined) {
+    const error = validateGitHubSlug("owner", cfg.owner);
+    if (error) throw new Error(`Invalid GitHub configuration: ${error}`);
+  }
+  if (cfg.repo !== undefined) {
+    const error = validateGitHubSlug("repo", cfg.repo);
+    if (error) throw new Error(`Invalid GitHub configuration: ${error}`);
+  }
+  if (cfg.defaultBranch !== undefined && cfg.defaultBranch.length > 0) {
+    const error = validateGitRef(cfg.defaultBranch);
+    if (error) throw new Error(`Invalid GitHub configuration: defaultBranch: ${error}`);
+  }
   config = { ...config, ...cfg } as GitHubConfig;
 }
 
@@ -153,6 +185,11 @@ export async function ghCreatePullRequest(
   },
 ): Promise<{ number: number; url: string } | null> {
   if (!isGitHubEnabled()) return null;
+
+  // headBranch reaches the REST route/body unvalidated from tool args
+  // (issue #166): reject anything that is not a safe git refname.
+  const headError = validateGitRef(options.headBranch);
+  if (headError) throw new Error(`headBranch: ${headError}`);
 
   const data = await ghApi<{ number: number; html_url: string }>(`repos/${config?.owner}/${config?.repo}/pulls`, {
     method: "POST",

@@ -116,6 +116,12 @@ function validateBaseBranch(branch: string): string | null {
   return null;
 }
 
+/** Public alias for refname validation (issue #166): GitHub owner/repo/head
+ *  values interpolated into API routes must satisfy the same git charset. */
+export function validateGitRef(branch: string): string | null {
+  return validateBaseBranch(branch);
+}
+
 /**
  * Derive the isolation plan for a proposal. Deterministic and side-effect
  * free: the same proposal and options always yield the same branch and
