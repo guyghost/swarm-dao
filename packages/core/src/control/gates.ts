@@ -2,6 +2,7 @@
 // Swarm DAO Core — Quality Control Gates
 // ============================================================
 
+import { getUnexecutedDependencies } from "../delivery/dependencies.js";
 import { allCoordinatorsClosed, isDelegationInFlightOnDisk } from "../governance/delegation.utils.js";
 import { type Electorate, resolveTypeThresholds, tallyVotes } from "../governance/voting.js";
 import type { ChecklistItem, ControlCheckResult, DAOConfig, GateResult, Proposal } from "../types/index.js";
@@ -60,12 +61,23 @@ const GATES: GateDefinition[] = [
     check: (proposal, config) => {
       // Parse risk scores from agent outputs
       const riskScores: number[] = [];
-      for (const output of proposal.agentOutputs || []) {
+      for (const output of proposal.agentOutputs ?? []) {
         const match = output.content?.match(/##\s*Risk Score \(1-10\)\s*\n\s*(\d+)/i) ?? null;
         if (match) riskScores.push(parseInt(match[1] ?? "0", 10));
       }
 
-      const avgRisk = riskScores.length > 0 ? riskScores.reduce((a, b) => a + b, 0) / riskScores.length : 0;
+      // Fail closed (issue #168.1): "no scores produced" is NOT "zero risk".
+      // Agents in error, drifted response formats or partial deliberations
+      // must not silently pass the risk gate.
+      if (riskScores.length === 0) {
+        return {
+          passed: false,
+          message: `No risk scores produced by agent outputs — cannot verify risk threshold ${config.riskThreshold}`,
+          details: { avgRisk: null, riskScores },
+        };
+      }
+
+      const avgRisk = riskScores.reduce((a, b) => a + b, 0) / riskScores.length;
 
       const passed = avgRisk <= config.riskThreshold;
       return {
@@ -137,18 +149,20 @@ const GATES: GateDefinition[] = [
         };
       }
 
-      const proposalMap = new Map<number, Proposal>(allProposals.map((p) => [p.id, p]));
-      const missing: number[] = [];
-      const unexecuted: number[] = [];
-
-      for (const id of dependsOn) {
-        const dep = proposalMap.get(id);
-        if (!dep) {
-          missing.push(id);
-        } else if (dep.status !== "executed") {
-          unexecuted.push(id);
-        }
+      // Same transitive semantics as the ship path (issue #168.4): a chain
+      // C→B→A with unexecuted A must fail here, not only at dao_ship.
+      const resolution = getUnexecutedDependencies(proposal.id, [...allProposals]);
+      if (resolution.error) {
+        return {
+          passed: false,
+          message: resolution.error,
+          details: { error: resolution.error },
+        };
       }
+      const unexecuted = resolution.order ?? [];
+
+      const proposalMap = new Map<number, Proposal>(allProposals.map((p) => [p.id, p]));
+      const missing = dependsOn.filter((id) => !proposalMap.has(id));
 
       if (missing.length > 0 || unexecuted.length > 0) {
         const parts: string[] = [];
@@ -299,7 +313,7 @@ function generateChecklist(proposal: Proposal): ChecklistItem[] {
       id: "architecture-reviewed",
       category: "quality",
       label: "Architecture reviewed",
-      checked: proposal.agentOutputs.some((o) => o.agentId === "architect"),
+      checked: (proposal.agentOutputs ?? []).some((o) => o.agentId === "architect"),
       autoChecked: true,
     },
     {
