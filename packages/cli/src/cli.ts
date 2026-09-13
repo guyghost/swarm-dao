@@ -4,10 +4,8 @@
 // Swarm DAO — Standalone CLI
 // ============================================================
 
-import { exec } from "node:child_process";
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { promisify } from "node:util";
 import type {
   AgentOutput,
   CommandRunnerPort,
@@ -26,6 +24,7 @@ import {
   configureGitHub,
   createExecutionWorkspace,
   evaluateShipAuditChallenge,
+  execCommand,
   FileDaoStateRepository,
   FsAttentionStore,
   FsShipAuditStore,
@@ -116,27 +115,13 @@ function info(msg: string): void {
   process.stdout.write(`${msg}\n`);
 }
 
-const execAsync = promisify(exec);
-
-/** CommandRunnerPort backed by the local shell, for git workspace effects. */
+/** CommandRunnerPort backed by the core shell-free execCommand, for git
+ * workspace effects. execCommand filters shell metacharacters and spawns
+ * with shell: false, so the CLI host is no longer the injectable odd one
+ * out (issue #165). */
 function cliRunner(): CommandRunnerPort {
   return {
-    exec: async (command, options) => {
-      try {
-        const { stdout, stderr } = await execAsync(command, {
-          cwd: options?.cwd,
-          timeout: options?.timeout,
-        });
-        return { stdout, stderr, exitCode: 0 };
-      } catch (error) {
-        const failure = error as { stdout?: string; stderr?: string; message?: string; code?: number };
-        return {
-          stdout: failure.stdout ?? "",
-          stderr: failure.stderr ?? failure.message ?? "command failed",
-          exitCode: failure.code ?? 1,
-        };
-      }
-    },
+    exec: (command, options) => execCommand(command, { cwd: options?.cwd, timeout: options?.timeout }),
   };
 }
 

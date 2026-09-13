@@ -1,7 +1,7 @@
 {
   "name": "@guyghost/swarm-dao-graph",
   "version": "0.3.5",
-  "description": "Swarm DAO Graph Engineering run executor — journal-replayed change-control runs with strict signal validation",
+  "description": "Swarm DAO Graph Engineering run executor \u2014 journal-replayed change-control runs with strict signal validation",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -24,7 +24,7 @@
     "prepublishOnly": "bun run build"
   },
   "dependencies": {
-    "@guyghost/swarm-dao-core": "^0.16.0"
+    "@guyghost/swarm-dao-core": "workspace:*"
   },
   "devDependencies": {
     "@types/bun": "1.3.14",

@@ -183,7 +183,12 @@ describe("herdr worker executor — agent kind defaults", () => {
   it("keeps plain '-ne' when the herdr state reporter is not installed", async () => {
     const commands: string[][] = [];
     const harvest = await runHerdrWorker(
-      { workDir: "/repo", piStateReporterPath: "/nonexistent/herdr-agent-state.ts", pollIntervalMs: 0, runner: okRunner(commands) },
+      {
+        workDir: "/repo",
+        piStateReporterPath: "/nonexistent/herdr-agent-state.ts",
+        pollIntervalMs: 0,
+        runner: okRunner(commands),
+      },
       "worker-no-reporter",
       "prompt",
     );
@@ -194,7 +199,13 @@ describe("herdr worker executor — agent kind defaults", () => {
   it("explicit agentArgs override the kind default", async () => {
     const commands: string[][] = [];
     const harvest = await runHerdrWorker(
-      { workDir: "/repo", kind: "claude", agentArgs: ["--permission-mode", "read-only"], pollIntervalMs: 0, runner: okRunner(commands) },
+      {
+        workDir: "/repo",
+        kind: "claude",
+        agentArgs: ["--permission-mode", "read-only"],
+        pollIntervalMs: 0,
+        runner: okRunner(commands),
+      },
       "worker-claude",
       "prompt",
     );
@@ -233,7 +244,11 @@ describe("herdr worker executor — orphaned workspace cleanup (dogfood-003 c6 f
       },
     };
 
-    const harvest = await runHerdrWorker({ workDir: "/repo", pollIntervalMs: 0, runner }, "orchestrator-sensor", "prompt");
+    const harvest = await runHerdrWorker(
+      { workDir: "/repo", pollIntervalMs: 0, runner },
+      "orchestrator-sensor",
+      "prompt",
+    );
     expect(harvest.ok).toBe(true);
 
     const closeIndex = commands.findIndex((argv) => argv[2] === "close" && argv[3] === "wOrphan");
@@ -262,7 +277,11 @@ describe("herdr worker executor — orphaned workspace cleanup (dogfood-003 c6 f
       },
     };
 
-    const harvest = await runHerdrWorker({ workDir: "/repo", pollIntervalMs: 0, runner }, "orchestrator-sensor", "prompt");
+    const harvest = await runHerdrWorker(
+      { workDir: "/repo", pollIntervalMs: 0, runner },
+      "orchestrator-sensor",
+      "prompt",
+    );
     expect(harvest.ok).toBe(true);
     expect(commands.some((argv) => argv[2] === "create")).toBe(true);
   });
@@ -296,7 +315,8 @@ describe("herdr worker executor — child session linkage (parent workspace)", (
     const runner = {
       exec: async (argv: readonly string[]) => {
         commands.push([...argv]);
-        if (argv[2] === "open") return { stdout: OPENED, stderr: openExitCode === 0 ? "" : "boom", exitCode: openExitCode };
+        if (argv[2] === "open")
+          return { stdout: OPENED, stderr: openExitCode === 0 ? "" : "boom", exitCode: openExitCode };
         if (argv[2] === "create") return { stdout: CREATED, stderr: "", exitCode: 0 };
         if (argv[1] === "agent" && argv[2] === "read") return READ_OK;
         return { stdout: "{}", stderr: "", exitCode: 0 };

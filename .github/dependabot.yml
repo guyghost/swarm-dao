@@ -1,0 +1,27 @@
+# Dependency & action update policy (issue #169.2).
+# npm: weekly grouped minor/patch updates; major bumps surface as individual
+# PRs for manual review. GitHub Actions: weekly grouped too.
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+    ignore:
+      # @types/bun tracks the Bun runtime the repo pins via setup-bun.
+      - dependency-name: "@types/bun"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      actions:
+        patterns:
+          - "*"

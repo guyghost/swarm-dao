@@ -88,7 +88,7 @@ describe("improvement runner — concurrent writers", () => {
 
       const journal = (await readFile(join(evidenceRoot, cycleId, "journal.ndjson"), "utf8")).trim().split("\n");
       expect(journal).toHaveLength(2);
-      expect(JSON.parse(journal[1])).toMatchObject({ sequence: 2, accepted: false });
+      expect(JSON.parse(journal[1] ?? "")).toMatchObject({ sequence: 2, accepted: false });
     } finally {
       await rm(evidenceRoot, { recursive: true, force: true });
     }

@@ -36,12 +36,11 @@
 // Prerequisites: the herdr server must be running (`herdr` once) and the
 // chosen kind's executable installed and authenticated.
 
-import { exec as execCallback, execFile } from "node:child_process";
+import { execFile } from "node:child_process";
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { promisify } from "node:util";
 import type { AgentOutput, DAOAgent, HostAdapter, Proposal } from "@guyghost/swarm-dao-core";
-import { HARNESS_MODEL_FLAGS, isValidModelId } from "@guyghost/swarm-dao-core";
+import { execCommand, HARNESS_MODEL_FLAGS, isValidModelId } from "@guyghost/swarm-dao-core";
 /** Minimal command surface the adapter needs (node:child_process-backed by default).
  *
  * Commands are passed as ARGV — never as shell strings. The default runner
@@ -53,8 +52,6 @@ export interface HerdrRunner {
     options?: { cwd?: string; timeout?: number },
   ): Promise<{ stdout: string; stderr: string; exitCode: number }>;
 }
-
-const execAsync = promisify(execCallback);
 
 /** execFile with utf8 strings, promise-shaped. Failures reject with the child
  * error carrying .code/.stdout/.stderr (same shape the exec-based runner had). */
@@ -694,17 +691,10 @@ export function createHerdrHostAdapter(options: HerdrAdapterOptions): HostAdapte
     getWorkingDirectory: () => options.workDir,
     readFile: async (file) => fs.readFile(await containedPath(file), "utf8"),
     writeFile: async (file, content) => fs.writeFile(await containedPath(file), content, "utf8"),
-    exec: (command, execOptions) =>
-      execAsync(command, { cwd: execOptions?.cwd, timeout: execOptions?.timeout })
-        .then(({ stdout, stderr }) => ({ stdout: String(stdout), stderr: String(stderr), exitCode: 0 }))
-        .catch((error: unknown) => {
-          const failure = error as { stdout?: string; stderr?: string; message?: string; code?: number };
-          return {
-            stdout: failure.stdout ?? "",
-            stderr: failure.stderr ?? failure.message ?? "command failed",
-            exitCode: failure.code ?? 1,
-          };
-        }),
+    // Same shell-free surface as MCP/Pi/OpenCode (issue #165): execCommand
+    // rejects metacharacters and spawns with shell: false. The adapter's own
+    // herdr calls already used argv via HerdrRunner.
+    exec: (command, execOptions) => execCommand(command, { cwd: execOptions?.cwd, timeout: execOptions?.timeout }),
     hasCapability: (capability) => capability === "parallel-spawn",
   };
 }

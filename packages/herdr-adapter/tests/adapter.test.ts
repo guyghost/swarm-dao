@@ -883,4 +883,16 @@ describe("herdr adapter per-agent harness + model (models/agent-runtime.md D3/E-
       await fs.rm(path.join(workDir, "link"), { force: true });
     }
   });
+
+  test("HostAdapter.exec is shell-free: metacharacters never run as shell (issue #165)", async () => {
+    const fake = fakeHerdr([{ exitCode: 0 }]);
+    const adapter = createHerdrHostAdapter({ workDir, runner: fake.runner, kind: "pi" });
+    // With the old exec()-based implementation this ran TWO commands via
+    // /bin/sh. execCommand must refuse the metacharacter instead.
+    const result = await adapter.exec("echo a; echo b");
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stdout).not.toContain("a");
+    expect(result.stdout).not.toContain("b");
+    expect(result.stderr).toMatch(/metacharacters|Unsafe/i);
+  });
 });

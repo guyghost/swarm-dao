@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [main, master]
 
+# One run per ref at a time: superseded pushes cancel their in-flight run.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
@@ -28,6 +33,14 @@ jobs:
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.4.0"
+
+      - name: Cache Bun install
+        # Keyed on the lockfile: cold installs only when dependencies change.
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
 
       - name: Check changeset coverage
         # Fails fast, before install/lint/test/build: a PR changing a
@@ -52,6 +65,11 @@ jobs:
       - name: Set up workspace links and optional peer stubs
         run: bun run setup-workspace
 
+      - name: Build
+        # Explicit: `prepare` no longer builds on install (issue #169.4) —
+        # tests import the built dist of workspace packages.
+        run: bun run build
+
       - name: Lint
         run: bun run lint
 
@@ -70,6 +88,15 @@ jobs:
       - name: Integration tests
         run: bun run test:integration
 
+      - name: Type check tools
+        # tools/ holds the frozen-model contract validators and their tests;
+        # they are not workspace packages, so they need their own gates
+        # (issue #164).
+        run: bun run typecheck:tools
+
+      - name: Test tools
+        run: bun run test:tools
+
       - name: Build
         run: bun run build
 
@@ -85,7 +112,10 @@ jobs:
     # absolute floor by that ratio (capped 3x). Shared-runner slowdowns of
     # 30–60% therefore cannot fake fleet-wide regressions, while genuine
     # algorithmic regressions still fail the job on any runner.
-    continue-on-error: true
+    # Blocking (issue #169.1): the calibrated v2 baseline makes the job stable
+    # enough to gate PRs — regression detection that can never fail is only
+    # decoration.
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v6
 
