@@ -510,6 +510,12 @@ describe("governance/amendments", () => {
     expect(result.valid).toBe(true);
   });
 
+  it("rejects a gate-update that adds an unknown gate", () => {
+    const result = validateAmendmentPayload({ type: "gate-update", addGates: ["not-a-gate"] });
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContain("Unknown gate 'not-a-gate'");
+  });
+
   it("executes agent-update amendment", () => {
     const payload = { type: "agent-update" as const, agentId: "strategist", changes: { weight: 5 } };
     const result = executeAmendment(payload);
