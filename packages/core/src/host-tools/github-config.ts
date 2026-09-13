@@ -2,6 +2,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { configureGitHub, isGitHubEnabled } from "../integrations/github.js";
 import { logger } from "../observability/logging.js";
+import { writeAtomic } from "../persistence.js";
 
 export interface DaoGitHubConfig {
   owner: string;
@@ -54,6 +55,8 @@ export async function saveGitHubConfigToDaoRoot(daoRoot: string, githubConfig: D
     enabled: true,
     issues: githubConfig.issues === true,
   };
-  await fs.writeFile(configPath, JSON.stringify(configData, null, 2), "utf-8");
+  // Atomic write (issue #167.3): a crash mid-write must not truncate
+  // .dao/config.json and silently drop the GitHub configuration.
+  await writeAtomic(configPath, `${JSON.stringify(configData, null, 2)}\n`);
   configureGitHub({ ...githubConfig, enabled: true });
 }

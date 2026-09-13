@@ -4,7 +4,11 @@
 
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { FileDaoStateRepository, withFileLock } from "./adapters/persistence/file-dao-state.repository.js";
+import {
+  FileDaoStateRepository,
+  repairCounters,
+  withFileLock,
+} from "./adapters/persistence/file-dao-state.repository.js";
 import { logger } from "./observability/logging.js";
 import { recordVoteCast } from "./observability/metrics.js";
 import type { DaoStateRepositoryPort } from "./ports/repository.js";
@@ -393,6 +397,7 @@ export async function loadState(cwd: string, options?: { legacyDirectories?: str
   if (!loaded.daoRoot) loaded.daoRoot = daoRoot;
   if (!isPositiveInteger(loaded.nextProposalId)) loaded.nextProposalId = 1;
   if (!isPositiveInteger(loaded.nextAuditId)) loaded.nextAuditId = 1;
+  if (!isPositiveInteger(loaded.stateRevision)) loaded.stateRevision = 0;
   if (!loaded.config) loaded.config = createInitialState(daoRoot).config;
 
   // Drop any entries without a positive-integer id (defensive shape check).
@@ -404,13 +409,9 @@ export async function loadState(cwd: string, options?: { legacyDirectories?: str
   // truth for proposals.
   await importLegacyProposalSidecars(daoRoot, loaded);
 
-  const highestProposalId = loaded.proposals.reduce((max, proposal) => Math.max(max, proposal.id), 0);
-  if (loaded.nextProposalId <= highestProposalId) loaded.nextProposalId = highestProposalId + 1;
-  const highestAuditId = loaded.auditLog.reduce((max, entry) => {
-    const id = (entry as { id?: unknown })?.id;
-    return isPositiveInteger(id) ? Math.max(max, id) : max;
-  }, 0);
-  if (loaded.nextAuditId <= highestAuditId) loaded.nextAuditId = highestAuditId + 1;
+  // Shared counter repair (issue #157): both load paths must produce
+  // identical, collision-free ID counters.
+  repairCounters(loaded);
 
   activeRepository = FileDaoStateRepository.fromLoaded(loaded, raw);
   // Disk is now the source of truth for the freshly loaded state; reset the
@@ -531,25 +532,30 @@ export async function updateStorageSettings(
   daoRoot: string,
   updates: Partial<StorageSettings>,
 ): Promise<StorageSettings> {
-  const current = await getStorageSettings(daoRoot);
-  const next = normalizeStorageSettings({ ...current, ...updates }, daoRoot);
   const configPath = path.join(daoRoot, CONFIG_FILE);
   await fs.mkdir(daoRoot, { recursive: true });
-  let rootConfig: Record<string, unknown> = {};
-  try {
-    const parsed = await readJsonFile<unknown>(configPath);
-    if (isRecord(parsed)) {
-      rootConfig = parsed;
+  // Read-modify-write under the DAO lock (issue #167.4): otherwise a
+  // concurrent config.json writer (e.g. saveGitHubConfigToDaoRoot) can drop
+  // the storage update, or vice versa.
+  return withFileLock(daoRoot, async () => {
+    const current = await getStorageSettings(daoRoot);
+    const next = normalizeStorageSettings({ ...current, ...updates }, daoRoot);
+    let rootConfig: Record<string, unknown> = {};
+    try {
+      const parsed = await readJsonFile<unknown>(configPath);
+      if (isRecord(parsed)) {
+        rootConfig = parsed;
+      }
+    } catch (error) {
+      if (!hasErrorCode(error, "ENOENT")) {
+        logger.warn(`⚠ Ignoring invalid storage config at ${configPath}: ${getErrorMessage(error)}`);
+      }
     }
-  } catch (error) {
-    if (!hasErrorCode(error, "ENOENT")) {
-      logger.warn(`⚠ Ignoring invalid storage config at ${configPath}: ${getErrorMessage(error)}`);
-    }
-  }
-  rootConfig.storageSettings = next;
-  const redacted = redactSensitiveFields(rootConfig);
-  await writeJsonFile(configPath, redacted);
-  return next;
+    rootConfig.storageSettings = next;
+    const redacted = redactSensitiveFields(rootConfig);
+    await writeJsonFile(configPath, redacted);
+    return next;
+  });
 }
 
 // ── Agent CRUD ───────────────────────────────────────────────

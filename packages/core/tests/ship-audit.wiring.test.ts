@@ -215,6 +215,28 @@ describe("ship-audit wiring", () => {
     expect(after.message).toContain("AUDIT_REQUIRED");
   });
 
+  test("a claim left by a dead process is reclaimable (issue #167.5)", async () => {
+    const store = new FsShipAuditStore(path.dirname(daoRoot));
+    const lockPath = path.join(daoRoot, "ship-audits", `${proposalId}.lock`);
+    await fs.mkdir(path.dirname(lockPath), { recursive: true });
+    // Claim owned by a pid that no longer exists: the next claim() must
+    // succeed instead of failing forever.
+    await fs.writeFile(lockPath, `${JSON.stringify({ pid: 999999999, ts: Date.now() })}\n`, "utf8");
+    const claim = await store.claim(proposalId);
+    expect(claim.acquired).toBe(true);
+    await claim.release();
+  });
+
+  test("a fresh claim from a live foreign process is still honoured (issue #167.5)", async () => {
+    const store = new FsShipAuditStore(path.dirname(daoRoot));
+    const lockPath = path.join(daoRoot, "ship-audits", `${proposalId}.lock`);
+    await fs.mkdir(path.dirname(lockPath), { recursive: true });
+    await fs.writeFile(lockPath, `${JSON.stringify({ pid: process.pid, ts: Date.now() })}\n`, "utf8");
+    const claim = await store.claim(proposalId);
+    expect(claim.acquired).toBe(false);
+    await fs.rm(lockPath, { force: true });
+  });
+
   test("a force bypass fails closed when its record cannot persist", async () => {
     await gate();
     const brokenStore: import("@guyghost/swarm-dao-core").ShipAuditStorePort = {

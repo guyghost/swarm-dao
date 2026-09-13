@@ -743,6 +743,10 @@ export interface DAOState {
   initialized: boolean;
   auditLog: AuditEntry[];
   nextAuditId: number;
+  /** Monotonic write counter (issue #153): bumped on every persist under the
+   *  lock and compared on write, so a stale in-memory copy can never silently
+   *  overwrite votes/proposals persisted by another process. */
+  stateRevision: number;
   controlResults: Record<number, ControlCheckResult>;
   deliveryPlans: Record<number, DeliveryPlan>;
   artefacts: Record<number, DAOArtefacts>;
@@ -992,6 +996,7 @@ export function createInitialState(daoRoot: string): DAOState {
     initialized: false,
     auditLog: [],
     nextAuditId: 1,
+    stateRevision: 0,
     controlResults: {},
     deliveryPlans: {},
     artefacts: {},
