@@ -54,7 +54,7 @@ import {
   loadMetricContract,
   loadProjectImprovementConfig,
 } from "./config.js";
-import { extractLastJsonObject, runHerdrWorker, type WorkerHarvest } from "./workers.js";
+import { extractLastJsonObject, runHerdrWorker, type WorkerExecutionOptions, type WorkerHarvest } from "./workers.js";
 
 export const DEFAULT_SERIES_EVIDENCE_ROOT = "evidence/improvement-series";
 export const DEFAULT_CYCLE_EVIDENCE_ROOT = "evidence/improvement-cycles";
@@ -134,10 +134,11 @@ export interface OrchestratorOnceDeps {
   cycleEvidenceRoot?: string;
   /** Repository root for herdr workspaces and anchor commands (default cwd). */
   workDir?: string;
-  /** herdr worker executor options: agent kind (pi, codex, claude, …) and
-   * extra agent args for the default worker executor. Executor configuration
-   * only — never model state. */
-  worker?: { kind?: string; agentArgs?: readonly string[] };
+  /** herdr worker executor options: agent kind (pi, codex, claude, …), extra
+   * agent args, and harvest pacing (timeoutMs, pollIntervalMs, stablePolls)
+   * for the default worker executor. Executor configuration only — never
+   * model state. */
+  worker?: WorkerExecutionOptions;
 }
 
 const resolvedCycleEvidenceRoot = (deps: OrchestratorOnceDeps): string =>
