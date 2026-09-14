@@ -156,8 +156,13 @@ export function formatComparisons(comparisons: Comparison[]): string {
  * Re-measure one benchmark case in isolation, `attempts` times, and report each
  * run's mean. Uses a higher iteration count than the suite default so the
  * re-measurement is steadier than the run that raised the flag (more samples
- * also dilute single GC pauses inside a run's mean). Returns an empty array
- * when the case no longer exists (renamed/removed).
+ * also dilute single GC pauses inside a run's mean). Suite state is re-seeded
+ * before every attempt (setup/teardown per attempt): stateful suites cap the
+ * total runs between setups — the deliberation pool holds 200 proposals,
+ * consumed one per iteration, which a 3×50 re-measurement barely fit and
+ * 5×100 exhausted mid-adjudication (caught live on CI) — and every attempt
+ * then starts from an identical state, keeping the means comparable.
+ * Returns an empty array when the case no longer exists (renamed/removed).
  */
 export async function reMeasureCase(
   suiteName: string,
@@ -168,16 +173,16 @@ export async function reMeasureCase(
   const suite = SUITES.find((candidate) => candidate.name === suiteName);
   const benchmark = suite?.cases.find((candidate) => candidate.name === caseName);
   if (!suite || !benchmark) return [];
-  await suite.setup?.();
-  try {
-    const means: number[] = [];
-    for (let attempt = 0; attempt < attempts; attempt++) {
+  const means: number[] = [];
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    await suite.setup?.();
+    try {
       means.push((await runCase(suite, benchmark, { iterations })).meanMs);
+    } finally {
+      await suite.teardown?.();
     }
-    return means;
-  } finally {
-    await suite.teardown?.();
   }
+  return means;
 }
 
 export interface AdjudicationResult {

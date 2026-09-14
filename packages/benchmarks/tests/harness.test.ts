@@ -6,6 +6,7 @@ import {
   compareReports,
   formatComparisons,
   ioCalibrationSlowdown,
+  reMeasureCase,
 } from "../scripts/compare-benchmarks.js";
 import { type BenchmarkReport, formatReport, runSuites, summarize } from "../src/harness.js";
 
@@ -231,6 +232,21 @@ describe("bench:compare — flake adjudication (PR #79 finding)", () => {
     expect(confirmed).toHaveLength(0);
     expect(dismissed).toHaveLength(1);
   });
+});
+
+describe("reMeasureCase — suite state per attempt", () => {
+  it("re-seeds the suite before every attempt (5×100 exhausted the deliberation pool on CI)", async () => {
+    // 2026-09-14 CI incident: the deliberation suite consumes one seeded
+    // proposal per iteration from a 200-item pool; with a single setup,
+    // 5 attempts × (100 + warmup) runs overflowed it mid-adjudication and
+    // crashed bench:compare. Per-attempt setup/teardown makes any
+    // attempts/iterations combination safe.
+    const suite = SUITES.find((candidate) => candidate.name === "deliberation");
+    expect(suite).toBeDefined();
+    const means = await reMeasureCase("deliberation", "run control gates", 5, 100);
+    expect(means).toHaveLength(5);
+    for (const mean of means) expect(Number.isFinite(mean) && mean > 0).toBe(true);
+  }, 20_000);
 });
 
 describe("calibrated comparison", () => {
