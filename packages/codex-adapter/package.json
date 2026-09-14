@@ -33,7 +33,7 @@
     "@guyghost/swarm-dao-mcp": "^0.9.1"
   },
   "devDependencies": {
-    "@types/bun": "1.3.14"
+    "@types/bun": "1.4.2"
   },
   "keywords": [
     "swarm-dao",
