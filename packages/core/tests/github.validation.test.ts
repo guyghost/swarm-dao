@@ -3,6 +3,9 @@
 // credentials — they must satisfy the GitHub slug / git refname charsets
 // before any route is built or value persisted.
 import { beforeEach, describe, expect, it } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { validateGitRef } from "../src/delivery/execution-isolation.js";
 import { configureGitHub, ghCreatePullRequest, validateGitHubSlug } from "../src/integrations/github.js";
 
@@ -50,9 +53,22 @@ describe("github input validation (issue #166)", () => {
     // No gh binary needed: validation fires before the subprocess spawn.
     await expect(ghCreatePullRequest(proposal, { headBranch: "evil\0branch" })).rejects.toThrow(/headBranch/);
     await expect(ghCreatePullRequest(proposal, { headBranch: "a..b" })).rejects.toThrow(/headBranch/);
-    await expect(ghCreatePullRequest(proposal, { headBranch: "feature/x-1.2" })).rejects.toThrow(
-      /gh api|Failed|spawn|ENOENT|timed out|exited/i,
-    );
+    // The valid branch passes validation and reaches the gh subprocess —
+    // which must never actually run here: a real `gh api` POST is a network
+    // call that raced bun's 5s test timeout on shared CI runners. Pointing
+    // PATH at an empty directory makes the spawn fail deterministically with
+    // ENOENT, still proving the ref got past validation.
+    const realPath = process.env.PATH;
+    const emptyBin = await mkdtemp(join(tmpdir(), "no-gh-bin-"));
+    process.env.PATH = emptyBin;
+    try {
+      await expect(ghCreatePullRequest(proposal, { headBranch: "feature/x-1.2" })).rejects.toThrow(
+        /gh api|Failed|spawn|ENOENT|timed out|exited/i,
+      );
+    } finally {
+      process.env.PATH = realPath;
+      await rm(emptyBin, { recursive: true, force: true });
+    }
     configureGitHub({ enabled: false, owner: undefined, repo: undefined });
   });
 

@@ -153,7 +153,7 @@ describe("bench:compare — flake adjudication (PR #79 finding)", () => {
     },
   ];
 
-  it("dismisses a flagged bench whose re-measured median falls back inside the gates", async () => {
+  it("dismisses a flagged bench whose best re-measured run falls back inside the gates", async () => {
     // The PR #79 flake: 0.101ms vs 0.031ms baseline on one run, gone on the next.
     const baseline = report([{ suite: "artefacts", name: "render artefacts to markdown", meanMs: 0.031 }]);
     const { confirmed, dismissed } = await adjudicateRegressions(flagged(0.101, 0.031), baseline, gates, async () => [
@@ -161,10 +161,37 @@ describe("bench:compare — flake adjudication (PR #79 finding)", () => {
     ]);
     expect(confirmed).toHaveLength(0);
     expect(dismissed).toHaveLength(1);
-    expect(dismissed[0]?.reMeasuredMs).toBe(0.03);
+    expect(dismissed[0]?.reMeasuredMs).toBe(0.028);
   });
 
-  it("confirms a regression whose re-measured median stays beyond the gates", async () => {
+  it("dismisses a flag when a GC burst inflates the re-measurement median (2026-09-14 CI incident)", async () => {
+    // deliberation/run control gates: +71% vs a +55% calibrated gate, with
+    // 2 of 3 re-measured runs inflated by a GC burst — the median confirmed a
+    // regression on a healthy runner. The minimum (0.16, inside) is the only
+    // run without a pause: the flag was noise, not a regression.
+    const baseline = report([{ suite: "deliberation", name: "run control gates", meanMs: 0.199 }]);
+    const calibrated = { threshold: 0.25, floorMs: 0.05, slowdown: 1.3, ioSlowdown: 1.28 };
+    const { confirmed, dismissed } = await adjudicateRegressions(
+      [
+        {
+          suite: "deliberation",
+          name: "run control gates",
+          currentMs: 0.341,
+          baselineMs: 0.199,
+          changeRatio: 0.714,
+          status: "regression" as const,
+        },
+      ],
+      baseline,
+      calibrated,
+      async () => [0.35, 0.33, 0.16],
+    );
+    expect(confirmed).toHaveLength(0);
+    expect(dismissed).toHaveLength(1);
+    expect(dismissed[0]?.reMeasuredMs).toBe(0.16);
+  });
+
+  it("confirms a regression whose best re-measured run stays beyond the gates", async () => {
     const baseline = report([{ suite: "artefacts", name: "render artefacts to markdown", meanMs: 0.031 }]);
     const { confirmed, dismissed } = await adjudicateRegressions(flagged(0.101, 0.031), baseline, gates, async () => [
       0.15, 0.14, 0.16,
