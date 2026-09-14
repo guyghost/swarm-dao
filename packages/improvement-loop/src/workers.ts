@@ -97,10 +97,10 @@ export interface HerdrWorkerOptions {
    * HERDR_WORKSPACE_ID when running inside a herdr pane). Series-worktree
    * workers open nested under it; same-checkout workers get a parent token. */
   parentWorkspaceId?: string;
-  /** Per-attempt harvest deadline in ms (default 10 min; ceiling 15 min).
-   * The old herdr --wait cap no longer applies: real observation work
-   * (running repo measurements, reading models) legitimately takes 5–10 min
-   * under load. */
+  /** Per-attempt harvest deadline in ms (default 15 min). The old herdr
+   * --wait cap no longer applies: real observation work (running repo
+   * measurements, reading models) and full uncached gate suites legitimately
+   * take 5–15 min under load (issue #180). */
   timeoutMs?: number;
   /** agent start readiness timeout in ms (default 120 s; herdr max 300000). */
   startTimeoutMs?: number;
@@ -114,11 +114,30 @@ export interface HerdrWorkerOptions {
   /** Delay between transcript harvest polls (default 5 s; 0 only for
    * tests). */
   pollIntervalMs?: number;
+  /** Consecutive identical non-empty polls that declare the output settled
+   * without a contract (default 36 ≈ 3 min at the default 5 s poll). A long
+   * uncached command (e.g. a full test suite re-run by a drift auditor)
+   * legitimately silences the transcript for minutes — 20 s of silence killed
+   * live workers mid-command (issue #180). The cost when an agent genuinely
+   * settles with prose is this window per attempt. */
+  stablePolls?: number;
   /** Injectable command runner (tests). */
   runner?: HerdrRunner;
 }
 
 export type WorkerHarvest = Readonly<{ ok: true; content: string } | { ok: false; error: string }>;
+
+/** Consecutive identical non-empty polls declaring settlement (default:
+ * 3 min at the default 5 s poll — see HerdrWorkerOptions.stablePolls). */
+export const DEFAULT_STABLE_POLLS = 36;
+
+/** Worker executor options a persisted project config may set (the `worker`
+ * section of .dao/improvement.json): executor pacing only — never model
+ * state. */
+export type WorkerExecutionOptions = Pick<
+  HerdrWorkerOptions,
+  "kind" | "agentArgs" | "timeoutMs" | "pollIntervalMs" | "stablePolls"
+>;
 
 /** herdr kinds are identifiers — anything else is refused, never interpolated. */
 export const SAFE_HERDR_KIND = /^[a-z][a-z0-9_-]{0,31}$/;
@@ -262,11 +281,12 @@ export async function runHerdrWorker(
   const agentArgs = options.agentArgs ?? (kind === "pi" ? piWorkerAgentArgs(options.piStateReporterPath) : []);
   // The harvest deadline bounds the whole attempt; readLines is capped to
   // keep the read command (and the harvested transcript) bounded.
-  const timeoutMs = toBoundedInt(options.timeoutMs, 600_000, 1_000, 900_000);
+  const timeoutMs = toBoundedInt(options.timeoutMs, 900_000, 1_000, 900_000);
   const startTimeoutMs = toBoundedInt(options.startTimeoutMs, 120_000, 1_000, 300_000);
   const readLines = toBoundedInt(options.readLines, 200, 1, 10_000);
   const readinessRetryDelayMs = toBoundedInt(options.readinessRetryDelayMs, 1_000, 0, 60_000);
   const pollIntervalMs = toBoundedInt(options.pollIntervalMs, 5_000, 0, 60_000);
+  const maxStablePolls = toBoundedInt(options.stablePolls, DEFAULT_STABLE_POLLS, 1, 1_000);
   const parentWorkspaceId = options.parentWorkspaceId ?? herdrParentWorkspaceId();
 
   if (!SAFE_HERDR_KIND.test(kind))
@@ -358,11 +378,13 @@ export async function runHerdrWorker(
           break;
         }
         // Settled output that never satisfies the contract (blocked UI,
-        // prose-only transcript): four identical non-empty polls are enough.
+        // prose-only transcript): a configurable run of identical non-empty
+        // polls — long enough by default that a worker mid-command on an
+        // uncached gate suite is not misread as settled (issue #180).
         if (content.length > 0 && content.length === previousLength) stablePolls += 1;
         else stablePolls = 0;
         previousLength = content.length;
-        if (stablePolls >= 4) break;
+        if (stablePolls >= maxStablePolls) break;
       }
       if (harvested !== null) return { ok: true, content: harvested };
 

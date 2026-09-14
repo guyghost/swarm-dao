@@ -11,7 +11,7 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { REQUIRED_IMPROVEMENT_ANCHORS } from "@guyghost/swarm-dao-core/models/improvement";
 import type { SandboxMode, SandboxRequest } from "./sandbox.js";
-import { SAFE_HERDR_KIND } from "./workers.js";
+import { SAFE_HERDR_KIND, type WorkerExecutionOptions } from "./workers.js";
 
 export const PROJECT_CONFIG_PATH = ".dao/improvement.json";
 
@@ -136,11 +136,11 @@ const configString = (value: unknown): string | undefined =>
   typeof value === "string" && value.trim().length > 0 ? value : undefined;
 
 /** herdr worker options from the `worker` section of .dao/improvement.json
- * (host-triggered advances never accept per-call overrides). */
-export function workerOptionsFromConfig(config: ProjectImprovementConfig | null): {
-  kind?: string;
-  agentArgs?: readonly string[];
-} {
+ * (host-triggered advances never accept per-call overrides). Harvest pacing
+ * fields (issue #180): pollIntervalMs, stablePolls, timeoutMs — bounded
+ * downstream by runHerdrWorker; a non-numeric value is a malformed
+ * human-owned config and is never silently ignored. */
+export function workerOptionsFromConfig(config: ProjectImprovementConfig | null): WorkerExecutionOptions {
   const section = configSection(config, "worker");
   const kind = configString(section.kind);
   if (kind !== undefined && !SAFE_HERDR_KIND.test(kind)) {
@@ -150,7 +150,24 @@ export function workerOptionsFromConfig(config: ProjectImprovementConfig | null)
     Array.isArray(section.agentArgs) && section.agentArgs.every((a) => typeof a === "string")
       ? (section.agentArgs as string[])
       : undefined;
-  return { ...(kind !== undefined ? { kind } : {}), ...(agentArgs !== undefined ? { agentArgs } : {}) };
+  const numberField = (key: string): number | undefined => {
+    const value = section[key];
+    if (value === undefined) return undefined;
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+      throw new Error(`worker.${key} must be a finite number of milliseconds/polls, got ${JSON.stringify(value)}`);
+    }
+    return value;
+  };
+  const timeoutMs = numberField("timeoutMs");
+  const pollIntervalMs = numberField("pollIntervalMs");
+  const stablePolls = numberField("stablePolls");
+  return {
+    ...(kind !== undefined ? { kind } : {}),
+    ...(agentArgs !== undefined ? { agentArgs } : {}),
+    ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+    ...(pollIntervalMs !== undefined ? { pollIntervalMs } : {}),
+    ...(stablePolls !== undefined ? { stablePolls } : {}),
+  };
 }
 
 /** Sandbox request from the `sandbox` section of .dao/improvement.json. */

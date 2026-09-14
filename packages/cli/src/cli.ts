@@ -65,10 +65,13 @@ import {
   ORCHESTRATOR_MIN_COOLDOWN_MS,
   type OrchestratorOnceDeps,
   OrchestratorRunner,
+  type ProjectImprovementConfig,
   resolveAnchorCommands,
   resolveSandboxRunCommand,
   SAFE_HERDR_KIND,
   type SandboxMode,
+  type WorkerExecutionOptions,
+  workerOptionsFromConfig,
 } from "@guyghost/swarm-dao-improvement";
 import { createProductRunner } from "@guyghost/swarm-dao-product";
 import { createTmuxHostAdapter } from "@guyghost/swarm-dao-tmux-adapter";
@@ -1290,37 +1293,32 @@ function sandboxRequestFrom(
   };
 }
 
-/** herdr worker options (agent kind and extra args) from flags layered over
- * the optional `worker` section of .dao/improvement.json. Explicit flags win;
- * the kind must be a safe herdr identifier. */
+/** herdr worker options (agent kind, extra args, harvest pacing) from flags
+ * layered over the optional `worker` section of .dao/improvement.json.
+ * Explicit flags win for kind/agentArgs; the kind must be a safe herdr
+ * identifier; numeric pacing fields pass through validated config parsing. */
 function workerOptionsFrom(
   flags: Record<string, string | true>,
-  config: { raw: Record<string, unknown> } | null,
-): { kind?: string; agentArgs?: readonly string[] } {
+  config: ProjectImprovementConfig | null,
+): WorkerExecutionOptions {
+  const base = workerOptionsFromConfig(config);
   const stringFlag = (name: string): string | undefined => {
     const value = flags[name];
     if (value === undefined) return undefined;
     if (typeof value !== "string" || value.trim().length === 0) err(`--${name} requires a value`);
     return value;
   };
-  const configWorker =
-    config && typeof config.raw.worker === "object" && config.raw.worker !== null
-      ? (config.raw.worker as Record<string, unknown>)
-      : {};
-  const configKind =
-    typeof configWorker.kind === "string" && configWorker.kind.trim().length > 0 ? configWorker.kind : undefined;
-  const kind = stringFlag("agent") ?? configKind;
+  const kind = stringFlag("agent") ?? base.kind;
   if (kind !== undefined && !SAFE_HERDR_KIND.test(kind)) {
     err(`--agent must be a valid herdr agent kind (e.g. pi, codex, claude), got '${kind}'`);
   }
   const argsFlag = stringFlag("agent-args");
-  const agentArgs =
-    argsFlag !== undefined
-      ? argsFlag.split(/\s+/).filter(Boolean)
-      : Array.isArray(configWorker.agentArgs) && configWorker.agentArgs.every((a) => typeof a === "string")
-        ? (configWorker.agentArgs as string[])
-        : undefined;
-  return { ...(kind !== undefined ? { kind } : {}), ...(agentArgs !== undefined ? { agentArgs } : {}) };
+  const agentArgs = argsFlag !== undefined ? argsFlag.split(/\s+/).filter(Boolean) : base.agentArgs;
+  return {
+    ...base,
+    ...(kind !== undefined ? { kind } : {}),
+    ...(agentArgs !== undefined ? { agentArgs } : {}),
+  };
 }
 
 async function cmdImprove(cwd: string, positional: string[], flags: Record<string, string | true>): Promise<number> {
