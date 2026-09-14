@@ -94,7 +94,9 @@ jobs:
       - name: Publish packages to npm
         uses: changesets/action@v2
         with:
-          publish: bun run release
+          # v2 renamed `publish` to `publish-script` (v1 inputs fail closed:
+          # "The following inputs have been renamed", run 34832549335).
+          publish-script: bun run release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_CONFIG_PROVENANCE: "true"
