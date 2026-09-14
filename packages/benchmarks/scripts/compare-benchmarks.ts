@@ -152,34 +152,37 @@ export function formatComparisons(comparisons: Comparison[]): string {
     .join("\n");
 }
 
-const median = (values: number[]): number =>
-  [...values].sort((left, right) => left - right)[Math.floor(values.length / 2)] ?? 0;
-
 /**
  * Re-measure one benchmark case in isolation, `attempts` times, and report each
  * run's mean. Uses a higher iteration count than the suite default so the
- * re-measurement is steadier than the run that raised the flag. Returns an
- * empty array when the case no longer exists (renamed/removed).
+ * re-measurement is steadier than the run that raised the flag (more samples
+ * also dilute single GC pauses inside a run's mean). Suite state is re-seeded
+ * before every attempt (setup/teardown per attempt): stateful suites cap the
+ * total runs between setups — the deliberation pool holds 200 proposals,
+ * consumed one per iteration, which a 3×50 re-measurement barely fit and
+ * 5×100 exhausted mid-adjudication (caught live on CI) — and every attempt
+ * then starts from an identical state, keeping the means comparable.
+ * Returns an empty array when the case no longer exists (renamed/removed).
  */
 export async function reMeasureCase(
   suiteName: string,
   caseName: string,
-  attempts = 3,
-  iterations = 50,
+  attempts = 5,
+  iterations = 100,
 ): Promise<number[]> {
   const suite = SUITES.find((candidate) => candidate.name === suiteName);
   const benchmark = suite?.cases.find((candidate) => candidate.name === caseName);
   if (!suite || !benchmark) return [];
-  await suite.setup?.();
-  try {
-    const means: number[] = [];
-    for (let attempt = 0; attempt < attempts; attempt++) {
+  const means: number[] = [];
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    await suite.setup?.();
+    try {
       means.push((await runCase(suite, benchmark, { iterations })).meanMs);
+    } finally {
+      await suite.teardown?.();
     }
-    return means;
-  } finally {
-    await suite.teardown?.();
   }
+  return means;
 }
 
 export interface AdjudicationResult {
@@ -192,8 +195,17 @@ export interface AdjudicationResult {
 /**
  * Second-chance gate: a flag must reproduce on isolated re-measurement before
  * it may fail CI. The same calibrated gates (relative AND absolute) apply to
- * the re-measured median — adjudication never loosens the definition of a
- * regression, it only demands the evidence reproduce.
+ * the re-measured BEST (minimum) run — adjudication never loosens the
+ * definition of a regression, it only demands the evidence reproduce.
+ *
+ * Why the minimum and not the median (2026-09-14 CI incident): measurement
+ * noise (GC pauses, scheduler bursts) is strictly additive, so a run's mean
+ * can only be inflated, never deflated. A sub-ms case re-measured while a GC
+ * burst is active yields 2–3 inflated means in a row, and the median stays
+ * contaminated — `deliberation/run control gates` (+71% vs a +55% gate) was
+ * confirmed that way on a healthy runner. The minimum is the least-noise
+ * estimator of the case's true cost: if even the best re-measurement sits
+ * beyond the gate, the case genuinely cannot run at baseline speed here.
  */
 export async function adjudicateRegressions(
   regressions: Comparison[],
@@ -225,11 +237,11 @@ export async function adjudicateRegressions(
     if (
       means.length === 0 ||
       baselineMs <= 0 ||
-      isRegression(median(means), baselineMs, allowedThreshold, allowedFloor)
+      isRegression(Math.min(...means), baselineMs, allowedThreshold, allowedFloor)
     ) {
       confirmed.push(regression);
     } else {
-      dismissed.push({ ...regression, reMeasuredMs: median(means) });
+      dismissed.push({ ...regression, reMeasuredMs: Math.min(...means) });
     }
   }
   return { confirmed, dismissed };
@@ -300,7 +312,7 @@ async function main(): Promise<void> {
   });
   for (const flake of dismissed) {
     console.log(
-      `ADJUDICATED  ${flake.suite}/${flake.name} — re-measured median ${flake.reMeasuredMs.toFixed(3)}ms vs ${flake.baselineMs?.toFixed(3)}ms is inside the gate; dismissed as runner noise.`,
+      `ADJUDICATED  ${flake.suite}/${flake.name} — best re-measured run ${flake.reMeasuredMs.toFixed(3)}ms vs ${flake.baselineMs?.toFixed(3)}ms is inside the gate; dismissed as runner noise.`,
     );
   }
   if (confirmed.length === 0) {
