@@ -30,9 +30,14 @@ export function resolveTypeThresholds(proposal: Proposal, config: DAOConfig): Ty
 // lines — heading patterns only use [ \t] classes so no quantifier can cross
 // a newline, and bodies are collected line by line instead of
 // [\s\S]*? + lookahead alternations.
-const VOTE_HEADING = /^##[ \t]*vote[ \t]*$/i;
+// Headings accept both the charter's raw form (`## Vote`) and the form a
+// rendering TUI leaves on screen (`Vote`, `  Vote:`) — hosts like herdr
+// harvest the RENDERED terminal text, where the `##` glyphs are gone
+// (issue #178). The optional `(?:##[ \t]*)?` is [ \t]-only, so no quantifier
+// can cross a newline.
+const VOTE_HEADING = /^[ \t]*(?:##[ \t]*)?vote[ \t:]*$/i;
 const VOTE_WORD = /^(for|against|abstain)$/i;
-const REASONING_HEADING = /^##[ \t]*reasoning[ \t]*$/i;
+const REASONING_HEADING = /^[ \t]*(?:##[ \t]*)?reasoning[ \t:]*$/i;
 const DELEGATED_FACETS_HEADING = /^##[ \t]*delegated[ \t]+facets[ \t]*$/i;
 const FENCE = /^[ \t]*```/;
 

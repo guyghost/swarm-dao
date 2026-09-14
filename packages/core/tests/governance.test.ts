@@ -100,6 +100,42 @@ Real vote is for.`;
     expect(parseVoteFromOutput("critic", "Critic", 3, output)?.position).toBe("for");
   });
 
+  it("parses a vote from a rendered transcript whose ## glyphs are gone (issue #178)", () => {
+    // pi's TUI renders markdown, so herdr harvests the rendered text:
+    // headings appear without the leading `##`.
+    const output = `Analysis
+Good idea.
+
+Vote
+
+for
+
+Reasoning
+Low risk, high impact.`;
+    const vote = parseVoteFromOutput("strategist", "Product Strategist", 3, output);
+    expect(vote?.position).toBe("for");
+    expect(vote?.reasoning).toBe("Low risk, high impact.");
+  });
+
+  it("does not treat charter placeholders as votes in a rendered transcript", () => {
+    expect(
+      parseVoteFromOutput(
+        "critic",
+        "Critic",
+        3,
+        "Analysis\nrisky.\n\nVote\nfor | against | abstain\n\nReasoning\nUnsure.",
+      ),
+    ).toBeUndefined();
+    expect(
+      parseVoteFromOutput(
+        "critic",
+        "Critic",
+        3,
+        "Analysis\nrisky.\n\nVote\n<for|against|abstain>\n\nReasoning\nUnsure.",
+      ),
+    ).toBeUndefined();
+  });
+
   it("does not let a delegated child's vote become the parent's", () => {
     const output = `## Analysis
 Parent analysis, no vote section.

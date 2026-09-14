@@ -1,5 +1,17 @@
 # @guyghost/swarm-dao-core
 
+## 1.0.2
+
+### Patch Changes
+
+- d740001: Fix vote tally harvesting 0 votes from rendering TUIs (herdr + pi, issue #178): the `## Vote` / `## Reasoning` heading patterns now also accept the rendered form a terminal leaves on screen (`Vote`, `  Vote:`, `Reasoning`) where the `##` glyphs are gone. Charter placeholders (`for | against | abstain`, `<for|against|abstain>`) remain inert, and the raw `## Vote` form keeps parsing as before.
+
+## 1.0.1
+
+### Patch Changes
+
+- 527195a: Close vote-tally poisoning (charter placeholders, fenced decoys, delegated-child hijack), apply council weights on the CLI, add `swarm-dao control`, and fail-close unknown gates / cascade+force / shell-free improvement anchors.
+
 ## 1.0.0
 
 ### Major Changes

@@ -6,7 +6,9 @@ import {
   COMMAND_BACKED_ANCHORS,
   loadMetricContract,
   loadProjectImprovementConfig,
+  type ProjectImprovementConfig,
   validateProjectAnchorCommands,
+  workerOptionsFromConfig,
 } from "../src/config.js";
 import { resolveAnchorCommands } from "../src/orchestrator.js";
 
@@ -77,6 +79,41 @@ describe("improvement-loop — per-project config (.dao/improvement.json)", () =
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("worker harvest pacing config (issue #180)", () => {
+  const configWithWorker = (worker: unknown): ProjectImprovementConfig => ({
+    path: "/tmp/repo/.dao/improvement.json",
+    raw: { anchorCommands: {}, worker },
+  });
+
+  it("passes harvest pacing fields through to the worker executor options", () => {
+    expect(
+      workerOptionsFromConfig(
+        configWithWorker({
+          kind: "pi",
+          agentArgs: ["-ne"],
+          pollIntervalMs: 15_000,
+          stablePolls: 24,
+          timeoutMs: 900_000,
+        }),
+      ),
+    ).toEqual({ kind: "pi", agentArgs: ["-ne"], pollIntervalMs: 15_000, stablePolls: 24, timeoutMs: 900_000 });
+  });
+
+  it("omits absent fields so executor defaults apply", () => {
+    expect(workerOptionsFromConfig(configWithWorker({}))).toEqual({});
+    expect(workerOptionsFromConfig(null)).toEqual({});
+  });
+
+  it("refuses a non-numeric pacing field instead of silently ignoring it", () => {
+    expect(() => workerOptionsFromConfig(configWithWorker({ stablePolls: "24" }))).toThrow(
+      /worker\.stablePolls must be a finite number/,
+    );
+    expect(() => workerOptionsFromConfig(configWithWorker({ timeoutMs: true }))).toThrow(
+      /worker\.timeoutMs must be a finite number/,
+    );
   });
 });
 

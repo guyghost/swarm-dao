@@ -102,6 +102,23 @@ discover the dao_* extension tools); other kinds start with their own
 defaults. Kind identifiers are validated — anything else is refused, never
 interpolated into a shell command.
 
+### Harvest pacing
+
+Workers are harvested by polling the transcript (`pollIntervalMs`, default
+5 s). The attempt ends when the last JSON object satisfies the worker
+contract, the output has been stable for `stablePolls` consecutive polls
+(default 36 ≈ 3 min — long enough that a worker running an uncached gate
+command is not killed mid-command, issue #180), or `timeoutMs` (default
+900000) expires. Repos with longer gate suites can widen the window via the
+`worker` section:
+
+```json
+{ "worker": { "pollIntervalMs": 15000, "stablePolls": 24, "timeoutMs": 900000 } }
+```
+
+Non-numeric values are refused; out-of-range numbers are clamped to the
+executor's bounds.
+
 ## Programmatic use
 
 ```typescript

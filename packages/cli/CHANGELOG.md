@@ -1,5 +1,20 @@
 # @guyghost/swarm-dao-cli
 
+## 0.12.1
+
+### Patch Changes
+
+- 4184177: Fix published manifests: internal dependencies were declared with the `workspace:*` protocol, which `npm publish` does not resolve (only pnpm does). Every install of the affected packages failed with `EUNSUPPORTEDPROTOCOL Unsupported URL Type "workspace:"`. Restore `^` semver ranges, which changesets bumps automatically on release.
+- 527195a: Close vote-tally poisoning (charter placeholders, fenced decoys, delegated-child hijack), apply council weights on the CLI, add `swarm-dao control`, and fail-close unknown gates / cascade+force / shell-free improvement anchors.
+- Updated dependencies [4184177]
+- Updated dependencies [527195a]
+  - @guyghost/swarm-dao-graph@0.3.7
+  - @guyghost/swarm-dao-improvement@0.6.7
+  - @guyghost/swarm-dao-product@0.3.7
+  - @guyghost/swarm-dao-herdr-adapter@0.5.1
+  - @guyghost/swarm-dao-tmux-adapter@0.4.1
+  - @guyghost/swarm-dao-core@1.0.1
+
 ## 0.12.0
 
 ### Minor Changes

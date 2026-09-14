@@ -13,7 +13,7 @@
 // read` until the last JSON object satisfies the worker contract (resolved
 // value, non-placeholder evidence) or the output settles.
 import { describe, expect, test } from "bun:test";
-import { extractLastJsonObject, isWorkerContract, runHerdrWorker } from "../src/workers.js";
+import { DEFAULT_STABLE_POLLS, extractLastJsonObject, isWorkerContract, runHerdrWorker } from "../src/workers.js";
 
 const WORKSPACE_CREATED = JSON.stringify({
   id: "cli:workspace:create",
@@ -218,6 +218,22 @@ describe("runHerdrWorker transcript harvest", () => {
     // Exactly one prompt per attempt: double submission is structurally
     // impossible (no stall classification, no recovery re-prompt).
     expect(fake.callsOf("prompt").length).toBe(3);
+  });
+
+  test("keeps polling through the default stable window (3 min at 5 s polls) before declaring settlement", async () => {
+    // Issue #180: a worker mid-command on an uncached gate suite silences the
+    // transcript for minutes. The default window must be 36 identical polls,
+    // not the old 4 (≈20 s) that killed live workers. Poll 1 seeds the
+    // comparison, polls 2..(36+1) confirm stability → break after 37 reads.
+    const fake = fakeHerdr({ read: [{ stdout: PROSE, exitCode: 0 }] });
+    await runHerdrWorker({ ...BASE_OPTIONS, runner: fake.runner }, "sensor", "PROMPT");
+    expect(fake.callsOf("read").length).toBe(3 * (DEFAULT_STABLE_POLLS + 1));
+  });
+
+  test("honors a configured stablePolls window", async () => {
+    const fake = fakeHerdr({ read: [{ stdout: PROSE, exitCode: 0 }] });
+    await runHerdrWorker({ ...BASE_OPTIONS, stablePolls: 2, runner: fake.runner }, "sensor", "PROMPT");
+    expect(fake.callsOf("read").length).toBe(3 * (2 + 1)); // seed + 2 stable polls, per attempt
   });
 
   test("fails the attempt at the harvest deadline when the transcript never settles", async () => {
