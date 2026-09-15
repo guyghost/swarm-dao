@@ -28,7 +28,7 @@
     "@guyghost/swarm-dao-herdr-adapter": "^0.5.1"
   },
   "devDependencies": {
-    "@types/bun": "1.3.14",
+    "@types/bun": "1.4.2",
     "@types/node": "^26.0.1"
   },
   "keywords": [
