@@ -96,10 +96,13 @@ jobs:
             echo "</details>"
           } > review-comment.md
 
-          COMMENT_ID=$(gh api "repos/$REPO/issues/$PR_NUMBER/comments" --jq '.[] | select(.body | startswith("<!-- evals-review -->")) | .id' | head -n1)
-          if [ -n "$COMMENT_ID" ]; then
-            gh api -X PATCH "repos/$REPO/issues/$PR_NUMBER/comments/$COMMENT_ID" -f body=@"review-comment.md" >/dev/null
-            echo "updated review comment $COMMENT_ID"
+          COMMENT_NODE=$(gh api "repos/$REPO/issues/$PR_NUMBER/comments" --jq '.[] | select(.body | startswith("<!-- evals-review -->")) | .node_id' | head -n1)
+          if [ -n "$COMMENT_NODE" ]; then
+            # GraphQL, not REST PATCH: comments created via the Actions app
+            # token 404 on REST PATCH even for the same token that posted
+            # them; updateIssueComment always works for the author.
+            gh api graphql -f query='mutation($id: ID!, $body: String!) { updateIssueComment(input: {id: $id, body: $body}) { issueComment { updatedAt } } }' -f id="$COMMENT_NODE" -F body=@review-comment.md >/dev/null
+            echo "updated review comment $COMMENT_NODE"
           else
             gh pr comment "$PR_NUMBER" --body-file review-comment.md
           fi
