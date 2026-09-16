@@ -24,6 +24,9 @@ evidence/improvement-series/
 # Product Loop local evidence
 evidence/product-loops/
 
+# Eval scorecards local evidence
+evidence/evals/
+
 # IDE
 .vscode/
 .idea/
