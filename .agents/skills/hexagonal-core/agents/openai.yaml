@@ -1,0 +1,4 @@
+interface:
+  display_name: "Hexagonal Core"
+  short_description: "Respecter les frontières du cœur hexagonal (ADR-002)"
+  default_prompt: "Use $hexagonal-core to keep this change inside the functional core boundaries and pass the architecture contract gates."

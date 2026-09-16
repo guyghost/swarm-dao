@@ -1,0 +1,4 @@
+interface:
+  display_name: "Machine Boundaries"
+  short_description: "Ne pas franchir les frontières entre machines XState"
+  default_prompt: "Use $machine-boundaries before touching workflow machines, events, or workers so proposal authority, signal-only rules, and frozen anchors stay intact."
