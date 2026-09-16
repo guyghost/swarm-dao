@@ -172,69 +172,69 @@ describe("CLI E2E", () => {
 
   // ── Ship command tests ─────────────────────────────────────
 
-  describe("ship command", () => {
-    /** Helper: fast-track a proposal to 'controlled' status by mutating state directly */
-    async function setupControlledProposal(title: string, dependsOn?: number[]): Promise<number> {
-      const { loadState, saveState, getOrCreateState, setState } = await import("@guyghost/swarm-dao-core");
+  /** Helper: fast-track a proposal to 'controlled' status by mutating state directly */
+  async function setupControlledProposal(title: string, dependsOn?: number[]): Promise<number> {
+    const { loadState, saveState, getOrCreateState, setState } = await import("@guyghost/swarm-dao-core");
 
-      const loaded = await loadState(testDir);
-      if (!loaded) {
-        const { initializeAgents } = await import("@guyghost/swarm-dao-core");
-        const s = getOrCreateState(testDir);
-        s.initialized = true;
-        s.agents = initializeAgents();
-        setState(s);
-      }
-
-      const { createProposal, dispatchProposalEvent, DEFAULT_CONFIG } = await import("@guyghost/swarm-dao-core");
-      const p = await createProposal(title, "product-feature", "desc", "test");
-      if (dependsOn) p.dependsOn = dependsOn;
-      // Guarded events recompute the decision (issue #158): real votes + config.
-      p.votes = [
-        { agentId: "a", agentName: "A", position: "for", reasoning: "ok", weight: 1 },
-        { agentId: "b", agentName: "B", position: "for", reasoning: "ok", weight: 1 },
-      ];
-      dispatchProposalEvent(p, { type: "DELIBERATE" });
-      dispatchProposalEvent(
-        p,
-        {
-          type: "APPROVE",
-          tally: {
-            proposalId: p.id,
-            approved: true,
-            quorumMet: true,
-            totalAgents: 5,
-            votingAgents: 5,
-            quorumPercent: 100,
-            weightedFor: 10,
-            weightedAgainst: 0,
-            totalVotingWeight: 10,
-            approvalScore: 100,
-            votes: [],
-          },
-        },
-        { config: DEFAULT_CONFIG },
-      );
-      dispatchProposalEvent(
-        p,
-        {
-          type: "CONTROL_PASS",
-          result: {
-            proposalId: p.id,
-            timestamp: new Date().toISOString(),
-            allGatesPassed: true,
-            blockerCount: 0,
-            warningCount: 0,
-            gates: [],
-            checklist: [],
-          },
-        },
-        { config: DEFAULT_CONFIG },
-      );
-      await saveState();
-      return p.id;
+    const loaded = await loadState(testDir);
+    if (!loaded) {
+      const { initializeAgents } = await import("@guyghost/swarm-dao-core");
+      const s = getOrCreateState(testDir);
+      s.initialized = true;
+      s.agents = initializeAgents();
+      setState(s);
     }
 
+    const { createProposal, dispatchProposalEvent, DEFAULT_CONFIG } = await import("@guyghost/swarm-dao-core");
+    const p = await createProposal(title, "product-feature", "desc", "test");
+    if (dependsOn) p.dependsOn = dependsOn;
+    // Guarded events recompute the decision (issue #158): real votes + config.
+    p.votes = [
+      { agentId: "a", agentName: "A", position: "for", reasoning: "ok", weight: 1 },
+      { agentId: "b", agentName: "B", position: "for", reasoning: "ok", weight: 1 },
+    ];
+    dispatchProposalEvent(p, { type: "DELIBERATE" });
+    dispatchProposalEvent(
+      p,
+      {
+        type: "APPROVE",
+        tally: {
+          proposalId: p.id,
+          approved: true,
+          quorumMet: true,
+          totalAgents: 5,
+          votingAgents: 5,
+          quorumPercent: 100,
+          weightedFor: 10,
+          weightedAgainst: 0,
+          totalVotingWeight: 10,
+          approvalScore: 100,
+          votes: [],
+        },
+      },
+      { config: DEFAULT_CONFIG },
+    );
+    dispatchProposalEvent(
+      p,
+      {
+        type: "CONTROL_PASS",
+        result: {
+          proposalId: p.id,
+          timestamp: new Date().toISOString(),
+          allGatesPassed: true,
+          blockerCount: 0,
+          warningCount: 0,
+          gates: [],
+          checklist: [],
+        },
+      },
+      { config: DEFAULT_CONFIG },
+    );
+    await saveState();
+    return p.id;
+  }
+
+  describe("ship command", () => {
     it("ships a proposal without dependencies", async () => {
       await runCLI(["init"], testDir);
       await runCLI(["setup"], testDir);
@@ -330,6 +330,52 @@ describe("CLI E2E", () => {
       );
       expect(result.code).toBe(0);
       expect(result.stdout).toContain("depends-on: #1");
+    });
+  });
+
+  describe("rate command (issue #190)", () => {
+    it("records a rating on an executed proposal and persists the outcome", async () => {
+      await runCLI(["init"], testDir);
+      await runCLI(["setup"], testDir);
+      const id = await setupControlledProposal("Feature A");
+      await runCLI(["ship", String(id)], testDir);
+
+      const result = await runCLI(["rate", String(id), "--score=4", "--comment=Works as shipped", "--by=Guy"], testDir);
+      expect(result.code).toBe(0);
+      expect(result.stdout).toContain("Rating recorded");
+      expect(result.stdout).toContain("4/5");
+      expect(result.stdout).toContain("Guy");
+
+      const { loadState } = await import("@guyghost/swarm-dao-core");
+      const state = await loadState(testDir);
+      const ratings = state?.outcomes[id]?.ratings ?? [];
+      expect(ratings).toHaveLength(1);
+      expect(ratings[0]?.score).toBe(4);
+      expect(ratings[0]?.rater).toBe("Guy");
+      expect(state?.auditLog.some((e) => e.action === "outcome-rated")).toBe(true);
+    });
+
+    it("refuses to rate a proposal that is not executed", async () => {
+      await runCLI(["init"], testDir);
+      await runCLI(["setup"], testDir);
+      await runCLI(["propose", "--title=Too early", "--type=product-feature", "--description=Test"], testDir);
+
+      const result = await runCLI(["rate", "1", "--score=5", "--comment=Nice"], testDir);
+      expect(result.code).toBe(1);
+      expect(result.stderr).toContain("must be executed");
+    });
+
+    it("validates the score range and the required comment", async () => {
+      await runCLI(["init"], testDir);
+      await runCLI(["setup"], testDir);
+
+      const badScore = await runCLI(["rate", "1", "--score=6", "--comment=x"], testDir);
+      expect(badScore.code).toBe(1);
+      expect(badScore.stderr).toContain("--score");
+
+      const noComment = await runCLI(["rate", "1", "--score=3"], testDir);
+      expect(noComment.code).toBe(1);
+      expect(noComment.stderr).toContain("--comment");
     });
   });
 });

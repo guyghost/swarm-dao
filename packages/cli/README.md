@@ -109,6 +109,7 @@ missing runtime is an honest error, never a silent host fallback.
 | `vote <id>` | Cast an agent vote |
 | `reject-proposal <id>` | Reject a proposal with an auditable reason (`--reason <text>`) |
 | `ship <id>` | Execute an approved proposal |
+| `rate <id>` | Rate an executed proposal's outcome (`--score <1-5>`, `--comment <text>`, `--by <name>`) |
 | `github-config` | Configure the GitHub integration |
 | `github-branch <id>` | Create the proposal's GitHub branch |
 | `github-pr <id>` | Open a pull request for a proposal |
@@ -129,6 +130,8 @@ swarm-dao ship 1 [--cascade]      # --cascade ships unexecuted dependencies firs
 swarm-dao ship 1 --force          # skip dependency checks (recorded bypass)
 
 swarm-dao reject-proposal 1 --reason "Risk zone underestimated"
+
+swarm-dao rate 1 --score 5 --comment "Shipped and verified in production" [--by <name>]
 ```
 
 Proposal types: `product-feature`, `security-change`, `technical-change`,
