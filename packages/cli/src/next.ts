@@ -1,9 +1,19 @@
 // Swarm DAO CLI — `next`: what the machines need from you, and what is
-// quietly progressing. Attention (human gates) first, then live-but-calm
-// workflows (cooldown countdowns, in-flight runs), each with the exact
-// command to copy. Read-only.
+// quietly progressing. Attention (human gates) first, then the retro loop
+// (shipped proposals awaiting a rating), then live-but-calm workflows
+// (cooldown countdowns, in-flight runs), each with the exact command to
+// copy. Read-only.
 
-import { ATTENTION_SOURCES, type AttentionSource, collectAttention, FsAttentionStore } from "@guyghost/swarm-dao-core";
+import { promises as fs } from "node:fs";
+import path from "node:path";
+import {
+  ATTENTION_SOURCES,
+  type AttentionSource,
+  collectAttention,
+  FileDaoStateRepository,
+  FsAttentionStore,
+  getDaoRoot,
+} from "@guyghost/swarm-dao-core";
 import { c, formatRemaining, GLYPH } from "./render.js";
 import { locateRoot, readJsonOrNull, SERIES_ROOT_CANDIDATES } from "./roots.js";
 
@@ -25,6 +35,8 @@ export async function renderNext(cwd: string): Promise<string> {
   const items = await collectAttention(store);
   const gated = new Set(items.map((i) => `${i.source}/${i.runId}`));
 
+  const unrated = await unratedProposals(cwd);
+
   const progress: string[] = [];
   for (const source of ATTENTION_SOURCES) {
     const runIds = await store.listRuns(source).catch(() => [] as readonly string[]);
@@ -38,7 +50,7 @@ export async function renderNext(cwd: string): Promise<string> {
     }
   }
 
-  if (items.length === 0 && progress.length === 0) {
+  if (items.length === 0 && progress.length === 0 && unrated.length === 0) {
     return "nothing pending — no human gates, no active workflows\n";
   }
 
@@ -54,11 +66,43 @@ export async function renderNext(cwd: string): Promise<string> {
     lines.push(`${c.bold("Needs you")} — nothing; no human gates are pending`);
   }
 
+  if (unrated.length > 0) {
+    lines.push(``, `${c.bold("Retro loop")} — shipped, awaiting your rating`);
+    for (const p of unrated) {
+      lines.push(`  ${GLYPH.warn} #${p.id} — ${p.title}`);
+    }
+    lines.push(
+      `      ${GLYPH.arrow} swarm-dao rate <id> --score <1-5> --comment "<what worked / what didn't>"${c.dim("  (see: swarm-dao list --unrated)")}`,
+    );
+  }
+
   if (progress.length > 0) {
     lines.push(``, `${c.bold("In progress")} — no action needed`);
     for (const line of progress) lines.push(`  ${GLYPH.wait} ${line}`);
   }
   return `${lines.join("\n")}\n`;
+}
+
+/**
+ * Executed proposals with no outcome rating yet — the retro loop the human
+ * still owes. Read-only and silent: a project without a DAO (or with an
+ * unreadable state) simply reports nothing, and we never create `.dao/` as a
+ * side effect (`FileDaoStateRepository.open` mkdirs, so gate on state.json).
+ */
+async function unratedProposals(cwd: string): Promise<{ id: number; title: string }[]> {
+  try {
+    await fs.access(path.join(getDaoRoot(cwd), "state.json"));
+  } catch {
+    return [];
+  }
+  try {
+    const state = (await FileDaoStateRepository.open(cwd)).get();
+    return state.proposals
+      .filter((p) => p.status === "executed" && (state.outcomes[p.id]?.ratings.length ?? 0) === 0)
+      .map((p) => ({ id: p.id, title: p.title }));
+  } catch {
+    return [];
+  }
 }
 
 export async function cmdNext(cwd: string): Promise<number> {

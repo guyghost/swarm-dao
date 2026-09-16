@@ -104,7 +104,7 @@ missing runtime is an honest error, never a silent host fallback.
 | `config` | Print the DAO configuration |
 | `status` | Show DAO status |
 | `propose` | Create a proposal |
-| `list` | List proposals (`--status`, `--type`) |
+| `list` | List proposals (`--status`, `--type`, `--unrated`) |
 | `show <id>` | Show full proposal details |
 | `vote <id>` | Cast an agent vote |
 | `reject-proposal <id>` | Reject a proposal with an auditable reason (`--reason <text>`) |

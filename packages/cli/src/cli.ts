@@ -363,7 +363,7 @@ const CLI_USAGE_DETAILS: Record<string, string> = {
     "  roundtable [--host <herdr|tmux|auto>] [--kind <pi|codex|claude|…>] [--keep-panes] [--timeout-ms <ms>]\n        every agent suggests a proposal idea in its own child session",
   implement:
     "  implement <id> [<id>…] [--host <herdr|tmux|auto>] [--kind <pi|codex|claude|…>] [--keep-panes] [--timeout-ms <ms>]\n        dispatch one child agent per proposal; multiple ids develop in\n        parallel, each in its own worktree (needs execution.isolation)",
-  list: "  list [--status <s>] [--type <T>]",
+  list: "  list [--status <s>] [--type <T>] [--unrated]",
   show: "  show <id>",
   vote: "  vote <id> --position <for|against|abstain> --reasoning <text>\n        [--weight <n>] [--agent <id>]\n        --weight defaults to the council agent's registry weight",
   control: "  control <id>\n        Run quality-control gates (alias: check)",
@@ -590,6 +590,10 @@ async function cmdList(cwd: string, flags: Record<string, string | true>): Promi
   if (typeof flags.status === "string") {
     items = items.filter((p) => p.status === flags.status);
   }
+  if (flags.unrated === true) {
+    const outcomes = getState().outcomes;
+    items = items.filter((p) => p.status === "executed" && (outcomes[p.id]?.ratings.length ?? 0) === 0);
+  }
   if (typeof flags.type === "string") {
     items = items.filter((p) => p.type === flags.type);
   }
@@ -600,6 +604,9 @@ async function cmdList(cwd: string, flags: Record<string, string | true>): Promi
   for (const p of items) {
     const risk = p.riskZone ? ` [${p.riskZone}]` : "";
     info(`#${String(p.id).padStart(3)} [${p.status.padEnd(12)}] ${p.type.padEnd(18)}${risk}  ${p.title}`);
+  }
+  if (flags.unrated === true) {
+    info(c.dim(`  → close the loop: swarm-dao rate <id> --score <1-5> --comment "<what worked / what didn't>"`));
   }
 }
 
