@@ -18,7 +18,10 @@
 import { execFile } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { HARNESS_MODEL_FLAGS } from "../../packages/core/src/intelligence/runtime.js";
+import { extractLastJsonObject, runHerdrWorker, SAFE_HERDR_KIND } from "../../packages/improvement-loop/src/workers.js";
 import { compareScorecards, hasRegressions } from "./compare.js";
+import { gradeAnswer, SCENARIOS, type Scenario } from "./scenarios.js";
 import { EVAL_SUITE, type EvalResult, type Scorecard } from "./suite.js";
 
 const ROOT = path.resolve(import.meta.dir, "../..");
@@ -28,6 +31,7 @@ const STDERR_TAIL_LINES = 15;
 const usage = `Usage:
   bun tools/evals/evalctl.ts list
   bun tools/evals/evalctl.ts run --label <id> [--filter <id-prefix>] [--json <path>]
+  bun tools/evals/evalctl.ts scenario --label <id> [--scenario <id>] [--kind <herdr-kind>] [--model <model>] [--timeout <ms>] [--json <path>]
   bun tools/evals/evalctl.ts compare --base <path> --candidate <path>`;
 
 const argv = process.argv.slice(2);
@@ -60,8 +64,7 @@ function runOne(command: string): Promise<EvalResult> {
       (error, _stdout, stderr) => {
         const durationMs = Date.now() - startedAt;
         const exitCode = typeof error?.code === "number" ? error.code : error ? null : 0;
-        const stderrText =
-          exitCode === 0 || typeof stderr !== "string" || !stderr.trim() ? undefined : stderr;
+        const stderrText = exitCode === 0 || typeof stderr !== "string" || !stderr.trim() ? undefined : stderr;
         resolve({
           id: command,
           command,
@@ -157,6 +160,116 @@ function compare(): number {
   return hasRegressions(diff) ? 1 : 0;
 }
 
+// ── scenario (live, herdr) ─────────────────────────────
+
+function scenarioResult(
+  scenario: Scenario,
+  rubricId: string,
+  passed: boolean,
+  durationMs: number,
+  detail: string,
+): EvalResult {
+  return {
+    id: `${scenario.id}.${rubricId}`,
+    command: `evals:scenario ${scenario.id}`,
+    status: passed ? "passed" : "failed",
+    exitCode: passed ? 0 : 1,
+    durationMs,
+    stderrTail: passed ? undefined : detail,
+  };
+}
+
+async function scenario(): Promise<number> {
+  const label = arg("label");
+  if (!label || !/^[a-z0-9][a-z0-9._-]*$/i.test(label)) {
+    console.error(`scenario requires --label <id> (alphanumeric, . _ -)\n${usage}`);
+    return 2;
+  }
+  const kind = arg("kind") ?? "pi";
+  if (!SAFE_HERDR_KIND.test(kind)) {
+    console.error(`--kind "${kind}" is not a valid herdr kind identifier`);
+    return 2;
+  }
+  const model = arg("model");
+  const modelFlag = HARNESS_MODEL_FLAGS[kind];
+  if (model && modelFlag === undefined) {
+    console.error(
+      `--model is not supported for kind "${kind}" (known: ${Object.keys(HARNESS_MODEL_FLAGS).join(", ")})`,
+    );
+    return 2;
+  }
+  const filter = arg("scenario");
+  const selected = SCENARIOS.filter((scenario) => !filter || scenario.id === filter);
+  if (selected.length === 0) {
+    console.error(`no scenario matches "${filter ?? ""}" (known: ${SCENARIOS.map((s) => s.id).join(", ")})`);
+    return 2;
+  }
+  const timeoutMs = Number(arg("timeout") ?? 180_000);
+  if (!Number.isInteger(timeoutMs) || timeoutMs < 1_000 || timeoutMs > 900_000) {
+    console.error("--timeout must be an integer between 1000 and 900000");
+    return 2;
+  }
+
+  const agentArgs = model && modelFlag ? [modelFlag, model] : undefined;
+  const dispatchDesc = `herdr/${kind}${model ? ` ${modelFlag} ${model}` : ""}`;
+  console.log(`evals:scenario — ${selected.length} scenario(s) via ${dispatchDesc}, label "${label}"\n`);
+  const startedAt = new Date().toISOString();
+  const results: EvalResult[] = [];
+
+  for (const scenario of selected) {
+    const scenarioStart = Date.now();
+    const harvest = await runHerdrWorker(
+      {
+        workDir: ROOT,
+        kind,
+        agentArgs,
+        timeoutMs,
+        // Eval answers are single JSON objects; prose settling is a failure,
+        // so fail fast instead of the improvement workers' 3-minute window.
+        stablePolls: 3,
+      },
+      `eval-${label}-${scenario.id}`.replace(/[^a-zA-Z0-9._-]/g, "-").slice(0, 32),
+      scenario.prompt,
+    );
+    const durationMs = Date.now() - scenarioStart;
+    if (!harvest.ok) {
+      console.log(`FAIL  ${scenario.id}.dispatch (${durationMs}ms)`);
+      console.error(harvest.error);
+      results.push(scenarioResult(scenario, "dispatch", false, durationMs, harvest.error));
+      continue;
+    }
+    const answer = extractLastJsonObject(harvest.content);
+    for (const rubricResult of gradeAnswer(scenario, answer)) {
+      const mark = rubricResult.passed ? "PASS" : "FAIL";
+      console.log(`${mark}  ${rubricResult.id} (${durationMs}ms)  ${rubricResult.detail}`);
+      results.push(scenarioResult(scenario, rubricResult.id, rubricResult.passed, durationMs, rubricResult.detail));
+    }
+  }
+  const finishedAt = new Date().toISOString();
+
+  const passed = results.filter((result) => result.status === "passed").length;
+  const scorecard: Scorecard = {
+    label,
+    startedAt,
+    finishedAt,
+    results,
+    summary: {
+      total: results.length,
+      passed,
+      failed: results.length - passed,
+      totalMs: results.reduce((sum, result) => sum + result.durationMs, 0),
+    },
+  };
+
+  const outPath = arg("json") ?? path.join(DEFAULT_EVIDENCE_DIR, `${label}.json`);
+  mkdirSync(path.dirname(outPath), { recursive: true });
+  writeFileSync(outPath, `${JSON.stringify(scorecard, null, 2)}\n`);
+  console.log(
+    `\nsummary: ${passed}/${results.length} passed in ${scorecard.summary.totalMs}ms — scorecard: ${path.relative(ROOT, outPath)}`,
+  );
+  return scorecard.summary.failed > 0 ? 1 : 0;
+}
+
 // ── Dispatch ─────────────────────────────────────────────────
 
 switch (subcommand) {
@@ -165,6 +278,9 @@ switch (subcommand) {
     break;
   case "run":
     process.exit(await run());
+    break;
+  case "scenario":
+    process.exit(await scenario());
     break;
   case "compare":
     process.exit(compare());
