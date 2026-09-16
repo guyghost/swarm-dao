@@ -378,4 +378,40 @@ describe("CLI E2E", () => {
       expect(noComment.stderr).toContain("--comment");
     });
   });
+
+  describe("unrated discovery (issue #192)", () => {
+    it("list --unrated shows executed-but-unrated proposals with the close-the-loop hint", async () => {
+      await runCLI(["init"], testDir);
+      await runCLI(["setup"], testDir);
+      const id = await setupControlledProposal("Feature A");
+      await runCLI(["ship", String(id)], testDir);
+
+      const result = await runCLI(["list", "--unrated"], testDir);
+      expect(result.code).toBe(0);
+      expect(result.stdout).toContain("Feature A");
+      expect(result.stdout).toContain("swarm-dao rate");
+
+      // Rating closes the loop: the proposal leaves the unrated list.
+      await runCLI(["rate", String(id), "--score=4", "--comment=Works"], testDir);
+      const after = await runCLI(["list", "--unrated"], testDir);
+      expect(after.stdout).toContain("(no proposals)");
+    });
+
+    it("next surfaces the retro loop for shipped-unrated proposals and clears after rating", async () => {
+      await runCLI(["init"], testDir);
+      await runCLI(["setup"], testDir);
+      const id = await setupControlledProposal("Feature B");
+      await runCLI(["ship", String(id)], testDir);
+
+      const before = await runCLI(["next"], testDir);
+      expect(before.code).toBe(0);
+      expect(before.stdout).toContain("Retro loop");
+      expect(before.stdout).toContain(`#${id} — Feature B`);
+      expect(before.stdout).toContain("swarm-dao rate");
+
+      await runCLI(["rate", String(id), "--score=5", "--comment=Great"], testDir);
+      const after = await runCLI(["next"], testDir);
+      expect(after.stdout).not.toContain("Retro loop");
+    });
+  });
 });
