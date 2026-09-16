@@ -1,0 +1,4 @@
+interface:
+  display_name: "Host Adapter"
+  short_description: "Ajouter ou modifier un adaptateur d'hôte Swarm DAO"
+  default_prompt: "Use $host-adapter to add or modify this host adapter package following the enforced lifecycle and manifest rules."
