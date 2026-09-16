@@ -54,10 +54,38 @@ Safety: the scenario agent runs in this checkout with prompts under a
 read-only discipline. Run live scenarios on a clean tree (or a worktree
 checkout) so an off-script agent cannot touch in-flight work.
 
+## Automated PR review
+
+`evals:review` is the first-pass reviewer for a small PR — deterministic
+gates first, agent judgment second, both gated:
+
+```bash
+bun run evals:review                      # base = merge-base(origin/main, HEAD)
+bun run evals:review --base main --label my-review
+```
+
+1. **Candidate battery** — the full gate suite on the current tree;
+2. **Base battery** — the same suite in a throwaway `git worktree` at the
+   merge-base, with `node_modules` staged so `@guyghost/*` links point at the
+   worktree's own packages (candidate sources can never mask a regression);
+   any passed→failed regression blocks;
+3. **Changeset coverage** — `check:changesets` pinned to the merge-base;
+4. **Agent review** — a real reviewer agent (herdr harness, `--kind`/`--model`)
+   inspects the diff itself and returns a typed verdict in the worker
+   envelope; the vocabulary is closed (`approve` | `changes-requested`), so a
+   reworded approval cannot flip the outcome.
+
+Exit 1 if any step fails. `--no-agent` skips step 4 for a fully
+deterministic review (CI-friendly — no herdr or model access needed).
+Scorecard lands in `evidence/evals/` like the
+other runs, so adoption regressions and review verdicts diff with the same
+tool.
+
 ## Layout
 
 - `suite.ts` — gate suite data + scorecard types (pure)
 - `scenarios.ts` — live scenario data + deterministic grading (pure)
+- `review.ts` — review prompt + verdict grading (pure)
 - `compare.ts` — scorecard diff (pure)
 - `evalctl.ts` — CLI shell (list / run / scenario / compare)
 - `tests/` — integrity, grading, and diff logic tests (`bun run test:tools`)

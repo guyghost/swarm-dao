@@ -15,12 +15,14 @@
 // Deterministic battery: no LLM calls. Live-model scenario runs are
 // a deferred layer that will emit scorecards in the same shape.
 
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { HARNESS_MODEL_FLAGS } from "../../packages/core/src/intelligence/runtime.js";
 import { extractLastJsonObject, runHerdrWorker, SAFE_HERDR_KIND } from "../../packages/improvement-loop/src/workers.js";
 import { compareScorecards, hasRegressions } from "./compare.js";
+import { buildReviewPrompt, gradeReviewAnswer } from "./review.js";
 import { gradeAnswer, SCENARIOS, type Scenario } from "./scenarios.js";
 import { EVAL_SUITE, type EvalResult, type Scorecard } from "./suite.js";
 
@@ -32,6 +34,7 @@ const usage = `Usage:
   bun tools/evals/evalctl.ts list
   bun tools/evals/evalctl.ts run --label <id> [--filter <id-prefix>] [--json <path>]
   bun tools/evals/evalctl.ts scenario --label <id> [--scenario <id>] [--kind <herdr-kind>] [--model <model>] [--timeout <ms>] [--json <path>]
+  bun tools/evals/evalctl.ts review [--base <ref>] [--label <id>] [--kind <herdr-kind>] [--model <model>] [--json <path>]
   bun tools/evals/evalctl.ts compare --base <path> --candidate <path>`;
 
 const argv = process.argv.slice(2);
@@ -54,13 +57,13 @@ function list(): void {
 
 // ── run ──────────────────────────────────────────────────────
 
-function runOne(command: string): Promise<EvalResult> {
+function runOne(command: string, cwd: string = ROOT): Promise<EvalResult> {
   const startedAt = Date.now();
   return new Promise((resolve) => {
     execFile(
       "bun",
       command.split(" ").slice(1),
-      { cwd: ROOT, timeout: 120_000, maxBuffer: 16 * 1024 * 1024 },
+      { cwd, timeout: 120_000, maxBuffer: 16 * 1024 * 1024 },
       (error, _stdout, stderr) => {
         const durationMs = Date.now() - startedAt;
         const exitCode = typeof error?.code === "number" ? error.code : error ? null : 0;
@@ -78,35 +81,40 @@ function runOne(command: string): Promise<EvalResult> {
   });
 }
 
+async function runBattery(filter: string | undefined, cwd: string): Promise<EvalResult[]> {
+  const entries = EVAL_SUITE.filter((entry) => !filter || entry.id.startsWith(filter));
+  if (entries.length === 0) throw new Error(`no evals match filter "${filter}"`);
+  const results: EvalResult[] = [];
+  for (const entry of entries) {
+    const result = await runOne(entry.command, cwd);
+    results.push({ ...result, id: entry.id });
+    const mark = result.status === "passed" ? "PASS" : "FAIL";
+    console.log(`${mark}  ${entry.id} (${result.durationMs}ms)  ${entry.command}`);
+    if (result.stderrTail) console.error(result.stderrTail);
+  }
+  return results;
+}
+
 async function run(): Promise<number> {
   const label = arg("label");
   if (!label || !/^[a-z0-9][a-z0-9._-]*$/i.test(label)) {
     console.error(`run requires --label <id> (alphanumeric, . _ -)\n${usage}`);
     return 2;
   }
-  const filter = arg("filter");
-  const entries = EVAL_SUITE.filter((entry) => !filter || entry.id.startsWith(filter));
-  if (entries.length === 0) {
-    console.error(`no evals match filter "${filter}"`);
+  console.log(`evals:run — label "${label}"\n`);
+  let results: EvalResult[];
+  try {
+    results = await runBattery(arg("filter"), ROOT);
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
     return 2;
-  }
-
-  console.log(`evals:run — ${entries.length} eval(s), label "${label}"\n`);
-  const startedAt = new Date().toISOString();
-  const results: EvalResult[] = [];
-  for (const entry of entries) {
-    const result = await runOne(entry.command);
-    results.push({ ...result, id: entry.id });
-    const mark = result.status === "passed" ? "PASS" : "FAIL";
-    console.log(`${mark}  ${entry.id} (${result.durationMs}ms)  ${entry.command}`);
-    if (result.stderrTail) console.error(result.stderrTail);
   }
   const finishedAt = new Date().toISOString();
 
   const passed = results.filter((result) => result.status === "passed").length;
   const scorecard: Scorecard = {
     label,
-    startedAt,
+    startedAt: new Date().toISOString(),
     finishedAt,
     results,
     summary: {
@@ -270,7 +278,184 @@ async function scenario(): Promise<number> {
   return scorecard.summary.failed > 0 ? 1 : 0;
 }
 
-// ── Dispatch ─────────────────────────────────────────────────
+// ── review (deterministic diff gate + agent first-pass) ──────
+
+function sh(cwd: string, file: string, args: readonly string[], env?: NodeJS.ProcessEnv): string {
+  return execFileSync(file, args, {
+    cwd,
+    encoding: "utf8",
+    env: env ? { ...process.env, ...env } : process.env,
+    stdio: ["ignore", "pipe", "pipe"],
+  }).trim();
+}
+
+function resolveReviewBase(): string {
+  const explicit = arg("base");
+  return explicit
+    ? sh(ROOT, "git", ["merge-base", explicit, "HEAD"])
+    : sh(ROOT, "git", ["merge-base", "origin/main", "HEAD"]);
+}
+
+/** Prepare the base worktree for the battery: a real frozen install wires
+ * the full per-package node_modules layout bun uses (workspace links point at
+ * the worktree's own packages — candidate sources can never leak in), then a
+ * build because dist/ is gitignored and the gates import compiled entries. */
+function prepareWorktree(worktreePath: string): void {
+  sh(worktreePath, "bun", ["install", "--frozen-lockfile"]);
+  sh(worktreePath, "bun", ["run", "build"]);
+}
+
+async function review(): Promise<number> {
+  let mergeBase: string;
+  try {
+    mergeBase = resolveReviewBase();
+  } catch {
+    console.error("review requires a diff base: pass --base <ref> or ensure origin/main exists");
+    return 2;
+  }
+  const label = arg("label") ?? `review-${mergeBase.slice(0, 8)}`;
+  if (!/^[a-z0-9][a-z0-9._-]*$/i.test(label)) {
+    console.error(`--label must be alphanumeric (with . _ -)`);
+    return 2;
+  }
+  const kind = arg("kind") ?? "pi";
+  if (!SAFE_HERDR_KIND.test(kind)) {
+    console.error(`--kind "${kind}" is not a valid herdr kind identifier`);
+    return 2;
+  }
+  const model = arg("model");
+  const modelFlag = HARNESS_MODEL_FLAGS[kind];
+  if (model && modelFlag === undefined) {
+    console.error(
+      `--model is not supported for kind "${kind}" (known: ${Object.keys(HARNESS_MODEL_FLAGS).join(", ")})`,
+    );
+    return 2;
+  }
+
+  const startedAt = new Date().toISOString();
+  const results: EvalResult[] = [];
+
+  // 1. Candidate battery on the current tree.
+  console.log(`evals:review — base ${mergeBase.slice(0, 8)}, candidate HEAD, reviewer ${kind}\n`);
+  console.log("[1/4] candidate battery");
+  results.push(...(await runBattery(undefined, ROOT)));
+
+  // 2. Base battery in a throwaway worktree at the merge-base.
+  console.log("\n[2/4] base battery (throwaway worktree)");
+  const worktreePath = `${tmpdir()}/swarm-dao-review-${mergeBase.slice(0, 8)}-${Date.now()}`;
+  let baseResults: EvalResult[] = [];
+  try {
+    sh(ROOT, "git", ["worktree", "add", "--detach", worktreePath, mergeBase]);
+    prepareWorktree(worktreePath);
+    baseResults = await runBattery(undefined, worktreePath);
+  } catch (error) {
+    const err = error as { message?: string; stdout?: string; stderr?: string };
+    const detail = [err.message, err.stdout, err.stderr].filter(Boolean).join("\n");
+    console.error(`base battery could not run: ${detail.slice(-2000)}`);
+  } finally {
+    try {
+      execFileSync("git", ["worktree", "remove", "--force", worktreePath], { cwd: ROOT, stdio: "ignore" });
+    } catch {
+      // leave the worktree for manual cleanup rather than failing the review
+    }
+  }
+  const diff = compareScorecards(
+    {
+      label: "base",
+      startedAt,
+      finishedAt: startedAt,
+      results: baseResults,
+      summary: { total: baseResults.length, passed: 0, failed: 0, totalMs: 0 },
+    },
+    {
+      label: "candidate",
+      startedAt,
+      finishedAt: startedAt,
+      results,
+      summary: { total: results.length, passed: 0, failed: 0, totalMs: 0 },
+    },
+  );
+  for (const regression of diff.regressions) {
+    console.error(`REGRESSION  ${regression.id} — passed on base, failed on candidate`);
+    if (regression.stderrTail) console.error(regression.stderrTail);
+  }
+
+  for (const improvement of diff.improvements) console.log(`improved    ${improvement.id} (failed on base)`);
+
+  // 3. Changeset coverage for the diff (PR-aware check).
+  console.log("\n[3/4] changeset coverage");
+  const changesetsStart = Date.now();
+  let changesetsPassed = true;
+  try {
+    sh(ROOT, "bun", ["run", "check:changesets"], { BASE_SHA: mergeBase });
+    console.log("PASS  changesets.coverage");
+  } catch {
+    changesetsPassed = false;
+    console.error("FAIL  changesets.coverage — diff touches published package src without a changeset");
+  }
+  results.push({
+    id: "changesets.coverage",
+    command: "bun run check:changesets",
+    status: changesetsPassed ? "passed" : "failed",
+    exitCode: changesetsPassed ? 0 : 1,
+    durationMs: Date.now() - changesetsStart,
+  });
+
+  // 4. Agent first-pass review of the diff (skippable for a deterministic
+  // review in CI, where herdr/model access may not exist).
+  if (!argv.includes("--no-agent")) {
+    console.log("\n[4/4] agent review");
+    const reviewStart = Date.now();
+    const harvest = await runHerdrWorker(
+      {
+        workDir: ROOT,
+        kind,
+        agentArgs: model && modelFlag ? [modelFlag, model] : undefined,
+        timeoutMs: 600_000,
+        stablePolls: 3,
+      },
+      `eval-review-${mergeBase.slice(0, 8)}`.slice(0, 32),
+      buildReviewPrompt(mergeBase),
+    );
+    const reviewMs = Date.now() - reviewStart;
+    const answer = harvest.ok ? extractLastJsonObject(harvest.content) : null;
+    if (!harvest.ok) console.error(harvest.error);
+    for (const graded of gradeReviewAnswer(answer).results) {
+      const mark = graded.passed ? "PASS" : "FAIL";
+      console.log(`${mark}  ${graded.id} (${reviewMs}ms)  ${graded.detail}`);
+      results.push({
+        id: graded.id,
+        command: `evals:review agent (${kind})`,
+        status: graded.passed ? "passed" : "failed",
+        exitCode: graded.passed ? 0 : 1,
+        durationMs: reviewMs,
+        stderrTail: graded.passed ? undefined : graded.detail,
+      });
+    }
+  }
+
+  const scorecard: Scorecard = {
+    label,
+    startedAt,
+    finishedAt: new Date().toISOString(),
+    results,
+    summary: {
+      total: results.length,
+      passed: results.filter((result) => result.status === "passed").length,
+      failed: results.filter((result) => result.status === "failed").length,
+      totalMs: results.reduce((sum, result) => sum + result.durationMs, 0),
+    },
+  };
+  const outPath = arg("json") ?? path.join(DEFAULT_EVIDENCE_DIR, `${label}.json`);
+  mkdirSync(path.dirname(outPath), { recursive: true });
+  writeFileSync(outPath, `${JSON.stringify(scorecard, null, 2)}\n`);
+  console.log(
+    `\nsummary: ${scorecard.summary.passed}/${scorecard.summary.total} passed — scorecard: ${path.relative(ROOT, outPath)}`,
+  );
+  return scorecard.summary.failed > 0 ? 1 : 0;
+}
+
+// ── Dispatch ────────────────────────────────────────────────
 
 switch (subcommand) {
   case "list":
@@ -281,6 +466,9 @@ switch (subcommand) {
     break;
   case "scenario":
     process.exit(await scenario());
+    break;
+  case "review":
+    process.exit(await review());
     break;
   case "compare":
     process.exit(compare());

@@ -39,6 +39,7 @@
     "evals:run": "bun tools/evals/evalctl.ts run",
     "evals:compare": "bun tools/evals/evalctl.ts compare",
     "evals:scenario": "bun tools/evals/evalctl.ts scenario",
+    "evals:review": "bun tools/evals/evalctl.ts review",
     "shipaudit:validate": "bun tools/ship-audit/validate.ts",
     "shipaudit:demo": "bun tools/ship-audit/demo.ts",
     "shipaudit:regression": "bun test packages/core/tests/ship-audit.machine.test.ts packages/core/tests/ship-audit.wiring.test.ts tools/ship-audit/tests",
