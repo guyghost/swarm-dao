@@ -81,7 +81,7 @@ function runOne(command: string, cwd: string = ROOT): Promise<EvalResult> {
   });
 }
 
-async function runBattery(filter: string | undefined, cwd: string): Promise<EvalResult[]> {
+async function runBattery(filter: string | undefined, cwd: string, logPrefix = ""): Promise<EvalResult[]> {
   const entries = EVAL_SUITE.filter((entry) => !filter || entry.id.startsWith(filter));
   if (entries.length === 0) throw new Error(`no evals match filter "${filter}"`);
   const results: EvalResult[] = [];
@@ -89,7 +89,7 @@ async function runBattery(filter: string | undefined, cwd: string): Promise<Eval
     const result = await runOne(entry.command, cwd);
     results.push({ ...result, id: entry.id });
     const mark = result.status === "passed" ? "PASS" : "FAIL";
-    console.log(`${mark}  ${entry.id} (${result.durationMs}ms)  ${entry.command}`);
+    console.log(`${logPrefix}${mark}  ${entry.id} (${result.durationMs}ms)  ${entry.command}`);
     if (result.stderrTail) console.error(result.stderrTail);
   }
   return results;
@@ -347,7 +347,11 @@ async function review(): Promise<number> {
   try {
     sh(ROOT, "git", ["worktree", "add", "--detach", worktreePath, mergeBase]);
     prepareWorktree(worktreePath);
-    baseResults = await runBattery(undefined, worktreePath);
+    // Base-battery lines carry a "base " prefix: the PR comment's findings
+    // filter anchors on ^FAIL/^PASS, so a gate that legitimately cannot run
+    // on the base tree (e.g. a gate introduced by this PR) is reported as an
+    // "improved" line only, never as an alarming bare FAIL.
+    baseResults = await runBattery(undefined, worktreePath, "base ");
   } catch (error) {
     const err = error as { message?: string; stdout?: string; stderr?: string };
     const detail = [err.message, err.stdout, err.stderr].filter(Boolean).join("\n");
