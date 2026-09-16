@@ -87,5 +87,5 @@ tool.
 - `scenarios.ts` — live scenario data + deterministic grading (pure)
 - `review.ts` — review prompt + verdict grading (pure)
 - `compare.ts` — scorecard diff (pure)
-- `evalctl.ts` — CLI shell (list / run / scenario / compare)
+- `evalctl.ts` — CLI shell (list / run / scenario / review / compare)
 - `tests/` — integrity, grading, and diff logic tests (`bun run test:tools`)

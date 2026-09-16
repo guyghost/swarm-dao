@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 // ============================================================
-// Swarm DAO — Eval control (list | run | compare)
+// Swarm DAO — Eval control (list | run | scenario | review | compare)
 // ============================================================
 // Replays the eval suite (models/README.md anchor tables plus the
 // architecture/docs gates) into a scorecard, and diffs candidate
@@ -102,6 +102,7 @@ async function run(): Promise<number> {
     return 2;
   }
   console.log(`evals:run — label "${label}"\n`);
+  const startedAt = new Date().toISOString();
   let results: EvalResult[];
   try {
     results = await runBattery(arg("filter"), ROOT);
@@ -114,7 +115,7 @@ async function run(): Promise<number> {
   const passed = results.filter((result) => result.status === "passed").length;
   const scorecard: Scorecard = {
     label,
-    startedAt: new Date().toISOString(),
+    startedAt,
     finishedAt,
     results,
     summary: {

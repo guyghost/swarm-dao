@@ -64,7 +64,16 @@ function githubSlug(text: string): string {
 function headingAnchors(content: string): Set<string> {
   const anchors = new Set<string>();
   const seen = new Map<string, number>();
+  let inFence = false;
   for (const line of content.split("\n")) {
+    // Fence-aware like the link scan: GitHub generates no heading anchors
+    // from `#` lines inside code fences, and counting them as duplicates
+    // would shift a real heading's slug to `slug-1` (false broken link).
+    if (/^\s*(```|~~~)/.test(line)) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence) continue;
     const match = /^(#{1,6})\s+(.*)$/.exec(line);
     if (!match) continue;
     const slug = githubSlug(match[2]);
