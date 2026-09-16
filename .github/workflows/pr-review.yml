@@ -1,0 +1,105 @@
+name: PR review
+
+on:
+  pull_request:
+
+# One run per PR at a time: superseded pushes cancel their in-flight review.
+concurrency:
+  group: pr-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  # Posts/updates the review summary comment (same-repo branches; forks get a
+  # read-only token, where the comment step degrades gracefully).
+  pull-requests: write
+
+jobs:
+  review:
+    name: Evals review (deterministic)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Full history: the review diffs against the merge-base with
+          # origin/main and replays the gate battery on a worktree at it.
+          fetch-depth: 0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.0"
+
+      - name: Cache Bun install
+        # Shared with the review's worktree install (base battery), so the
+        # frozen install there is cache-warm too.
+        uses: actions/cache@v6
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build
+        # The candidate battery's gates import built dist of workspace
+        # packages; the base worktree builds itself inside the review.
+        run: bun run build
+
+      - name: Run deterministic review
+        id: review-step
+        # --no-agent: no herdr or model access on CI — the agent first-pass
+        # stays a local, on-demand step (bun run evals:review).
+        # shell: bash gives -o pipefail, so a non-zero review exit is not
+        # masked by tee.
+        shell: bash
+        run: |
+          bun run evals:review --no-agent --label ci-pr-${{ github.event.pull_request.number }} 2>&1 | tee review-output.txt
+
+      - name: Comment on the PR
+        # Upsert: one review comment per PR, edited on every push.
+        # continue-on-error: on fork PRs the token is read-only and the
+        # comment cannot post — the review verdict itself already failed or
+        # passed the job above.
+        continue-on-error: true
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          REVIEW_OUTCOME: ${{ steps.review-step.outcome }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -e
+          grep -E '^(REGRESSION|FAIL|improved|added|removed|summary:)' review-output.txt > review-findings.txt || true
+
+          {
+            echo "<!-- evals-review -->"
+            echo "## Evals review (deterministic)"
+            echo
+            if [ "$REVIEW_OUTCOME" = "success" ]; then
+              echo "✅ **No regressions.** Candidate battery, base battery, and changeset coverage all pass."
+            else
+              echo "❌ **Blocked.** Findings below — fix or justify before merge."
+            fi
+            echo
+            echo '```'
+            cat review-findings.txt
+            echo '```'
+            echo
+            echo "<details><summary>What this checks</summary>"
+            echo
+            echo "The gate battery runs on this PR's tree and again on a throwaway worktree at the merge-base (frozen install + build); any gate that passes on base and fails here blocks. Changeset coverage is pinned to the merge-base. Full output in this [workflow run]($RUN_URL). Agent first-pass review is available locally: \`bun run evals:review\`."
+            echo
+            echo "</details>"
+          } > review-comment.md
+
+          COMMENT_ID=$(gh api "repos/$REPO/issues/$PR_NUMBER/comments" --jq '.[] | select(.body | startswith("<!-- evals-review -->")) | .id' | head -n1)
+          if [ -n "$COMMENT_ID" ]; then
+            gh api -X PATCH "repos/$REPO/issues/$PR_NUMBER/comments/$COMMENT_ID" -f body=@"review-comment.md" >/dev/null
+            echo "updated review comment $COMMENT_ID"
+          else
+            gh pr comment "$PR_NUMBER" --body-file review-comment.md
+          fi
