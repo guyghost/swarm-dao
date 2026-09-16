@@ -8,7 +8,8 @@
   "sideEffects": false,
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "skills"
   ],
   "exports": {
     ".": {
@@ -17,6 +18,8 @@
     }
   },
   "scripts": {
+    "copy-skills": "bun run scripts/copy-skills.ts",
+    "prebuild": "bun run copy-skills",
     "build": "tsc",
     "test": "bun test",
     "lint": "biome check .",

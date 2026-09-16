@@ -181,6 +181,16 @@ The DAO uses sensible defaults. To customize, modify `.dao/state.json` after ini
 | `riskThreshold` | 7 | Risk score threshold (1–10) |
 | `maxConcurrent` | 4 | Max agents running in parallel |
 
+## Governance skills
+
+The package ships the repository's governance Agent Skills under `skills/`
+(`graph-engineering`, `hexagonal-core`, `host-adapter`, `machine-boundaries`).
+Install them into a project so coding agents load the same just-in-time
+context this repository uses — copy (or symlink) each `skills/<name>`
+directory into the project's `.agents/skills/` directory (or the agent's
+user-level skills directory), then read `skills/<name>/SKILL.md` for the
+workflow each skill governs.
+
 ## Development
 
 ```bash
