@@ -35,6 +35,7 @@ import {
   getAuditLog,
   getDaoCommandsByPhase,
   getDaoRoot,
+  getOutcome,
   getProposal,
   getState,
   ghBranchNameFor,
@@ -48,6 +49,7 @@ import {
   loadAgentDefinitions,
   loadConfig,
   PROPOSAL_TYPES,
+  RateProposalUseCase,
   RejectProposalUseCase,
   recordAudit,
   ShipProposalUseCase,
@@ -330,6 +332,7 @@ const CLI_IMPLEMENTED = [
   "reject-proposal",
   "ship",
   "implement",
+  "rate",
   "github-config",
   "github-branch",
   "github-pr",
@@ -366,6 +369,7 @@ const CLI_USAGE_DETAILS: Record<string, string> = {
   control: "  control <id>\n        Run quality-control gates (alias: check)",
   "reject-proposal": "  reject-proposal <id> --reason <text>",
   ship: "  ship <id> [--cascade] [--force]",
+  rate: "  rate <id> --score <1-5> --comment <text> [--by <name>]\n        rate an executed proposal's outcome; every rating is recorded\n        with its author in the audit trail and feeds the overall score",
   "github-config": "  github-config --owner <o> --repo <r> [--issues]",
   "github-branch": "  github-branch <proposal-id>",
   "github-pr": "  github-pr <proposal-id> --head-branch <b>",
@@ -772,6 +776,37 @@ async function cmdRejectProposal(
   });
   if (!result.ok) err(result.error);
   info(`✓ Proposal #${id} rejected (${result.via}) — status: rejected`);
+  info(c.dim(`  → audit trail: swarm-dao audit --proposal ${id}`));
+}
+
+async function cmdRate(cwd: string, positional: string[], flags: Record<string, string | true>): Promise<void> {
+  const idStr = positional[0];
+  if (!idStr) err("usage: swarm-dao rate <id> --score <1-5> --comment <text> [--by <name>]");
+  const id = Number(idStr);
+  if (!Number.isInteger(id)) err(`invalid proposal id '${idStr}'`);
+
+  const score = Number(flags.score);
+  if (!Number.isInteger(score) || score < 1 || score > 5) {
+    err("--score is required and must be an integer from 1 to 5");
+  }
+  const comment = typeof flags.comment === "string" ? flags.comment : "";
+  if (!comment.trim()) err("--comment is required (it is recorded in the audit trail)");
+  const by = typeof flags.by === "string" && flags.by.trim() ? flags.by.trim() : "cli-user";
+
+  const repository = await ensureLoaded(cwd);
+  const result = await new RateProposalUseCase({ repository, clock: systemClock }).execute({
+    proposalId: id,
+    rater: by,
+    score: score as 1 | 2 | 3 | 4 | 5,
+    comment,
+  });
+  if (!result.ok) err(result.error);
+  await recordAudit(id, "governance", "outcome-rated", by, `score ${result.rating.score}/5: ${comment}`);
+  const outcome = getOutcome(id);
+  info(`✓ Rating recorded for #${id}: ${result.rating.score}/5 by ${by}`);
+  if (outcome) {
+    info(c.dim(`  overall: ${outcome.overallScore.toFixed(1)}/5 across ${outcome.ratings.length} rating(s)`));
+  }
   info(c.dim(`  → audit trail: swarm-dao audit --proposal ${id}`));
 }
 
@@ -1698,6 +1733,9 @@ export async function main(argv: string[], cwd: string = process.cwd()): Promise
         return 0;
       case "reject-proposal":
         await cmdRejectProposal(cwd, positional, flags);
+        return 0;
+      case "rate":
+        await cmdRate(cwd, positional, flags);
         return 0;
       case "ship":
         await cmdShip(cwd, positional, flags);

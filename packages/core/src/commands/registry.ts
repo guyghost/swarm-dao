@@ -284,7 +284,7 @@ export const DAO_COMMANDS: readonly DaoCommand[] = [
     tool: "dao_rate",
     mutating: true,
     args: "proposalId score comment",
-    hosts: ["mcp", "claude", "copilot", "codex", "pi", "opencode"],
+    hosts: ["mcp", "claude", "copilot", "codex", "pi", "opencode", "cli"],
   },
   {
     id: "update-proposal",
