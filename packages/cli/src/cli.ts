@@ -785,7 +785,7 @@ async function cmdRate(cwd: string, positional: string[], flags: Record<string, 
   const id = Number(idStr);
   if (!Number.isInteger(id)) err(`invalid proposal id '${idStr}'`);
 
-  const score = Number(flags.score);
+  const score = typeof flags.score === "string" ? Number(flags.score) : NaN;
   if (!Number.isInteger(score) || score < 1 || score > 5) {
     err("--score is required and must be an integer from 1 to 5");
   }
