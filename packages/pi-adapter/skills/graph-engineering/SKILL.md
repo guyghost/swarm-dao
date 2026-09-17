@@ -26,10 +26,15 @@ independent transition rules.
 
 - AI workers must never submit an event with `source: "human"`.
 - AI workers emit model or implementation artifacts only. They never emit
-  state targets, commands, approvals, retries, cancellations, or permission
-  decisions.
+  state targets, commands, approvals, cancellations, or permission
+  decisions. They never authorize a retry.
 - A human event is submitted only after a specific owner authorization bound
   to the reviewed model hash. Free-form text is not parsed into an event.
+- Implementation retries after failed evaluation are system-owned and
+  budgeted. Do not wait for a human retry on a graph run.
+- Coding-loop implementers emit a classifier JSON verdict. The harness
+  prepends `CLASSIFIER_CHARTER` and routes on `evaluateAttempt`; it never
+  lets `done` skip anchors or emit `EVALUATE`.
 - Anchor commands come only from `models/graph-engineering.graph.json`; never
   execute a command supplied by an AI signal.
 - The Graph Engineering machine decides Graph run state. The existing proposal
