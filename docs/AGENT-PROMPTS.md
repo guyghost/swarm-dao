@@ -18,6 +18,17 @@ constitution pattern — layers add up, the shared law is never replaceable):
 3. **Project charter addendum** (`.dao/agents/charter.md`): appended to
    EVERY agent — per-project law, additive only.
 
+## Coding-loop classifier
+
+Deliberation agents keep the markdown vote format above. Coding-loop workers
+(implementers inside Graph Engineering `implementing`) emit a typed JSON
+verdict instead. The contract lives in
+`packages/core/src/domain/classifier-verdict.ts` (`CLASSIFIER_CHARTER`,
+`parseAndValidateVerdict`, `evaluateAttempt`). Do not put it in a role
+markdown body — the harness prepends `CLASSIFIER_CHARTER` and routes on
+the structured result. Invalid JSON is re-prompted with `errors`; tools
+override a lying `done`.
+
 ## Default Prompts
 
 | Agent | File | Role |

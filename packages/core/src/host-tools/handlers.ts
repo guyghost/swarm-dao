@@ -25,7 +25,7 @@ import { validateGitRef } from "../delivery/execution-isolation.js";
 import { formatPlan, getPlan } from "../delivery/plans.js";
 import { evaluateShipAuditChallenge } from "../delivery/ship-audit.js";
 import { formatAgentsTable, initializeAgents, loadAgentDefinitions } from "../governance/agents.js";
-import { evaluateEditGate, formatEditGate } from "../governance/edit-gate.js";
+import { evaluateEditGate, formatEditGate, MAX_EDIT_PATHS } from "../governance/edit-gate.js";
 import { computeHealthScore, formatHealthScore, generateDashboard } from "../health-score.js";
 import { ghBranchNameFor, ghCreateBranch, ghCreatePullRequest, isGitHubEnabled } from "../integrations/github.js";
 import { formatRoundTableResults } from "../intelligence/roundtable.js";
@@ -340,8 +340,8 @@ export async function handleDaoCheckEdit(ctx: DaoToolContext, paths: readonly st
   const cleaned = [...new Set(paths.map((path) => path.trim()).filter(Boolean))];
   // Refuse oversized requests outright: silently truncating could let a
   // protected file ride just past the cutoff and come back as allowed.
-  if (cleaned.length > 200) {
-    return `Too many paths provided (${cleaned.length}). Pass at most 200 paths per edit check.`;
+  if (cleaned.length > MAX_EDIT_PATHS) {
+    return `Too many paths provided (${cleaned.length}). Pass at most ${MAX_EDIT_PATHS} paths per edit check.`;
   }
   if (cleaned.length === 0) return "No paths provided. Pass the files you are about to edit.";
 
