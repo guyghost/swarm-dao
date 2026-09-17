@@ -361,8 +361,8 @@ export const DAO_COMMANDS: readonly DaoCommand[] = [
   {
     id: "graph",
     phase: "init",
-    summary: "Run a Graph Engineering change-control run in any project (init/status/submit)",
-    args: "<init|status|submit> [options]",
+    summary: "Run a Graph Engineering change-control run in any project (init/status/submit/implement)",
+    args: "<init|status|submit|implement> [options]",
     hosts: ["cli"],
   },
   {

@@ -45,3 +45,14 @@ owned by `evaluateGraphAttempt`.
 - Cross-field rules live in the validator, not the prompt (`CLASSIFIER_CHARTER`
   is the model-facing copy of those rules).
 - AI output cannot authorize a retry, skip anchors, or emit `MODEL_APPROVED`.
+
+## Implementing harness
+
+The Graph Engineering host (`runGraphImplementing` in
+`packages/graph-engineering/src/implementing.ts`, CLI
+`swarm-dao graph implement`) prepends `CLASSIFIER_CHARTER`, harvests the last
+JSON object, runs cheap tools on `done` / `run_tests`, and routes on
+`evaluateAttempt`. `request_evaluation` submits `IMPLEMENTATION_READY`.
+Exhausted inner budget submits `IMPLEMENTATION_FAILED` (outer auto-retry).
+Human escalate and environment block submit nothing — the run stays
+`implementing`. The harness never emits `EVALUATE`.
