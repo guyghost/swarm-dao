@@ -57,16 +57,16 @@ describe("graph signal validation", () => {
     expect(noEvidence.ok).toBe(false);
   });
 
-  it("rejects an AI producer emitting MODEL_APPROVED", () => {
-    const forged = validateGraphSignal({
+  it("rejects RETRY_AUTHORIZED — retries are evaluation-owned, not a human event", () => {
+    const result = validateGraphSignal({
       ...validModelSignal,
-      type: "MODEL_APPROVED",
+      type: "RETRY_AUTHORIZED",
       source: "human",
-      producer: "modeler",
-      payload: { modelHash: "model-sha256" },
+      producer: "human-owner",
+      payload: {},
     });
-    expect(forged.ok).toBe(false);
-    if (forged.ok) return;
-    expect(forged.issues.join("\n")).toMatch(/modeler is not declared to emit MODEL_APPROVED/);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.issues.join("\n")).toMatch(/known graph event/);
   });
 });

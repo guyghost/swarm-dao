@@ -84,6 +84,7 @@ const stringField = (context: Record<string, unknown> | null | undefined, field:
  * outcomes (succeeded, failed, blocked, cancelled, validated, rejected) are
  * deliberately excluded: they are closed, not awaiting attention.
  * `budgetBlocked` is transient (always -> review) and never persists.
+ * Graph `retrying` is likewise transient (always -> implementing).
  */
 const HUMAN_GATES: Readonly<Record<AttentionSource, Readonly<Record<string, GateDefinition>>>> = {
   "graph-engineering": {
@@ -91,10 +92,6 @@ const HUMAN_GATES: Readonly<Record<AttentionSource, Readonly<Record<string, Gate
       action: "Approve or reject the exact model hash (MODEL_APPROVED / MODEL_REJECTED)",
       command: "swarm-dao approve --run-id <id>",
       detail: (ctx) => stringField(ctx, "modelHash"),
-    },
-    retrying: {
-      action: "Authorize a retry (RETRY_AUTHORIZED) or cancel the run",
-      command: "swarm-dao graph submit --run-id <id> --signal <signal.json>",
     },
   },
   "improvement-loop": {

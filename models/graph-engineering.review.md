@@ -2,9 +2,12 @@
 
 ## Decision
 
-The behavioral model is complete and ready for an explicit owner decision on
-its exact hash. Implementation remains forbidden until that approval event is
-provided.
+This revision replaces human `RETRY_AUTHORIZED` with system-owned auto-evaluation
+retries. The owner approved the change in conversation; the exact model hash is
+`a2a11c62a37e4e0536be59b9e6675a314583d8b57e0f8fd1de37b157ed5ae30c`
+(`models/graph-engineering.md` + `models/graph-engineering.graph.json`).
+Model-hash approval and cancel remain human. Improvement-loop retries are
+unchanged.
 
 ## Coverage
 
@@ -17,7 +20,7 @@ provided.
 | Stale approval | Approval hash must equal the current reviewed model hash | Covered |
 | Errors | Invalid model and exhausted attempts end in `failed` | Covered |
 | Cancellation | Human `CANCEL` is accepted from every active state | Covered |
-| Retries | Human authorization, maximum two, attempt-scoped evidence | Covered |
+| Retries | Auto-evaluation, maximum two, attempt-scoped evidence; no human retry event | Covered |
 | Permissions | Tool-reported denial ends explicitly in `blocked` | Covered |
 | Terminal behavior | Four explicit terminal states reject all later events | Covered |
 | Counter-metrics | Architecture and regression watchers are independent mandatory vetoes | Covered |
@@ -31,10 +34,11 @@ provided.
 2. Human events are structured, and model approval is bound to an exact
    SHA-256 hash.
 3. AI events cannot name a target state, provide commands, approve work,
-   authorize a retry, cancel, or grant permissions.
+   cancel, or grant permissions. They cannot authorize or skip a retry.
 4. Tool events validate contracts or record independently executed anchors.
 5. System events start already-authorized work or evaluate existing evidence;
-   they do not manufacture evidence.
+   they do not manufacture evidence. Failed evaluation with remaining budget
+   auto-retries implementation; the hop is not a human authorization.
 6. Wrong-source, wrong-state, malformed, duplicate-anchor, and post-terminal
    events are rejected and retained in the journal.
 
@@ -47,7 +51,9 @@ provided.
 - `EVALUATE` has no success path when an anchor is missing, failed, empty, or
   belongs to another attempt.
 - A failed anchor is immutable for the current attempt.
-- A retry keeps the approved model but clears implementation evidence.
+- A retry keeps the approved model but clears implementation evidence. It is
+  selected by `EVALUATE` / `IMPLEMENTATION_FAILED` against the retry budget,
+  never by a human or AI retry event.
 - The architecture and regression vetoes cannot be replaced by the implementer.
 - Permission denial cannot silently become a retry.
 - Core-model purity is protected by the existing architecture contract tests.
