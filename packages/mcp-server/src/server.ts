@@ -79,10 +79,10 @@ function createToolContext(workDir: string, repository?: DaoStateRepositoryPort)
 }
 
 /** AI-source event types the MCP surface may submit to a graph run. Human
- * events (MODEL_APPROVED, MODEL_REJECTED, RETRY_AUTHORIZED, CANCEL) and
- * tool/system events never pass through MCP: the AI-channel helper inside the
- * graph package hardcodes source "ai", so an agent cannot forge another
- * channel's authority. */
+ * events (MODEL_APPROVED, MODEL_REJECTED, CANCEL) and tool/system events never
+ * pass through MCP: the AI-channel helper inside the graph package hardcodes
+ * source "ai", so an agent cannot forge another channel's authority.
+ * Graph retries after failed evaluation are system-owned (no RETRY_AUTHORIZED). */
 const GRAPH_AI_EVENT_ENUM = [...GRAPH_AI_EVENT_TYPES] as const;
 
 /** AI-source event types the MCP surface may submit to a product run. */
@@ -283,7 +283,7 @@ export function createSwarmDaoMcpServer(workDir = resolveDaoRoot(), repository?:
         name: "dao_graph_submit",
         description:
           "Submit an AI-source signal to a Graph Engineering run (MODEL_DRAFTED, IMPLEMENTATION_READY, IMPLEMENTATION_FAILED). " +
-          "The host sets source=ai; human events (MODEL_APPROVED, MODEL_REJECTED, RETRY_AUTHORIZED, CANCEL) belong to the swarm-dao CLI human channel.",
+          "The host sets source=ai; human events (MODEL_APPROVED, MODEL_REJECTED, CANCEL) belong to the swarm-dao CLI human channel. Implementation retries are system-owned after evaluation.",
         inputSchema: toolInputSchemas.dao_graph_submit,
       },
       {

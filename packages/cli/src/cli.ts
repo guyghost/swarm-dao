@@ -4,6 +4,7 @@
 // Swarm DAO — Standalone CLI
 // ============================================================
 
+import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type {
@@ -13,6 +14,8 @@ import type {
   HostAdapter,
   Proposal,
   ProposalType,
+  ToolCheckStatus,
+  ToolEvidence,
   VotePosition,
 } from "@guyghost/swarm-dao-core";
 import {
@@ -57,7 +60,7 @@ import {
   setRepository,
   systemClock,
 } from "@guyghost/swarm-dao-core";
-import { createGraphRunner } from "@guyghost/swarm-dao-graph";
+import { createGraphRunner, runGraphImplementing } from "@guyghost/swarm-dao-graph";
 import { createHerdrHostAdapter, herdrAgentName } from "@guyghost/swarm-dao-herdr-adapter";
 import {
   assertNoActiveSeriesForScope,
@@ -383,7 +386,7 @@ const CLI_USAGE_DETAILS: Record<string, string> = {
     "  approve --run-id <id> [--evidence-root <path>] [--yes]\n        approve the exact model hash of a graph run awaiting approval",
   reject: "  reject --run-id <id> --reason <text> [--yes]\n        send an awaiting model back to draft",
   graph:
-    "  graph <init|status|submit> --run-id <id> [--evidence-root <path>]\n        graph submit --run-id <id> --signal <file.json>",
+    "  graph <init|status|submit|implement> --run-id <id> [--evidence-root <path>]\n        graph submit --run-id <id> --signal <file.json>\n        graph implement --run-id <id> --task <text>   classifier-routed implementer",
   product:
     "  product <init|status|submit> --run-id <id> [--evidence-root <path>]\n        product submit --run-id <id> --signal <file.json>",
   improve: `  improve init --series-id <id> --scope <s> --reference-hash <hash> [--cooldown-ms <ms>]
@@ -1133,16 +1136,21 @@ async function cmdGithubPr(cwd: string, positional: string[], flags: Record<stri
 const GRAPH_RUN_ROOT = ".dao/graph-runs";
 const PRODUCT_RUN_ROOT = ".dao/product-loops";
 
-const GRAPH_USAGE = `usage: swarm-dao graph <init|status|submit> [options]
+const GRAPH_USAGE = `usage: swarm-dao graph <init|status|submit|implement> [options]
 
-  init   --run-id <id> [--evidence-root <path>]
-  status --run-id <id> [--evidence-root <path>]
-  submit --run-id <id> --signal <file.json> [--evidence-root <path>]
+  init      --run-id <id> [--evidence-root <path>]
+  status    --run-id <id> [--evidence-root <path>]
+  submit    --run-id <id> --signal <file.json> [--evidence-root <path>]
+  implement --run-id <id> --task <text> [--role <text>] [--evidence-root <path>]
+            [--host <herdr|tmux|auto>] [--kind <pi|codex|claude|…>]
+            [--keep-panes] [--timeout-ms <ms>]
 
 Graph runs live under .dao/graph-runs by default; override with --evidence-root
 (repos carrying the frozen graph use evidence/graph-runs). Signals are
 validated against the frozen Graph Engineering machine; human-source events
-require explicit owner authorization (see models/graph-engineering.md).`;
+require explicit owner authorization (see models/graph-engineering.md).
+implement prepends CLASSIFIER_CHARTER, routes on evaluateAttempt, and only then
+emits IMPLEMENTATION_READY or IMPLEMENTATION_FAILED. It never emits EVALUATE.`;
 
 const PRODUCT_USAGE = `usage: swarm-dao product <init|status|submit> [options]
 
@@ -1243,7 +1251,98 @@ const PRODUCT_SPEC: RunCommandSpec = {
 };
 
 function cmdGraph(cwd: string, positional: string[], flags: Record<string, string | true>): Promise<number> {
+  if (positional[0] === "implement") return cmdGraphImplement(cwd, flags);
   return cmdRunCommand(cwd, positional, flags, GRAPH_SPEC);
+}
+
+function graphImplementProposal(runId: string): Proposal {
+  let hash = 0;
+  for (let i = 0; i < runId.length; i++) hash = (hash * 31 + runId.charCodeAt(i)) | 0;
+  return {
+    id: (hash >>> 0) % 900_000_000,
+    title: `graph implement ${runId}`,
+    type: "technical-change",
+    description: runId,
+    proposedBy: "graph-engineering",
+    status: "approved",
+    votes: [],
+    agentOutputs: [],
+    createdAt: "1970-01-01T00:00:00.000Z",
+  };
+}
+
+async function hashCheckout(cwd: string): Promise<string> {
+  const head = await execCommand("git rev-parse HEAD", { cwd, timeout: 10_000 });
+  if (head.exitCode !== 0) throw new Error(head.stderr.trim() || "git rev-parse HEAD failed");
+  const status = await execCommand("git status --porcelain", { cwd, timeout: 10_000 });
+  const diff = await execCommand("git diff HEAD", { cwd, timeout: 30_000 });
+  return createHash("sha256").update(`${head.stdout}\n${status.stdout}\n${diff.stdout}`).digest("hex");
+}
+
+const toToolStatus = (exitCode: number): ToolCheckStatus => (exitCode === 0 ? "passed" : "failed");
+
+async function runRepoTools(cwd: string): Promise<ToolEvidence> {
+  const tests = await execCommand("bun test", { cwd, timeout: 180_000 });
+  const types = await execCommand("bun run typecheck", { cwd, timeout: 180_000 });
+  const lint = await execCommand("bun run lint", { cwd, timeout: 180_000 });
+  return {
+    tests: toToolStatus(tests.exitCode),
+    types: toToolStatus(types.exitCode),
+    lint: toToolStatus(lint.exitCode),
+  };
+}
+
+async function cmdGraphImplement(cwd: string, flags: Record<string, string | true>): Promise<number> {
+  const stringFlag = (name: string): string | undefined => {
+    const value = flags[name];
+    if (value === undefined) return undefined;
+    if (typeof value !== "string" || value.trim().length === 0) err(`--${name} requires a value`);
+    return value;
+  };
+  const runId = stringFlag("run-id");
+  if (!runId) err(`--run-id is required\n${GRAPH_USAGE}`);
+  const task = stringFlag("task");
+  if (!task) err(`--task is required\n${GRAPH_USAGE}`);
+  const evidenceRoot = path.resolve(cwd, stringFlag("evidence-root") ?? GRAPH_RUN_ROOT);
+  const role = stringFlag("role");
+
+  const peek = await createGraphRunner({ evidenceRoot, runId });
+  if (peek.snapshot().state !== "implementing") {
+    err(`run is in ${peek.snapshot().state}, not implementing`);
+  }
+
+  const projectConfig = await loadConfig(getDaoRoot(cwd));
+  const child = childSessionOptionsFrom(flags, projectConfig);
+  const proposal = graphImplementProposal(runId);
+  const adapter = childAdapter(child, cwd);
+  announceChildren(`graph implementer for ${runId}`, child, [childName(child, proposal.id, IMPLEMENTATION_AGENT.id)]);
+
+  const result = await runGraphImplementing({
+    evidenceRoot,
+    runId,
+    task,
+    ...(role ? { role } : {}),
+    ports: {
+      turn: async (prompt) => {
+        const output = await adapter.spawnAgent({
+          agent: IMPLEMENTATION_AGENT,
+          proposal,
+          systemPrompt: prompt,
+          ...(child.timeoutMs !== undefined ? { timeoutMs: child.timeoutMs } : {}),
+          ...(child.host === "herdr" ? { harness: child.kind } : {}),
+        });
+        if (output.error) return { ok: false, error: output.error };
+        return { ok: true, transcript: output.content };
+      },
+      runTools: () => runRepoTools(cwd),
+      implementationHash: () => hashCheckout(cwd),
+    },
+  });
+
+  info(JSON.stringify({ loop: result.loop, submitted: result.submitted, state: result.snapshot.state }, null, 2));
+  if (result.error) err(result.error);
+  if (result.loop.kind === "escalate" || result.loop.kind === "block") return 1;
+  return result.submitted ? 0 : 1;
 }
 
 function cmdProduct(cwd: string, positional: string[], flags: Record<string, string | true>): Promise<number> {

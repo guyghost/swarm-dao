@@ -788,7 +788,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
       // ── dao_graph_submit ──────────────────────────────────
       dao_graph_submit: tool({
         description:
-          "Submit an AI-source signal (MODEL_DRAFTED, IMPLEMENTATION_READY, IMPLEMENTATION_FAILED) to a Graph Engineering run. Human events (MODEL_APPROVED, MODEL_REJECTED, RETRY_AUTHORIZED, CANCEL) go through the swarm-dao CLI, never through AI-facing tools.",
+          "Submit an AI-source signal (MODEL_DRAFTED, IMPLEMENTATION_READY, IMPLEMENTATION_FAILED) to a Graph Engineering run. Human events (MODEL_APPROVED, MODEL_REJECTED, CANCEL) go through the swarm-dao CLI, never through AI-facing tools. Implementation retries are system-owned after evaluation.",
         args: {
           runId: schema.string(),
           type: schema.enum([...GRAPH_AI_EVENT_TYPES]),

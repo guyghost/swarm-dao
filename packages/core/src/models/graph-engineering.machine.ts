@@ -50,7 +50,6 @@ export type GraphEngineeringEvent =
       evidence: string;
     }
   | { type: "EVALUATE"; source: GraphSignalSource }
-  | { type: "RETRY_AUTHORIZED"; source: GraphSignalSource }
   | { type: "PERMISSION_DENIED"; source: GraphSignalSource; reason: string }
   | { type: "CANCEL"; source: GraphSignalSource; reason: string };
 
@@ -58,6 +57,34 @@ const isNonEmpty = (value: unknown): value is string => typeof value === "string
 
 export const isRequiredGraphAnchor = (value: unknown): value is GraphAnchorName =>
   typeof value === "string" && REQUIRED_GRAPH_ANCHORS.includes(value as GraphAnchorName);
+
+const anchorPassedForAttempt = (
+  anchors: GraphEngineeringContext["anchors"],
+  attempt: number,
+  anchor: GraphAnchorName,
+): boolean => {
+  const result = anchors[anchor];
+  return (
+    result?.status === "passed" &&
+    isNonEmpty(result.evidence) &&
+    (anchor === "model-contract" || result.attempt === attempt)
+  );
+};
+
+export type GraphEvaluationOutcome = "succeeded" | "retry" | "failed";
+
+/** Deterministic auto-evaluation. Lives in the model; the harness never asks a human to retry. */
+export const evaluateGraphAttempt = (
+  anchors: GraphEngineeringContext["anchors"],
+  attempt: number,
+  maxRetries: number,
+): GraphEvaluationOutcome => {
+  if (REQUIRED_GRAPH_ANCHORS.every((anchor) => anchorPassedForAttempt(anchors, attempt, anchor))) {
+    return "succeeded";
+  }
+  if (attempt < maxRetries) return "retry";
+  return "failed";
+};
 
 const initialContext = (runId: string): GraphEngineeringContext => ({
   runId,
@@ -105,17 +132,13 @@ const graphEngineeringSetup = setup({
     allAnchorsPassed: ({ context, event }) =>
       event.type === "EVALUATE" &&
       event.source === "system" &&
-      REQUIRED_GRAPH_ANCHORS.every((anchor) => {
-        const result = context.anchors[anchor];
-        return (
-          result?.status === "passed" &&
-          isNonEmpty(result.evidence) &&
-          (anchor === "model-contract" || result.attempt === context.attempt)
-        );
-      }),
+      evaluateGraphAttempt(context.anchors, context.attempt, context.maxRetries) === "succeeded",
+    isEvaluationRetry: ({ context, event }) =>
+      event.type === "EVALUATE" &&
+      event.source === "system" &&
+      evaluateGraphAttempt(context.anchors, context.attempt, context.maxRetries) === "retry",
     isSystemEvaluation: ({ event }) => event.type === "EVALUATE" && event.source === "system",
-    isHumanRetry: ({ context, event }) =>
-      event.type === "RETRY_AUTHORIZED" && event.source === "human" && context.attempt < context.maxRetries,
+    canRetry: ({ context }) => context.attempt < context.maxRetries,
     isToolPermissionDenial: ({ event }) =>
       event.type === "PERMISSION_DENIED" && event.source === "tool" && isNonEmpty(event.reason),
     isHumanCancellation: ({ event }) => event.type === "CANCEL" && event.source === "human" && isNonEmpty(event.reason),
@@ -257,20 +280,16 @@ export const graphEngineeringMachine = graphEngineeringSetup.createMachine({
         ANCHOR_RECORDED: { guard: "isValidAnchor", actions: "recordAnchorOnce" },
         EVALUATE: [
           { guard: "allAnchorsPassed", target: "succeeded", actions: "recordSuccess" },
-          {
-            guard: ({ context, event }) =>
-              event.type === "EVALUATE" && event.source === "system" && context.attempt < context.maxRetries,
-            target: "retrying",
-            actions: "recordVerificationFailure",
-          },
+          { guard: "isEvaluationRetry", target: "retrying", actions: "recordVerificationFailure" },
           { guard: "isSystemEvaluation", target: "failed", actions: "recordVerificationFailure" },
         ],
       },
     },
     retrying: {
-      on: {
-        RETRY_AUTHORIZED: { guard: "isHumanRetry", target: "implementing", actions: "prepareRetry" },
-      },
+      always: [
+        { guard: "canRetry", target: "implementing", actions: "prepareRetry" },
+        { target: "failed", actions: "recordVerificationFailure" },
+      ],
     },
     succeeded: { type: "final" },
     failed: { type: "final" },

@@ -39,9 +39,10 @@ an exact human-approved model hash, frozen runtime anchors, and durable evidence
 | `regression-watcher` | deterministic tool | veto | Prove forbidden transitions and AI authority escalation remain impossible |
 
 The human owner is outside the worker graph. Only the owner approves a precise
-model hash, rejects a model, authorizes a retry, or cancels a run. All nodes and
-edges are declared in `models/graph-engineering.graph.json`; prose cannot invent
-an edge.
+model hash, rejects a model, or cancels a run. Implementation retries after a
+failed evaluation are system-owned and budgeted — they are never a human event
+and never an AI authorization. All nodes and edges are declared in
+`models/graph-engineering.graph.json`; prose cannot invent an edge.
 
 ## Workflow model
 
@@ -57,7 +58,9 @@ draft
   -> succeeded | retrying | failed | blocked | cancelled
 ```
 
-`succeeded`, `failed`, `blocked`, and `cancelled` are terminal.
+`succeeded`, `failed`, `blocked`, and `cancelled` are terminal. `retrying` is
+transient: it never waits. Entering it with remaining budget always continues
+to `implementing` (prepareRetry). There is no human event that leaves `retrying`.
 
 ### Events and permitted sources
 
@@ -70,10 +73,9 @@ draft
 | `MODEL_REJECTED` | `human` | `awaitingApproval` | `draft`; clear model approval and attempt evidence |
 | `START_IMPLEMENTATION` | `system` | `ready` | `implementing` |
 | `IMPLEMENTATION_READY` | `ai` | `implementing` | `verifying`; record the implementation hash |
-| `IMPLEMENTATION_FAILED` | `ai` | `implementing` | `retrying` when retries remain, otherwise `failed` |
+| `IMPLEMENTATION_FAILED` | `ai` | `implementing` | `retrying` when retries remain (auto-continues to `implementing`), otherwise `failed` |
 | `ANCHOR_RECORDED` | `tool` | `verifying` | Record one immutable result for the current attempt |
-| `EVALUATE` | `system` | `verifying` | `succeeded`, `retrying`, or `failed` according to anchors and retry budget |
-| `RETRY_AUTHORIZED` | `human` | `retrying` | `implementing`; increment attempt and clear attempt-scoped evidence |
+| `EVALUATE` | `system` | `verifying` | `succeeded`, `retrying` (auto-continues to `implementing`), or `failed` according to anchors and retry budget |
 | `PERMISSION_DENIED` | `tool` | any active state | `blocked` |
 | `CANCEL` | `human` | any active state | `cancelled` |
 
@@ -103,6 +105,24 @@ The frozen commands are declared in `models/graph-engineering.graph.json` and
 executed only by the tool adapter. An AI signal cannot provide or replace a
 command.
 
+### EVALUATE decision
+
+`EVALUATE` selects exactly one outcome, in this order:
+
+1. If every required anchor is `passed`, non-empty, and bound to the current
+   attempt (`model-contract` may be bound to the reviewed model hash), target
+   is `succeeded`.
+2. Else if `attempt < maxRetries`, target is `retrying`, which always continues
+   to `implementing`: increment attempt, keep the approved model hash and
+   `model-contract` evidence, clear the implementation hash and attempt-scoped
+   anchors.
+3. Else target is `failed`.
+
+`IMPLEMENTATION_FAILED` uses the same retry budget: remaining attempts hop
+through `retrying` to `implementing`; exhausted attempts end in `failed`.
+The implementer cannot authorize, skip, or replace this evaluation. There is
+no `RETRY_AUTHORIZED` event.
+
 ## Side effects
 
 - Append every accepted and rejected signal to an NDJSON journal.
@@ -130,7 +150,10 @@ command.
 8. The implementer cannot produce, replace, or waive anchor evidence.
 9. A failed anchor cannot be overwritten in the same attempt.
 10. Evidence from one implementation attempt cannot satisfy a later attempt.
-11. Retries are bounded to two and always require a human event.
+11. Retries are bounded to two. Failed evaluation with remaining budget
+    auto-retries (`retrying` → `implementing`, source system). Exhausted
+    budget ends in `failed`. An AI signal cannot authorize, skip, or replace
+    a retry. There is no human retry event.
 12. Permission denial and cancellation are explicit terminal outcomes.
 13. Terminal states reject every later event.
 14. Graph Engineering status never changes a Swarm DAO proposal status, and a
