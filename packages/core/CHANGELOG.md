@@ -1,5 +1,22 @@
 # @guyghost/swarm-dao-core
 
+## 1.1.0
+
+### Minor Changes
+
+- 3aa2664: Add a TypeSafe-style classifier verdict: coding-loop workers emit closed-vocabulary JSON, the harness validates it without throwing, and evaluateAttempt composes that signal with tool evidence so done cannot skip tests or Graph evaluation.
+- d722194: CLI: new `rate <id> --score <1-5> --comment <text> [--by <name>]` command so
+  headless pipelines can record post-execution outcome ratings without going
+  through the MCP `dao_rate` tool. It reuses `RateProposalUseCase` (executed
+  status gate, 1–5 score validation), records an `outcome-rated` audit entry
+  with the rater, and prints the recomputed overall score. The `rate` registry
+  command is now exposed to the `cli` host.
+- 6b7d790: Graph Engineering retries after failed evaluation are now system-owned: EVALUATE / IMPLEMENTATION_FAILED with remaining budget auto-continue to implementing. There is no RETRY_AUTHORIZED human event on a graph run; model-hash approval and cancel stay human.
+
+### Patch Changes
+
+- 9cc48a9: Wire the classifier verdict into Graph Engineering implementing: the host prepends CLASSIFIER_CHARTER, routes on evaluateAttempt, and only then emits IMPLEMENTATION_READY or IMPLEMENTATION_FAILED.
+
 ## 1.0.2
 
 ### Patch Changes
