@@ -1,5 +1,38 @@
 # @guyghost/swarm-dao-cli
 
+## 0.13.0
+
+### Minor Changes
+
+- d722194: CLI: new `rate <id> --score <1-5> --comment <text> [--by <name>]` command so
+  headless pipelines can record post-execution outcome ratings without going
+  through the MCP `dao_rate` tool. It reuses `RateProposalUseCase` (executed
+  status gate, 1–5 score validation), records an `outcome-rated` audit entry
+  with the rater, and prints the recomputed overall score. The `rate` registry
+  command is now exposed to the `cli` host.
+- d0c794c: Surface shipped-but-unrated proposals so the retro loop actually gets closed:
+  
+  - `swarm-dao list --unrated` — executed proposals with no outcome rating,
+    with a `close the loop: swarm-dao rate <id> ...` hint.
+  - `swarm-dao next` (and `watch`) gains a read-only "Retro loop" section
+    listing shipped-but-unrated proposals with the exact rating command. It is
+    fully silent in projects without a DAO and never creates `.dao/` as a side
+    effect.
+  
+  Closes the discovery gap left after the `rate` command (#190/#192): ratings
+  no longer stay pending invisibly.
+
+### Patch Changes
+
+- 6b7d790: Graph Engineering retries after failed evaluation are now system-owned: EVALUATE / IMPLEMENTATION_FAILED with remaining budget auto-continue to implementing. There is no RETRY_AUTHORIZED human event on a graph run; model-hash approval and cancel stay human.
+- 9cc48a9: Wire the classifier verdict into Graph Engineering implementing: the host prepends CLASSIFIER_CHARTER, routes on evaluateAttempt, and only then emits IMPLEMENTATION_READY or IMPLEMENTATION_FAILED.
+- Updated dependencies [3aa2664]
+- Updated dependencies [d722194]
+- Updated dependencies [6b7d790]
+- Updated dependencies [9cc48a9]
+  - @guyghost/swarm-dao-core@1.1.0
+  - @guyghost/swarm-dao-graph@0.4.0
+
 ## 0.12.2
 
 ### Patch Changes

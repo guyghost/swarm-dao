@@ -1,5 +1,20 @@
 # @guyghost/swarm-dao-graph
 
+## 0.4.0
+
+### Minor Changes
+
+- 6b7d790: Graph Engineering retries after failed evaluation are now system-owned: EVALUATE / IMPLEMENTATION_FAILED with remaining budget auto-continue to implementing. There is no RETRY_AUTHORIZED human event on a graph run; model-hash approval and cancel stay human.
+- 9cc48a9: Wire the classifier verdict into Graph Engineering implementing: the host prepends CLASSIFIER_CHARTER, routes on evaluateAttempt, and only then emits IMPLEMENTATION_READY or IMPLEMENTATION_FAILED.
+
+### Patch Changes
+
+- Updated dependencies [3aa2664]
+- Updated dependencies [d722194]
+- Updated dependencies [6b7d790]
+- Updated dependencies [9cc48a9]
+  - @guyghost/swarm-dao-core@1.1.0
+
 ## 0.3.7
 
 ### Patch Changes
