@@ -12,7 +12,6 @@
       "owns_target",
       "approves_model_hash",
       "rejects_model",
-      "authorizes_retry",
       "cancels"
     ]
   },

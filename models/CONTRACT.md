@@ -14,9 +14,13 @@ their states, events, and anchors — everything below lives here.
 4. **AI = signals only.** Workers (`sensor`, `modeler`, `explorer`, agents…)
    produce typed signals. Deterministic policies (tally, arbitrator,
    anchor-verifier) select events. No LLM-driven transition.
-5. **Human authority.** Budget expansion, scope reduction, retry, cancel,
-   reference changes, and ship bypass are human events with exact-hash
-   approval (`MODEL_APPROVED`, `REFERENCE_CHANGE_APPROVED`, `FORCE_OVERRIDE`…).
+5. **Human authority.** Budget expansion, scope reduction, cancel, reference
+   changes, model-hash approval, and ship bypass are human events with
+   exact-hash approval (`MODEL_APPROVED`, `REFERENCE_CHANGE_APPROVED`,
+   `FORCE_OVERRIDE`…). Graph Engineering implementation retries after failed
+   evaluation are system-owned and budgeted; an AI signal cannot authorize
+   them. Improvement-loop cycle retries remain human until that model is
+   revised.
 6. **Terminal immutability.** Terminal states never transition. Rollback is a
    compensating technical action from a snapshot, not a rewrite.
 7. **Evidence.** NDJSON journal + snapshot per run, SHA-256 ordered manifest,

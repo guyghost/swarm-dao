@@ -182,9 +182,6 @@ export function renderGraphStatus(run: GraphStatusView): string[] {
   if (run.state === "awaitingApproval") {
     lines.push(`next:     ${GLYPH.arrow} swarm-dao approve --run-id ${run.runId}`);
   }
-  if (run.state === "retrying") {
-    lines.push(`next:     ${GLYPH.arrow} swarm-dao graph submit --run-id ${run.runId} --signal <signal.json>`);
-  }
   if (terminal) lines.push(c.dim("run is terminal; evidence is preserved under the evidence root"));
   return lines;
 }
