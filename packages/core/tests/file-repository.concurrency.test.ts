@@ -220,4 +220,53 @@ describe("FileDaoStateRepository concurrency", () => {
       await fs.rm(cwd, { recursive: true, force: true });
     }
   });
+
+  it("re-runs the decision sweep on the next persist after a mid-sweep failure", async () => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "swarm-dao-decisions-retry-"));
+    try {
+      const repository = await FileDaoStateRepository.open(cwd);
+      const state = repository.get();
+      state.initialized = true;
+      state.proposals.push({
+        id: 1,
+        title: "Closed one",
+        type: "product-feature",
+        description: "d",
+        problemStatement: "p",
+        acceptanceCriteria: [],
+        successMetrics: [],
+        rollbackConditions: [],
+        proposedBy: "t",
+        status: "rejected",
+        votes: [],
+        agentOutputs: [],
+        createdAt: "2031-01-01T00:00:00.000Z",
+      });
+      await repository.persist();
+
+      const decisionsDir = path.join(cwd, ".dao", "decisions");
+      const decisionFile = path.join(decisionsDir, "001.json");
+      const decisionBefore = await fs.readFile(decisionFile, "utf8");
+
+      // Make the decisions directory read-only so the next decision write
+      // throws mid-sweep (after state.json was already written).
+      await fs.chmod(decisionsDir, 0o500);
+      state.proposals[0] = { ...state.proposals[0], title: "Retitled while locked" };
+      await expect(repository.persist()).rejects.toThrow();
+
+      // Repair the permissions: the next persist must re-run the full sweep
+      // (decisionsPending) instead of treating everything as already written.
+      await fs.chmod(decisionsDir, 0o755);
+      await repository.persist();
+
+      const decisionAfter = await fs.readFile(decisionFile, "utf8");
+      expect(decisionAfter).not.toBe(decisionBefore);
+      expect(decisionAfter).toContain("Retitled while locked");
+      const reopened = await FileDaoStateRepository.open(cwd);
+      expect(reopened.get().proposals[0]?.title).toBe("Retitled while locked");
+    } finally {
+      await fs.chmod(path.join(cwd, ".dao", "decisions"), 0o755).catch(() => undefined);
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
 });
