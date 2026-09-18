@@ -1,6 +1,10 @@
 import { describe, expect, it } from "bun:test";
 import { createActor } from "xstate";
-import { graphEngineeringMachine, REQUIRED_GRAPH_ANCHORS } from "../src/models/graph-engineering.machine.js";
+import {
+  evaluateGraphAttempt,
+  graphEngineeringMachine,
+  REQUIRED_GRAPH_ANCHORS,
+} from "../src/models/graph-engineering.machine.js";
 
 const startActor = (runId = "graph-machine-test") => {
   const actor = createActor(graphEngineeringMachine, { input: { runId } });
@@ -43,6 +47,22 @@ const passImplementationAnchors = (actor: ReturnType<typeof startActor>) => {
   }
 };
 
+describe("evaluateGraphAttempt", () => {
+  it("succeeds only when every required anchor passed for the attempt", () => {
+    const passed = Object.fromEntries(
+      REQUIRED_GRAPH_ANCHORS.map((anchor) => [
+        anchor,
+        { status: "passed" as const, evidence: `${anchor} ok`, attempt: anchor === "model-contract" ? 0 : 1 },
+      ]),
+    );
+    expect(evaluateGraphAttempt(passed, 1, 2)).toBe("succeeded");
+    expect(evaluateGraphAttempt({}, 0, 2)).toBe("retry");
+    expect(evaluateGraphAttempt({ "graph-tests": { status: "failed", evidence: "no", attempt: 2 } }, 2, 2)).toBe(
+      "failed",
+    );
+  });
+});
+
 describe("graph engineering machine", () => {
   it("completes the nominal path only after exact-hash approval and every anchor", () => {
     const actor = reachVerifying();
@@ -56,7 +76,7 @@ describe("graph engineering machine", () => {
     expect(Object.keys(snapshot.context.anchors).sort()).toEqual([...REQUIRED_GRAPH_ANCHORS].sort());
   });
 
-  it("fails closed into retrying when an anchor is missing", () => {
+  it("auto-retries into implementing when an anchor is missing", () => {
     const actor = reachVerifying();
 
     actor.send({
@@ -68,10 +88,14 @@ describe("graph engineering machine", () => {
     });
     actor.send({ type: "EVALUATE", source: "system" });
 
-    expect(actor.getSnapshot().value).toBe("retrying");
+    const snapshot = actor.getSnapshot();
+    expect(snapshot.value).toBe("implementing");
+    expect(snapshot.context.attempt).toBe(1);
+    expect(snapshot.context.implementationHash).toBeNull();
+    expect(Object.keys(snapshot.context.anchors)).toEqual(["model-contract"]);
   });
 
-  it("retains model approval but clears attempt evidence after an authorized retry", () => {
+  it("retains model approval but clears attempt evidence after auto-evaluation retry", () => {
     const actor = reachVerifying();
     actor.send({
       type: "ANCHOR_RECORDED",
@@ -81,7 +105,6 @@ describe("graph engineering machine", () => {
       evidence: "one graph test failed",
     });
     actor.send({ type: "EVALUATE", source: "system" });
-    actor.send({ type: "RETRY_AUTHORIZED", source: "human" });
 
     const snapshot = actor.getSnapshot();
     expect(snapshot.value).toBe("implementing");
@@ -90,6 +113,43 @@ describe("graph engineering machine", () => {
     expect(snapshot.context.approvedModelHash).toBe("model-a");
     expect(snapshot.context.implementationHash).toBeNull();
     expect(Object.keys(snapshot.context.anchors)).toEqual(["model-contract"]);
+  });
+
+  it("fails when the retry budget is exhausted", () => {
+    const actor = reachVerifying();
+    actor.send({ type: "EVALUATE", source: "system" });
+    expect(actor.getSnapshot().value).toBe("implementing");
+    expect(actor.getSnapshot().context.attempt).toBe(1);
+
+    actor.send({
+      type: "IMPLEMENTATION_READY",
+      source: "ai",
+      implementationHash: "implementation-b",
+    });
+    actor.send({ type: "EVALUATE", source: "system" });
+    expect(actor.getSnapshot().value).toBe("implementing");
+    expect(actor.getSnapshot().context.attempt).toBe(2);
+
+    actor.send({
+      type: "IMPLEMENTATION_READY",
+      source: "ai",
+      implementationHash: "implementation-c",
+    });
+    actor.send({ type: "EVALUATE", source: "system" });
+    expect(actor.getSnapshot().value).toBe("failed");
+    expect(actor.getSnapshot().context.attempt).toBe(2);
+  });
+
+  it("auto-retries an AI implementation failure while budget remains", () => {
+    const actor = reachAwaitingApproval();
+    actor.send({ type: "MODEL_APPROVED", source: "human", modelHash: "model-a" });
+    actor.send({ type: "START_IMPLEMENTATION", source: "system" });
+    actor.send({ type: "IMPLEMENTATION_FAILED", source: "ai", reason: "types broke" });
+
+    const snapshot = actor.getSnapshot();
+    expect(snapshot.value).toBe("implementing");
+    expect(snapshot.context.attempt).toBe(1);
+    expect(snapshot.context.terminalReason).toBeNull();
   });
 
   it("ends explicitly when permission is denied", () => {

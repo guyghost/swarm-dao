@@ -34,7 +34,7 @@
           "type": "array",
           "uniqueItems": true,
           "items": {
-            "enum": ["owns_target", "approves_model_hash", "rejects_model", "authorizes_retry", "cancels"]
+            "enum": ["owns_target", "approves_model_hash", "rejects_model", "cancels"]
           }
         }
       }

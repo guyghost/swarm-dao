@@ -38,10 +38,8 @@ describe("attention: human-gate classification", () => {
     expect(item?.command).not.toContain("<id>");
   });
 
-  test("graph-engineering retrying awaits a human retry or cancellation", () => {
-    const item = classifyAttention("graph-engineering", snapshot("retrying"));
-    expect(item).not.toBeNull();
-    expect(item?.state).toBe("retrying");
+  test("graph-engineering retrying is not a human gate", () => {
+    expect(classifyAttention("graph-engineering", snapshot("retrying"))).toBeNull();
   });
 
   test("graph-engineering terminal states are not attention", () => {
@@ -137,7 +135,6 @@ describe("attention: collection", () => {
     const items = await collectAttention(store);
     expect(items.map((i) => `${i.source}/${i.runId}`)).toEqual([
       "graph-engineering/g-2",
-      "graph-engineering/g-3",
       "improvement-loop/i-1",
       "product-loop/run-b",
     ]);

@@ -1,5 +1,17 @@
 # @guyghost/swarm-dao-pi-adapter
 
+## 0.9.1
+
+### Patch Changes
+
+- 6b7d790: Graph Engineering retries after failed evaluation are now system-owned: EVALUATE / IMPLEMENTATION_FAILED with remaining budget auto-continue to implementing. There is no RETRY_AUTHORIZED human event on a graph run; model-hash approval and cancel stay human.
+- Updated dependencies [3aa2664]
+- Updated dependencies [d722194]
+- Updated dependencies [6b7d790]
+- Updated dependencies [9cc48a9]
+  - @guyghost/swarm-dao-core@1.1.0
+  - @guyghost/swarm-dao-graph@0.4.0
+
 ## 0.9.0
 
 ### Minor Changes

@@ -25,7 +25,6 @@ const EVENT_SOURCES = {
   IMPLEMENTATION_FAILED: "ai",
   ANCHOR_RECORDED: "tool",
   EVALUATE: "system",
-  RETRY_AUTHORIZED: "human",
   PERMISSION_DENIED: "tool",
   CANCEL: "human",
 } as const satisfies Record<GraphEngineeringEvent["type"], GraphSignalSource>;
@@ -55,7 +54,7 @@ const PRODUCER_EMISSIONS: Readonly<
   "regression-watcher": { source: "tool", emits: new Set(["ANCHOR_RECORDED", "PERMISSION_DENIED"]) },
   "human-owner": {
     source: "human",
-    emits: new Set(["MODEL_APPROVED", "MODEL_REJECTED", "RETRY_AUTHORIZED", "CANCEL"]),
+    emits: new Set(["MODEL_APPROVED", "MODEL_REJECTED", "CANCEL"]),
   },
 };
 
@@ -149,8 +148,6 @@ const buildEvent = (
       };
     }
     case "EVALUATE":
-      return { type, source };
-    case "RETRY_AUTHORIZED":
       return { type, source };
     case "PERMISSION_DENIED":
       return { type, source, reason: requiredPayloadString(payload, "reason", issues) };

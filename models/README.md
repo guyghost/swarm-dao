@@ -68,6 +68,16 @@ It gates implementation through exact-hash human approval and six deterministic
 anchors while the proposal lifecycle above remains the sole business-state
 authority.
 
+## Classifier verdict (coding-loop decisions)
+
+`classifier-verdict.md` is a **stateless decision contract**, not a machine
+(same pattern as `agent-runtime.md`). Coding-loop workers emit closed-vocabulary
+JSON; `validateVerdict` / `evaluateAttempt` compose that signal with tool
+evidence. `done` requests Graph Engineering evaluation — it never selects
+`succeeded`. Paths reuse `normalizeEditPath` and `MAX_EDIT_PATHS`.
+
+Executable source: `packages/core/src/domain/classifier-verdict.ts`.
+
 ## Improvement loop (self-improvement cycle)
 
 `improvement-loop.md` and `improvement-loop.graph.json` define a

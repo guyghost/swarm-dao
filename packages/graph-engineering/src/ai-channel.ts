@@ -6,7 +6,7 @@
 // "ai" HERE, inside the package — an AI-facing host can never claim the
 // tool/system/human channel, and the event types are restricted to the
 // AI-artifact set at the type level. Human events (MODEL_APPROVED,
-// MODEL_REJECTED, RETRY_AUTHORIZED, CANCEL) belong to the CLI human channel;
+// MODEL_REJECTED, CANCEL) belong to the CLI human channel;
 // tool/system events belong to the deterministic tools.
 
 import { createGraphRunner, type GraphSubmissionResult } from "./runner.js";

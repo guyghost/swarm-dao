@@ -59,4 +59,18 @@ describe("graph engineering counter-metrics", () => {
     expect(actor.getSnapshot().value).toBe("cancelled");
     expect(actor.getSnapshot().context.terminalReason).toBe("owner cancelled");
   });
+
+  it("does not accept a human retry event — evaluation owns retry", () => {
+    const actor = reachAwaitingApproval();
+    actor.send({ type: "MODEL_APPROVED", source: "human", modelHash: "model-a" });
+    actor.send({ type: "START_IMPLEMENTATION", source: "system" });
+    actor.send({ type: "IMPLEMENTATION_READY", source: "ai", implementationHash: "implementation-a" });
+    actor.send({ type: "EVALUATE", source: "system" });
+    expect(actor.getSnapshot().value).toBe("implementing");
+    expect(actor.getSnapshot().context.attempt).toBe(1);
+
+    actor.send({ type: "RETRY_AUTHORIZED", source: "human" } as never);
+    expect(actor.getSnapshot().value).toBe("implementing");
+    expect(actor.getSnapshot().context.attempt).toBe(1);
+  });
 });
