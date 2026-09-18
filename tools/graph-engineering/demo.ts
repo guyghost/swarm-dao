@@ -26,8 +26,6 @@ const implementationPaths = [
   "tools/graph-engineering/stop-gate.ts",
   "tools/graph-engineering/graphctl.ts",
   ".agents/skills/graph-engineering/SKILL.md",
-  ".codex/hooks.json",
-  ".codex/hooks/verify-stop.ts",
 ] as const;
 
 const hashImplementation = async (): Promise<string> => {
