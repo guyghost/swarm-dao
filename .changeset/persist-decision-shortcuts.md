@@ -12,6 +12,8 @@ change: `hasPendingWrites` short-circuits after the state check and
 write cache. A `decisionsPending` flag forces the full sweep after a
 persist that failed mid-way, keeping failure-retry behavior identical.
 
-Measured A/B (bun 1.4.2, no-op persist, 2000 closed proposals):
-~9.8–11.5 ms → ~8.8–9.1 ms. Adds a persistence benchmark case for the
-unchanged-state-with-closed-proposals regime.
+Standalone effect is within noise on the official suite; kept as
+groundwork for ADR-004 (proposal archive), where the index guard keeps
+archive-only persists free of the O(closed) decision sweep. Adds a
+persistence benchmark case for the unchanged-state-with-closed-proposals
+regime.
