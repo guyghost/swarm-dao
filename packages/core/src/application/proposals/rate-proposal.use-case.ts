@@ -34,6 +34,9 @@ export class RateProposalUseCase {
     outcome.overallScore = outcome.ratings.reduce((sum, item) => sum + item.score, 0) / outcome.ratings.length;
     outcome.updatedAt = now;
     state.outcomes[proposal.id] = outcome;
+    // Re-rating replaces an existing outcome value behind the archive's
+    // structural signature (ADR-004 mutation contract).
+    this.dependencies.repository.markArchivedDirty();
     await this.dependencies.repository.persist();
     return { ok: true, rating };
   }

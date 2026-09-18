@@ -220,4 +220,58 @@ describe("FileDaoStateRepository concurrency", () => {
       await fs.rm(cwd, { recursive: true, force: true });
     }
   });
+
+  it("re-runs the decision sweep on the next persist after a mid-sweep failure", async () => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "swarm-dao-decisions-retry-"));
+    try {
+      const repository = await FileDaoStateRepository.open(cwd);
+      const state = repository.get();
+      state.initialized = true;
+      state.proposals.push({
+        id: 1,
+        title: "Closed one",
+        type: "product-feature",
+        description: "d",
+        problemStatement: "p",
+        acceptanceCriteria: [],
+        successMetrics: [],
+        rollbackConditions: [],
+        proposedBy: "t",
+        status: "rejected",
+        votes: [],
+        agentOutputs: [],
+        createdAt: "2031-01-01T00:00:00.000Z",
+      });
+      await repository.persist();
+
+      const decisionsDir = path.join(cwd, ".dao", "decisions");
+      const decisionFile = path.join(decisionsDir, "001.json");
+      const decisionBefore = await fs.readFile(decisionFile, "utf8");
+
+      // Force the decision write to fail portably: replacing the decision file
+      // with a DIRECTORY makes the atomic rename throw (EISDIR) even when the
+      // process runs as root, where permission bits would be ignored.
+      await fs.rm(decisionFile, { force: true });
+      await fs.mkdir(decisionFile);
+      // Retitling an ARCHIVED proposal is an in-place edit behind the archive's
+      // structural signature — the ADR-004 contract requires the flag (and the
+      // test documents it for future call sites).
+      repository.markArchivedDirty();
+      state.proposals[0] = { ...state.proposals[0], title: "Retitled while locked" };
+      await expect(repository.persist()).rejects.toThrow();
+
+      // Remove the obstruction: the next persist must re-run the full sweep
+      // (decisionsPending) instead of treating everything as already written.
+      await fs.rmdir(decisionFile);
+      await repository.persist();
+
+      const decisionAfter = await fs.readFile(decisionFile, "utf8");
+      expect(decisionAfter).not.toBe(decisionBefore);
+      expect(decisionAfter).toContain("Retitled while locked");
+      const reopened = await FileDaoStateRepository.open(cwd);
+      expect(reopened.get().proposals[0]?.title).toBe("Retitled while locked");
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
 });

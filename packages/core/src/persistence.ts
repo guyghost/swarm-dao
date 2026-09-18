@@ -4,6 +4,8 @@
 
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { ARCHIVE_FILE_NAME, mergeArchive, parseArchive } from "./adapters/persistence/archive.js";
+import { AUDIT_JSONL_FILE_NAME, mergeAuditEntries, parseAuditJsonl } from "./adapters/persistence/audit-jsonl.js";
 import {
   FileDaoStateRepository,
   repairCounters,
@@ -42,6 +44,10 @@ class CompatibilityFileRepository implements DaoStateRepositoryPort {
 
   public persist(): Promise<void> {
     return persistState(this.state);
+  }
+
+  public markArchivedDirty(): void {
+    // Legacy path is archive-unaware (ADR-004): nothing to flag.
   }
 }
 
@@ -409,11 +415,57 @@ export async function loadState(cwd: string, options?: { legacyDirectories?: str
   // truth for proposals.
   await importLegacyProposalSidecars(daoRoot, loaded);
 
+  // ADR-004: state.json holds only live proposals — closed ones live in
+  // archive.json. Merge the archive back BEFORE fromLoaded wraps this state,
+  // otherwise the next persist would rewrite archive.json from archive-blind
+  // memory and silently destroy every archived proposal.
+  const archivePath = path.join(daoRoot, ARCHIVE_FILE_NAME);
+  let rawArchive: string | undefined;
+  try {
+    rawArchive = await fs.readFile(archivePath, "utf-8");
+  } catch (error) {
+    if (!hasErrorCode(error, "ENOENT")) {
+      throw new Error(`Failed to read DAO proposal archive at ${archivePath}: ${getErrorMessage(error)}`);
+    }
+  }
+  if (rawArchive !== undefined) {
+    let archive: ReturnType<typeof parseArchive>;
+    try {
+      archive = parseArchive(rawArchive);
+    } catch (error) {
+      throw new Error(`Corrupt DAO proposal archive at ${archivePath}: ${getErrorMessage(error)}`);
+    }
+    mergeArchive(loaded, archive);
+  }
+
+  // ADR-005: merge the append-only audit trail into the loaded state and
+  // hand the durable-id set to the repository so its next persist appends
+  // only genuinely new entries (never rewrites, never loses the trail).
+  const auditPath = path.join(daoRoot, AUDIT_JSONL_FILE_NAME);
+  let rawAudit: string | undefined;
+  try {
+    rawAudit = await fs.readFile(auditPath, "utf-8");
+  } catch (error) {
+    if (!hasErrorCode(error, "ENOENT")) {
+      throw new Error(`Failed to read DAO audit trail at ${auditPath}: ${getErrorMessage(error)}`);
+    }
+  }
+  let persistedAuditIds: Set<number> | undefined;
+  if (rawAudit !== undefined) {
+    const { entries, skipped } = parseAuditJsonl(rawAudit);
+    mergeAuditEntries(loaded.auditLog, entries);
+    persistedAuditIds = new Set(entries.map((entry) => entry.id));
+    if (skipped > 0) {
+      logger.warn(`⚠ Skipped ${skipped} corrupt audit.jsonl line(s) at ${auditPath} (torn tail or damaged entries)`);
+    }
+  }
+
   // Shared counter repair (issue #157): both load paths must produce
-  // identical, collision-free ID counters.
+  // identical, collision-free ID counters. Re-run after the merge so the
+  // counters also clear the archived ids.
   repairCounters(loaded);
 
-  activeRepository = FileDaoStateRepository.fromLoaded(loaded, raw);
+  activeRepository = FileDaoStateRepository.fromLoaded(loaded, raw, { persistedAuditIds });
   // Disk is now the source of truth for the freshly loaded state; reset the
   // cache so the first subsequent save reflects the real on-disk content.
   resetWriteCache();
@@ -465,6 +517,14 @@ async function importLegacyProposalSidecars(daoRoot: string, loaded: DAOState): 
 export async function saveState(): Promise<void> {
   if (!activeRepository) return;
   await activeRepository.persist();
+}
+
+/** ADR-004 mutation contract: compat helpers below mutate satellite values in
+ *  place (invisible to the archive's structural signature), so they must flag
+ *  the archive dirty before persisting when a partitioned repository is
+ *  active. No-op on repositories that do not partition. */
+function flagArchivedMutation(): void {
+  activeRepository?.markArchivedDirty();
 }
 
 async function persistState(state: DAOState): Promise<void> {
@@ -819,6 +879,7 @@ export async function initOutcome(proposalId: number): Promise<ProposalOutcome> 
     updatedAt: new Date().toISOString(),
   };
   s.outcomes[proposalId] = outcome;
+  flagArchivedMutation();
   await saveState();
   return outcome;
 }
@@ -829,6 +890,7 @@ export async function addRating(proposalId: number, rating: ProposalOutcome["rat
   const scores = outcome.ratings.map((r) => r.score);
   outcome.overallScore = scores.reduce((a, b) => a + b, 0) / scores.length;
   outcome.updatedAt = new Date().toISOString();
+  flagArchivedMutation();
   await saveState();
 }
 
@@ -836,6 +898,7 @@ export async function addMetric(proposalId: number, metric: ProposalOutcome["met
   const outcome = await initOutcome(proposalId);
   outcome.metrics.push(metric);
   outcome.updatedAt = new Date().toISOString();
+  flagArchivedMutation();
   await saveState();
 }
 

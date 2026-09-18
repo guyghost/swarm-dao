@@ -3,6 +3,8 @@ import path from "node:path";
 import { logger } from "../../observability/logging.js";
 import type { DaoStateRepositoryPort } from "../../ports/repository.js";
 import { createInitialState, type DAOState, type DecisionRecord } from "../../types/index.js";
+import { ARCHIVE_FILE_NAME, archiveSignature, mergeArchive, parseArchive, partitionState } from "./archive.js";
+import { AUDIT_JSONL_FILE_NAME, auditLine, mergeAuditEntries, parseAuditJsonl } from "./audit-jsonl.js";
 
 function formatJson(value: unknown): string {
   return `${JSON.stringify(value, null, 2)}\n`;
@@ -85,6 +87,31 @@ function repairState(value: Partial<DAOState>, daoRoot: string): RepairResult {
 export class FileDaoStateRepository implements DaoStateRepositoryPort {
   private readonly writeCache = new Map<string, string>();
   private writeQueue: Promise<void> = Promise.resolve();
+  /** Set when a persist failed after state.json was written, forcing the next
+   *  persist to run the full decision sweep so failed writes are retried. */
+  private decisionsPending = false;
+  /** ADR-004: set by markArchivedDirty() when a caller mutated values inside
+   *  the archived partition (in-place edits invisible to the structural
+   *  signature); forces the archive to be re-serialized on the next persist. */
+  private archivedDirty = false;
+  /** Last structural signature of the archived partition — the cheap
+   *  auto-detection half of the ADR-004 mutation contract. */
+  private lastArchiveSignature = "";
+  /** Whether archive.json is known to exist on disk. False for fresh
+   *  repositories and compat loaders: the archive must then be written on the
+   *  next full persist even when the signature is unchanged (legacy migration
+   *  would otherwise drop closed proposals from state.json without ever
+   *  archiving them). */
+  private archiveOnDiskKnown = false;
+  /** Ids of audit entries durably present in audit.jsonl (ADR-005). Entries
+   *  whose id is missing here are appended on the next persist. */
+  private persistedAuditIds = new Set<number>();
+
+  /** Name of the append-only audit trail file written next to state.json. */
+  private static readonly AUDIT_FILE = AUDIT_JSONL_FILE_NAME;
+
+  /** Name of the closed-proposal archive file written next to state.json. */
+  private static readonly ARCHIVE_FILE = ARCHIVE_FILE_NAME;
 
   /** Last state.json content this instance read or wrote, for cheap divergence checks. */
   private rawStateOnDisk: string | null;
@@ -118,13 +145,20 @@ export class FileDaoStateRepository implements DaoStateRepositoryPort {
   }
 
   /** Wrap already-loaded state so compatibility loaders share the locked persist path. */
-  public static fromLoaded(state: DAOState, rawStateOnDisk: string | null): FileDaoStateRepository {
-    return new FileDaoStateRepository(
+  public static fromLoaded(
+    state: DAOState,
+    rawStateOnDisk: string | null,
+    options?: { persistedAuditIds?: Set<number> },
+  ): FileDaoStateRepository {
+    const repository = new FileDaoStateRepository(
       state,
       state.daoRoot,
       rawStateOnDisk,
       isPositiveInteger(state.stateRevision) ? state.stateRevision : undefined,
     );
+    repository.lastArchiveSignature = archiveSignature(state);
+    if (options?.persistedAuditIds) repository.persistedAuditIds = options.persistedAuditIds;
+    return repository;
   }
 
   public static async open(cwd: string): Promise<FileDaoStateRepository> {
@@ -161,11 +195,72 @@ export class FileDaoStateRepository implements DaoStateRepositoryPort {
         logger.warn(`⚠ state.json needed shape repair; original backed up to ${backupPath}`);
       }
     }
-    return new FileDaoStateRepository(state, daoRoot, rawState, state.stateRevision);
+    // ADR-004: merge the closed-proposal archive into the in-memory state so
+    // consumers keep seeing one merged DAOState. Archived ids shadow same-id
+    // live proposals (crash ordering: the archive is always the newer copy).
+    const archivePath = path.join(daoRoot, FileDaoStateRepository.ARCHIVE_FILE);
+    let rawArchive: string | null = null;
+    try {
+      rawArchive = await fs.readFile(archivePath, "utf8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw new Error(
+          `Failed to read DAO proposal archive at ${archivePath}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+    if (rawArchive !== null) {
+      let archive: ReturnType<typeof parseArchive>;
+      try {
+        archive = parseArchive(rawArchive);
+      } catch (error) {
+        // Same wrapping as state.json: a raw parse error names no file.
+        throw new Error(
+          `Corrupt DAO proposal archive at ${archivePath}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      mergeArchive(state, archive);
+    }
+    // ADR-005: fold the append-only audit trail into the in-memory log.
+    // Tolerant by design — torn/corrupt lines are skipped, duplicates are
+    // removed by id during the merge.
+    let auditIds: Set<number> | undefined;
+    const auditPath = path.join(daoRoot, FileDaoStateRepository.AUDIT_FILE);
+    let rawAudit: string | undefined;
+    try {
+      rawAudit = await fs.readFile(auditPath, "utf8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw new Error(
+          `Failed to read DAO audit trail at ${auditPath}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+    if (rawAudit !== undefined) {
+      const { entries, skipped } = parseAuditJsonl(rawAudit);
+      mergeAuditEntries(state.auditLog, entries);
+      auditIds = new Set(entries.map((entry) => entry.id));
+      if (skipped > 0) {
+        logger.warn(`⚠ Skipped ${skipped} corrupt audit.jsonl line(s) at ${auditPath} (torn tail or damaged entries)`);
+      }
+    }
+    // Counters must account for archived proposal AND audit-trail ids
+    // (issue #157): a restored old state.json can never reuse ids.
+    repairCounters(state);
+    const repository = new FileDaoStateRepository(state, daoRoot, rawState, state.stateRevision);
+    repository.lastArchiveSignature = archiveSignature(state);
+    repository.archiveOnDiskKnown = rawArchive !== null;
+    if (auditIds) repository.persistedAuditIds = auditIds;
+    return repository;
   }
 
   public get(): DAOState {
     return this.state;
+  }
+
+  /** ADR-004 mutation contract — see DaoStateRepositoryPort. */
+  public markArchivedDirty(): void {
+    this.archivedDirty = true;
   }
 
   public async persist(): Promise<void> {
@@ -179,11 +274,52 @@ export class FileDaoStateRepository implements DaoStateRepositoryPort {
         // Monotonic revision (issue #153): move past whatever is on disk so a
         // stale copy of this instance can never be accepted again.
         this.state.stateRevision = Math.max(diskRevision, this.seenRevision) + 1;
+        // ADR-004: only re-serialize the archive when its partition may have
+        // changed (mutation contract) or it is not known to be on disk yet
+        // (fresh/legacy). A signature-clean archive keeps archive-only-heavy
+        // flows (e.g. touching an open proposal) at O(open) cost.
+        const signature = archiveSignature(this.state);
+        const archiveChanged =
+          this.archivedDirty || !this.archiveOnDiskKnown || signature !== this.lastArchiveSignature;
+        const { live, archive } = partitionState(this.state);
+        const archivePath = path.join(this.daoRoot, FileDaoStateRepository.ARCHIVE_FILE);
+        // Crash ordering (ADR-004): the archive is written BEFORE state.json.
+        // A crash in between leaves the archive holding the newer closed copy
+        // while state.json still lists the proposal as open; the shadow rule
+        // in mergeArchive resolves that deterministically on the next open.
+        // The reverse order would lose the proposal entirely.
+        if (archiveChanged) {
+          await this.writeIfChanged(archivePath, archive);
+          this.archiveOnDiskKnown = true;
+        }
+        // ADR-005: append not-yet-durable audit entries BEFORE state.json.
+        // A crash in between leaves the trail durably ahead of the state —
+        // accepted governance semantics (a recorded action must not vanish);
+        // the loader dedupes by id, so a post-recovery re-append is harmless.
+        const auditChanged =
+          this.state.auditLog.length !== this.persistedAuditIds.size ||
+          this.state.auditLog.some((entry) => !this.persistedAuditIds.has(entry.id));
+        if (auditChanged) {
+          const pending = this.state.auditLog.filter((entry) => !this.persistedAuditIds.has(entry.id));
+          if (pending.length > 0) {
+            const auditPath = path.join(this.daoRoot, FileDaoStateRepository.AUDIT_FILE);
+            await fs.appendFile(auditPath, pending.map(auditLine).join(""), "utf8");
+            for (const entry of pending) this.persistedAuditIds.add(entry.id);
+          }
+        }
         const statePath = path.join(this.daoRoot, "state.json");
-        await this.writeIfChanged(statePath, this.state);
+        await this.writeIfChanged(statePath, live);
         this.rawStateOnDisk = this.writeCache.get(statePath) ?? null;
         this.seenRevision = this.state.stateRevision;
-        await this.persistDecisions();
+        this.lastArchiveSignature = signature;
+        this.archivedDirty = false;
+        try {
+          await this.persistDecisions();
+          this.decisionsPending = false;
+        } catch (error) {
+          this.decisionsPending = true;
+          throw error;
+        }
       });
     };
     const queued = this.writeQueue.then(task, task);
@@ -197,7 +333,28 @@ export class FileDaoStateRepository implements DaoStateRepositoryPort {
    * write cache, persist is a no-op and can skip lock, check and I/O.
    */
   private hasPendingWrites(): boolean {
-    if (this.writeCache.get(path.join(this.daoRoot, "state.json")) !== formatJson(this.state)) return true;
+    const statePath = path.join(this.daoRoot, "state.json");
+    const { live } = partitionState(this.state);
+    if (this.writeCache.get(statePath) !== formatJson(live)) return true;
+    // ADR-004: the archived partition is clean only when its structural
+    // signature is unchanged, no caller flagged in-place value edits via
+    // markArchivedDirty(), and the archive is known to be on disk. The
+    // signature costs O(closed) key checks — far below serializing the
+    // closed proposals themselves.
+    const archiveClean =
+      archiveSignature(this.state) === this.lastArchiveSignature && !this.archivedDirty && this.archiveOnDiskKnown;
+    // ADR-005: audit entries not yet appended to audit.jsonl also count as
+    // pending work (O(audit) probe via Set lookups — no serialization).
+    const auditChanged =
+      this.state.auditLog.length !== this.persistedAuditIds.size ||
+      this.state.auditLog.some((entry) => !this.persistedAuditIds.has(entry.id));
+    if (!archiveClean || auditChanged) return true;
+    // Decision records are a pure function of state.proposals: when the
+    // serialized state is byte-identical to the last write, the decision
+    // index and per-decision files were written from this exact state and
+    // must match the write cache. Skipping the O(proposals) serialize+compare
+    // sweep removes the dominant cost of a no-op persist on large states.
+    if (!this.decisionsPending) return false;
     const decisions = this.closedDecisions();
     if (this.writeCache.get(path.join(this.daoRoot, "decisions", "index.json")) !== formatJson(decisions)) {
       return true;
@@ -284,7 +441,14 @@ export class FileDaoStateRepository implements DaoStateRepositoryPort {
     const decisionsDir = path.join(this.daoRoot, "decisions");
     await fs.mkdir(decisionsDir, { recursive: true });
     const decisions = this.closedDecisions();
-    await this.writeIfChanged(path.join(decisionsDir, "index.json"), decisions);
+    const indexPath = path.join(decisionsDir, "index.json");
+    // The per-decision files are a pure function of the decisions array that
+    // produced index.json: a serialized index identical to the cached one
+    // means every decision file already matches the cache too. Skip the
+    // per-decision serialize+compare sweep (O(closed proposals)) — after a
+    // mid-sweep failure, decisionsPending forces the full sweep instead.
+    if (!this.decisionsPending && this.writeCache.get(indexPath) === formatJson(decisions)) return;
+    await this.writeIfChanged(indexPath, decisions);
     await Promise.all(
       decisions.map((decision) =>
         this.writeIfChanged(path.join(decisionsDir, `${decision.id.toString().padStart(3, "0")}.json`), decision),

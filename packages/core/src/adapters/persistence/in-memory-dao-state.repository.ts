@@ -12,4 +12,8 @@ export class InMemoryDaoStateRepository implements DaoStateRepositoryPort {
   public async persist(): Promise<void> {
     // State already lives in this isolated instance.
   }
+
+  public markArchivedDirty(): void {
+    // Nothing is partitioned in memory — nothing to flag.
+  }
 }

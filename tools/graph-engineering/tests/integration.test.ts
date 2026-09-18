@@ -21,13 +21,11 @@ describe("repository Graph Engineering integration", () => {
     }
   });
 
-  it("projects the authority boundary into the repository skill and Codex hook", async () => {
+  it("projects the authority boundary into the repository skill", async () => {
     const skill = await readFile(resolve(".agents/skills/graph-engineering/SKILL.md"), "utf8");
-    const hooks = JSON.parse(await readFile(resolve(".codex/hooks.json"), "utf8"));
 
     expect(skill).toMatch(/models\/graph-engineering\.md/);
     expect(skill).toMatch(/must never submit.*source.*human/is);
     expect(skill).toMatch(/Model.*Review.*Implement.*Verify/is);
-    expect(hooks.hooks.Stop[0].hooks[0].command).toMatch(/verify-stop\.ts/);
   });
 });

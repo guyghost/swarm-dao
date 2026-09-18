@@ -45,6 +45,9 @@ export class ControlProposalUseCase {
       now,
     });
     state.controlResults[proposal.id] = control;
+    // Control runs on archived (approved) proposals: the control result and
+    // possibly the delivery plan are archived-partition values (ADR-004).
+    this.dependencies.repository.markArchivedDirty();
     if (control.allGatesPassed) {
       const transition = dispatchProposalEvent(
         proposal,
