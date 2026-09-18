@@ -27,7 +27,7 @@
     "@guyghost/swarm-dao-core": "^1.1.0"
   },
   "devDependencies": {
-    "@types/bun": "1.3.14",
+    "@types/bun": "1.4.2",
     "@types/node": "^26.0.1"
   },
   "keywords": [
