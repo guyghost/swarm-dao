@@ -45,6 +45,9 @@ export interface EditGateDecision {
 
 const AUTHORITY_STATUSES = new Set(["approved", "controlled", "executed"]);
 
+/** Shared with `dao_check_edit` and the classifier verdict: never silently truncate. */
+export const MAX_EDIT_PATHS = 200;
+
 /**
  * Lexically normalize a repository-relative path so glob matching cannot be
  * evaded by spelling variants (absolute paths, `./` prefixes, `a/../b`

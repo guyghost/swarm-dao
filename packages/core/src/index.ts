@@ -16,6 +16,8 @@ export * from "./config.js";
 export * from "./control/index.js";
 // Delivery (L3)
 export * from "./delivery/index.js";
+// Domain (pure decision contracts)
+export * from "./domain/classifier-verdict.js";
 // Governance (L1)
 export * from "./governance/index.js";
 // Health Score

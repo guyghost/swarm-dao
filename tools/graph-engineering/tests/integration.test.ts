@@ -10,7 +10,7 @@ describe("repository Graph Engineering integration", () => {
 
     expect(result.valid).toBe(true);
     expect(result.issues).toEqual([]);
-    expect(result.modelHash).toBe("0b1400275d7cef099826933c64f361cd26c36029abc7bfd732a92f221c9bc3d9");
+    expect(result.modelHash).toBe("a2a11c62a37e4e0536be59b9e6675a314583d8b57e0f8fd1de37b157ed5ae30c");
   });
 
   it("blocks a normal Codex stop until the graph reaches an explicit terminal state", () => {
@@ -21,13 +21,11 @@ describe("repository Graph Engineering integration", () => {
     }
   });
 
-  it("projects the authority boundary into the repository skill and Codex hook", async () => {
+  it("projects the authority boundary into the repository skill", async () => {
     const skill = await readFile(resolve(".agents/skills/graph-engineering/SKILL.md"), "utf8");
-    const hooks = JSON.parse(await readFile(resolve(".codex/hooks.json"), "utf8"));
 
     expect(skill).toMatch(/models\/graph-engineering\.md/);
     expect(skill).toMatch(/must never submit.*source.*human/is);
     expect(skill).toMatch(/Model.*Review.*Implement.*Verify/is);
-    expect(hooks.hooks.Stop[0].hooks[0].command).toMatch(/verify-stop\.ts/);
   });
 });

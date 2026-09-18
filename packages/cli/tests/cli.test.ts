@@ -183,6 +183,7 @@ describe("cli.ts — graph runs", () => {
       expect(await main(["graph", "init"], cwd)).toBe(1);
       expect(await main(["graph", "submit", "--run-id", "x"], cwd)).toBe(1);
       expect(await main(["graph", "init", "--run-id", "x", "--evidence-root"], cwd)).toBe(1);
+      expect(await main(["graph", "implement", "--run-id", "x"], cwd)).toBe(1);
     } finally {
       await fs.rm(cwd, { recursive: true, force: true });
     }
@@ -208,6 +209,16 @@ describe("cli.ts — graph runs", () => {
       );
       // No model was drafted: the machine must refuse the approval.
       expect(await main(["graph", "submit", "--run-id", "cli-test", "--signal", "signal.json"], cwd)).toBe(2);
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("graph implement refuses unless the run is implementing", async () => {
+    const cwd = await tmpCwd();
+    try {
+      await main(["graph", "init", "--run-id", "cli-test"], cwd);
+      expect(await main(["graph", "implement", "--run-id", "cli-test", "--task", "ship it"], cwd)).toBe(1);
     } finally {
       await fs.rm(cwd, { recursive: true, force: true });
     }

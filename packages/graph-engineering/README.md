@@ -25,5 +25,7 @@ const code = await runGraphCli(["status", "--run-id", "my-run"]); // 0 | 1 | 2
 ```
 
 The `swarm-dao` CLI exposes the same surface as `swarm-dao graph
-<init|status|submit>`; exit codes are 0 (success), 2 (machine rejection),
-1 (usage or execution error).
+<init|status|submit|implement>`; exit codes are 0 (success), 2 (machine rejection),
+1 (usage or execution error). `graph implement` prepends `CLASSIFIER_CHARTER`
+and routes the implementer through `evaluateAttempt` before submitting an
+AI artifact (`IMPLEMENTATION_READY` / `IMPLEMENTATION_FAILED`).

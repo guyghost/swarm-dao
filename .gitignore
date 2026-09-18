@@ -55,16 +55,10 @@ benchmark-baseline.json
 tmp/
 temp/
 
-# Ralph loop state
-.ralph/
-
 # Pi local extension symlink
 .pi/
 
-# OpenSpec tooling (local only)
-openspec/
 *.tgz
 .tmp-*
 
 .impeccable/
-.codex/
