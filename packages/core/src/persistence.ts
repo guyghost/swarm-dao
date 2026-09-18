@@ -4,6 +4,7 @@
 
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { ARCHIVE_FILE_NAME, mergeArchive, parseArchive } from "./adapters/persistence/archive.js";
 import {
   FileDaoStateRepository,
   repairCounters,
@@ -42,6 +43,10 @@ class CompatibilityFileRepository implements DaoStateRepositoryPort {
 
   public persist(): Promise<void> {
     return persistState(this.state);
+  }
+
+  public markArchivedDirty(): void {
+    // Legacy path is archive-unaware (ADR-004): nothing to flag.
   }
 }
 
@@ -409,8 +414,32 @@ export async function loadState(cwd: string, options?: { legacyDirectories?: str
   // truth for proposals.
   await importLegacyProposalSidecars(daoRoot, loaded);
 
+  // ADR-004: state.json holds only live proposals — closed ones live in
+  // archive.json. Merge the archive back BEFORE fromLoaded wraps this state,
+  // otherwise the next persist would rewrite archive.json from archive-blind
+  // memory and silently destroy every archived proposal.
+  const archivePath = path.join(daoRoot, ARCHIVE_FILE_NAME);
+  let rawArchive: string | undefined;
+  try {
+    rawArchive = await fs.readFile(archivePath, "utf-8");
+  } catch (error) {
+    if (!hasErrorCode(error, "ENOENT")) {
+      throw new Error(`Failed to read DAO proposal archive at ${archivePath}: ${getErrorMessage(error)}`);
+    }
+  }
+  if (rawArchive !== undefined) {
+    let archive: ReturnType<typeof parseArchive>;
+    try {
+      archive = parseArchive(rawArchive);
+    } catch (error) {
+      throw new Error(`Corrupt DAO proposal archive at ${archivePath}: ${getErrorMessage(error)}`);
+    }
+    mergeArchive(loaded, archive);
+  }
+
   // Shared counter repair (issue #157): both load paths must produce
-  // identical, collision-free ID counters.
+  // identical, collision-free ID counters. Re-run after the merge so the
+  // counters also clear the archived ids.
   repairCounters(loaded);
 
   activeRepository = FileDaoStateRepository.fromLoaded(loaded, raw);
@@ -465,6 +494,14 @@ async function importLegacyProposalSidecars(daoRoot: string, loaded: DAOState): 
 export async function saveState(): Promise<void> {
   if (!activeRepository) return;
   await activeRepository.persist();
+}
+
+/** ADR-004 mutation contract: compat helpers below mutate satellite values in
+ *  place (invisible to the archive's structural signature), so they must flag
+ *  the archive dirty before persisting when a partitioned repository is
+ *  active. No-op on repositories that do not partition. */
+function flagArchivedMutation(): void {
+  activeRepository?.markArchivedDirty();
 }
 
 async function persistState(state: DAOState): Promise<void> {
@@ -819,6 +856,7 @@ export async function initOutcome(proposalId: number): Promise<ProposalOutcome> 
     updatedAt: new Date().toISOString(),
   };
   s.outcomes[proposalId] = outcome;
+  flagArchivedMutation();
   await saveState();
   return outcome;
 }
@@ -829,6 +867,7 @@ export async function addRating(proposalId: number, rating: ProposalOutcome["rat
   const scores = outcome.ratings.map((r) => r.score);
   outcome.overallScore = scores.reduce((a, b) => a + b, 0) / scores.length;
   outcome.updatedAt = new Date().toISOString();
+  flagArchivedMutation();
   await saveState();
 }
 
@@ -836,6 +875,7 @@ export async function addMetric(proposalId: number, metric: ProposalOutcome["met
   const outcome = await initOutcome(proposalId);
   outcome.metrics.push(metric);
   outcome.updatedAt = new Date().toISOString();
+  flagArchivedMutation();
   await saveState();
 }
 

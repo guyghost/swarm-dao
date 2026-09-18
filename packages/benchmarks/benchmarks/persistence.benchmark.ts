@@ -10,7 +10,6 @@ let memoryRepository: InMemoryDaoStateRepository;
 let fileRepository: FileDaoStateRepository;
 let largeFileRepository: FileDaoStateRepository;
 let closedFileRepository: FileDaoStateRepository;
-
 async function openSeeded(dir: string, proposals: number): Promise<FileDaoStateRepository> {
   const repository = await FileDaoStateRepository.open(dir);
   const seed = initializedState(path.join(dir, ".dao"));
@@ -35,7 +34,8 @@ export const persistenceSuite: BenchmarkSuite = {
     largeFileRepository = await openSeeded(path.join(workDir, "large"), 500);
     // Long-lived DAO state regime: many closed proposals => non-empty decision
     // sweep on every persist, so no-op persists guard the decision shortcuts.
-    closedFileRepository = await openSeeded(path.join(workDir, "closed"), 2000);
+    // 20 open proposals keep the touch-open case realistic (ADR-004 criteria).
+    closedFileRepository = await openSeeded(path.join(workDir, "closed"), 2020);
     const closedState = closedFileRepository.get();
     for (let index = 0; index < 2000; index++) closedState.proposals[index] = deliberatedProposal(index + 1);
     await closedFileRepository.persist();
@@ -75,6 +75,15 @@ export const persistenceSuite: BenchmarkSuite = {
     {
       name: "file persist (unchanged, 2000 closed)",
       run: async () => {
+        await closedFileRepository.persist();
+      },
+    },
+    {
+      name: "file persist (touch open, 2000 closed)",
+      run: async () => {
+        const state = closedFileRepository.get();
+        const open = state.proposals.find((p) => p.status === "open");
+        if (open) state.proposals[open.id - 1] = { ...open, title: `Retouched ${Math.random()}` };
         await closedFileRepository.persist();
       },
     },

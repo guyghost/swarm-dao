@@ -14,4 +14,8 @@ export class LegacyDaoStateRepository implements DaoStateRepositoryPort {
   public persist(): Promise<void> {
     return saveState();
   }
+
+  public markArchivedDirty(): void {
+    // Legacy path is archive-unaware (ADR-004): nothing to flag.
+  }
 }

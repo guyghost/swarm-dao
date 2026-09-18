@@ -248,15 +248,21 @@ describe("FileDaoStateRepository concurrency", () => {
       const decisionFile = path.join(decisionsDir, "001.json");
       const decisionBefore = await fs.readFile(decisionFile, "utf8");
 
-      // Make the decisions directory read-only so the next decision write
-      // throws mid-sweep (after state.json was already written).
-      await fs.chmod(decisionsDir, 0o500);
+      // Force the decision write to fail portably: replacing the decision file
+      // with a DIRECTORY makes the atomic rename throw (EISDIR) even when the
+      // process runs as root, where permission bits would be ignored.
+      await fs.rm(decisionFile, { force: true });
+      await fs.mkdir(decisionFile);
+      // Retitling an ARCHIVED proposal is an in-place edit behind the archive's
+      // structural signature — the ADR-004 contract requires the flag (and the
+      // test documents it for future call sites).
+      repository.markArchivedDirty();
       state.proposals[0] = { ...state.proposals[0], title: "Retitled while locked" };
       await expect(repository.persist()).rejects.toThrow();
 
-      // Repair the permissions: the next persist must re-run the full sweep
+      // Remove the obstruction: the next persist must re-run the full sweep
       // (decisionsPending) instead of treating everything as already written.
-      await fs.chmod(decisionsDir, 0o755);
+      await fs.rmdir(decisionFile);
       await repository.persist();
 
       const decisionAfter = await fs.readFile(decisionFile, "utf8");
@@ -265,7 +271,6 @@ describe("FileDaoStateRepository concurrency", () => {
       const reopened = await FileDaoStateRepository.open(cwd);
       expect(reopened.get().proposals[0]?.title).toBe("Retitled while locked");
     } finally {
-      await fs.chmod(path.join(cwd, ".dao", "decisions"), 0o755).catch(() => undefined);
       await fs.rm(cwd, { recursive: true, force: true });
     }
   });
