@@ -253,6 +253,10 @@ describe("FileDaoStateRepository concurrency", () => {
       // process runs as root, where permission bits would be ignored.
       await fs.rm(decisionFile, { force: true });
       await fs.mkdir(decisionFile);
+      // Retitling an ARCHIVED proposal is an in-place edit behind the archive's
+      // structural signature — the ADR-004 contract requires the flag (and the
+      // test documents it for future call sites).
+      repository.markArchivedDirty();
       state.proposals[0] = { ...state.proposals[0], title: "Retitled while locked" };
       await expect(repository.persist()).rejects.toThrow();
 
