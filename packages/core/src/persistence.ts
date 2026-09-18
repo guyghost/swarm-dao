@@ -5,6 +5,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { ARCHIVE_FILE_NAME, mergeArchive, parseArchive } from "./adapters/persistence/archive.js";
+import { AUDIT_JSONL_FILE_NAME, mergeAuditEntries, parseAuditJsonl } from "./adapters/persistence/audit-jsonl.js";
 import {
   FileDaoStateRepository,
   repairCounters,
@@ -437,12 +438,31 @@ export async function loadState(cwd: string, options?: { legacyDirectories?: str
     mergeArchive(loaded, archive);
   }
 
+  // ADR-005: merge the append-only audit trail into the loaded state and
+  // hand the durable-id set to the repository so its next persist appends
+  // only genuinely new entries (never rewrites, never loses the trail).
+  const auditPath = path.join(daoRoot, AUDIT_JSONL_FILE_NAME);
+  let rawAudit: string | undefined;
+  try {
+    rawAudit = await fs.readFile(auditPath, "utf-8");
+  } catch (error) {
+    if (!hasErrorCode(error, "ENOENT")) {
+      throw new Error(`Failed to read DAO audit trail at ${auditPath}: ${getErrorMessage(error)}`);
+    }
+  }
+  let persistedAuditIds: Set<number> | undefined;
+  if (rawAudit !== undefined) {
+    const entries = parseAuditJsonl(rawAudit);
+    mergeAuditEntries(loaded.auditLog, entries);
+    persistedAuditIds = new Set(entries.map((entry) => entry.id));
+  }
+
   // Shared counter repair (issue #157): both load paths must produce
   // identical, collision-free ID counters. Re-run after the merge so the
   // counters also clear the archived ids.
   repairCounters(loaded);
 
-  activeRepository = FileDaoStateRepository.fromLoaded(loaded, raw);
+  activeRepository = FileDaoStateRepository.fromLoaded(loaded, raw, { persistedAuditIds });
   // Disk is now the source of truth for the freshly loaded state; reset the
   // cache so the first subsequent save reflects the real on-disk content.
   resetWriteCache();
