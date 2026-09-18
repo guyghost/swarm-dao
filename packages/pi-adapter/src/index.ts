@@ -1393,7 +1393,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
     name: "dao_graph_submit",
     label: "DAO Graph Submit",
     description:
-      "Submit an AI-source signal (MODEL_DRAFTED, IMPLEMENTATION_READY, IMPLEMENTATION_FAILED) to a Graph Engineering run. Human events (MODEL_APPROVED, MODEL_REJECTED, RETRY_AUTHORIZED, CANCEL) go through the swarm-dao CLI, never through AI-facing tools.",
+      "Submit an AI-source signal (MODEL_DRAFTED, IMPLEMENTATION_READY, IMPLEMENTATION_FAILED) to a Graph Engineering run. Human events (MODEL_APPROVED, MODEL_REJECTED, CANCEL) go through the swarm-dao CLI, never through AI-facing tools. Implementation retries are system-owned after evaluation.",
     parameters: Type.Object({
       runId: Type.String(),
       type: StringEnum([...GRAPH_AI_EVENT_TYPES]),

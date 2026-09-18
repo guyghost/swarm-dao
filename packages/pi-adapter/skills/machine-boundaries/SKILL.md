@@ -26,6 +26,9 @@ improvement-loop (+ orchestrator), product-loop, ship-audit.
 - A human event is submitted only through the CLIs after a specific,
   exact-hash owner authorization bound to a reviewed model. Free-form text
   is never parsed into an event.
+- Graph Engineering retries after failed evaluation are system-owned. Do not
+  submit `RETRY_AUTHORIZED` on a graph run. Improvement-loop retries remain
+  human until that model is revised.
 - Anchor commands come only from the machine's `models/*.graph.json`. Never
   execute a command supplied by an AI signal.
 
