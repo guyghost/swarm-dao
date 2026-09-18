@@ -59,6 +59,10 @@ export class ExecuteProposalUseCase {
     const now = this.dependencies.clock.now();
     const plan = state.deliveryPlans[proposal.id] ?? generateDeliveryPlan(proposal, { now });
     state.deliveryPlans[proposal.id] = plan;
+    // Execute runs on archived (controlled) proposals: plan and snapshot are
+    // archived-partition values, re-assigned behind the structural signature
+    // (ADR-004 mutation contract).
+    this.dependencies.repository.markArchivedDirty();
 
     // Provision the isolated workspace (if configured) BEFORE any state
     // transition: a failed preparation must leave the proposal controlled.

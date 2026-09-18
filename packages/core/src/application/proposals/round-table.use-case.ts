@@ -57,6 +57,7 @@ export class RoundTableUseCase {
     const stagedRepository: DaoStateRepositoryPort = {
       get: () => state,
       persist: async () => undefined,
+      markArchivedDirty: () => undefined,
     };
     const createProposal = new CreateProposalUseCase({
       repository: stagedRepository,
