@@ -85,6 +85,9 @@ function repairState(value: Partial<DAOState>, daoRoot: string): RepairResult {
 export class FileDaoStateRepository implements DaoStateRepositoryPort {
   private readonly writeCache = new Map<string, string>();
   private writeQueue: Promise<void> = Promise.resolve();
+  /** Set when a persist failed after state.json was written, forcing the next
+   *  persist to run the full decision sweep so failed writes are retried. */
+  private decisionsPending = false;
 
   /** Last state.json content this instance read or wrote, for cheap divergence checks. */
   private rawStateOnDisk: string | null;
@@ -183,7 +186,13 @@ export class FileDaoStateRepository implements DaoStateRepositoryPort {
         await this.writeIfChanged(statePath, this.state);
         this.rawStateOnDisk = this.writeCache.get(statePath) ?? null;
         this.seenRevision = this.state.stateRevision;
-        await this.persistDecisions();
+        try {
+          await this.persistDecisions();
+          this.decisionsPending = false;
+        } catch (error) {
+          this.decisionsPending = true;
+          throw error;
+        }
       });
     };
     const queued = this.writeQueue.then(task, task);
@@ -198,6 +207,12 @@ export class FileDaoStateRepository implements DaoStateRepositoryPort {
    */
   private hasPendingWrites(): boolean {
     if (this.writeCache.get(path.join(this.daoRoot, "state.json")) !== formatJson(this.state)) return true;
+    // Decision records are a pure function of state.proposals: when the
+    // serialized state is byte-identical to the last write, the decision
+    // index and per-decision files were written from this exact state and
+    // must match the write cache. Skipping the O(proposals) serialize+compare
+    // sweep removes the dominant cost of a no-op persist on large states.
+    if (!this.decisionsPending) return false;
     const decisions = this.closedDecisions();
     if (this.writeCache.get(path.join(this.daoRoot, "decisions", "index.json")) !== formatJson(decisions)) {
       return true;
@@ -284,7 +299,14 @@ export class FileDaoStateRepository implements DaoStateRepositoryPort {
     const decisionsDir = path.join(this.daoRoot, "decisions");
     await fs.mkdir(decisionsDir, { recursive: true });
     const decisions = this.closedDecisions();
-    await this.writeIfChanged(path.join(decisionsDir, "index.json"), decisions);
+    const indexPath = path.join(decisionsDir, "index.json");
+    // The per-decision files are a pure function of the decisions array that
+    // produced index.json: a serialized index identical to the cached one
+    // means every decision file already matches the cache too. Skip the
+    // per-decision serialize+compare sweep (O(closed proposals)) — after a
+    // mid-sweep failure, decisionsPending forces the full sweep instead.
+    if (!this.decisionsPending && this.writeCache.get(indexPath) === formatJson(decisions)) return;
+    await this.writeIfChanged(indexPath, decisions);
     await Promise.all(
       decisions.map((decision) =>
         this.writeIfChanged(path.join(decisionsDir, `${decision.id.toString().padStart(3, "0")}.json`), decision),

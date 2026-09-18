@@ -2,13 +2,14 @@ import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { FileDaoStateRepository, type InMemoryDaoStateRepository } from "@guyghost/swarm-dao-core";
-import { benchmarkProposal, initializedRepository, initializedState } from "../src/fixtures.js";
+import { benchmarkProposal, deliberatedProposal, initializedRepository, initializedState } from "../src/fixtures.js";
 import type { BenchmarkSuite } from "../src/harness.js";
 
 let workDir: string;
 let memoryRepository: InMemoryDaoStateRepository;
 let fileRepository: FileDaoStateRepository;
 let largeFileRepository: FileDaoStateRepository;
+let closedFileRepository: FileDaoStateRepository;
 
 async function openSeeded(dir: string, proposals: number): Promise<FileDaoStateRepository> {
   const repository = await FileDaoStateRepository.open(dir);
@@ -32,6 +33,12 @@ export const persistenceSuite: BenchmarkSuite = {
     for (let index = 0; index < 100; index++) memoryRepository.get().proposals.push(benchmarkProposal(index + 1));
     fileRepository = await openSeeded(path.join(workDir, "small"), 1);
     largeFileRepository = await openSeeded(path.join(workDir, "large"), 500);
+    // Long-lived DAO state regime: many closed proposals => non-empty decision
+    // sweep on every persist, so no-op persists guard the decision shortcuts.
+    closedFileRepository = await openSeeded(path.join(workDir, "closed"), 2000);
+    const closedState = closedFileRepository.get();
+    for (let index = 0; index < 2000; index++) closedState.proposals[index] = deliberatedProposal(index + 1);
+    await closedFileRepository.persist();
   },
   teardown: async () => {
     await fs.rm(workDir, { recursive: true, force: true });
@@ -63,6 +70,12 @@ export const persistenceSuite: BenchmarkSuite = {
       name: "file persist (unchanged state)",
       run: async () => {
         await largeFileRepository.persist();
+      },
+    },
+    {
+      name: "file persist (unchanged, 2000 closed)",
+      run: async () => {
+        await closedFileRepository.persist();
       },
     },
     {
