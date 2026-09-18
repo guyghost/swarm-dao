@@ -94,7 +94,7 @@ ${briefSection}Evaluate this proposal carefully. Provide your analysis, vote, an
       harness,
       harnessDescription,
       harnessWarning,
-      timeoutMs: 120_000,
+      timeoutMs: 240_000,
     };
   });
 }

@@ -496,6 +496,14 @@ export async function saveState(): Promise<void> {
   await activeRepository.persist();
 }
 
+/** ADR-004 mutation contract: compat helpers below mutate satellite values in
+ *  place (invisible to the archive's structural signature), so they must flag
+ *  the archive dirty before persisting when a partitioned repository is
+ *  active. No-op on repositories that do not partition. */
+function flagArchivedMutation(): void {
+  activeRepository?.markArchivedDirty();
+}
+
 async function persistState(state: DAOState): Promise<void> {
   if (!state.daoRoot) return;
   if (!state.proposals) state.proposals = [];
@@ -848,6 +856,7 @@ export async function initOutcome(proposalId: number): Promise<ProposalOutcome> 
     updatedAt: new Date().toISOString(),
   };
   s.outcomes[proposalId] = outcome;
+  flagArchivedMutation();
   await saveState();
   return outcome;
 }
@@ -858,6 +867,7 @@ export async function addRating(proposalId: number, rating: ProposalOutcome["rat
   const scores = outcome.ratings.map((r) => r.score);
   outcome.overallScore = scores.reduce((a, b) => a + b, 0) / scores.length;
   outcome.updatedAt = new Date().toISOString();
+  flagArchivedMutation();
   await saveState();
 }
 
@@ -865,6 +875,7 @@ export async function addMetric(proposalId: number, metric: ProposalOutcome["met
   const outcome = await initOutcome(proposalId);
   outcome.metrics.push(metric);
   outcome.updatedAt = new Date().toISOString();
+  flagArchivedMutation();
   await saveState();
 }
 

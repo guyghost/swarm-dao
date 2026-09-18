@@ -198,11 +198,20 @@ export class FileDaoStateRepository implements DaoStateRepositoryPort {
       }
     }
     if (rawArchive !== null) {
-      mergeArchive(state, parseArchive(rawArchive));
-      // Counters must account for archived ids too (issue #157): a restored
-      // old state.json next to an existing archive can never reuse ids.
-      repairCounters(state);
+      let archive: ReturnType<typeof parseArchive>;
+      try {
+        archive = parseArchive(rawArchive);
+      } catch (error) {
+        // Same wrapping as state.json: a raw parse error names no file.
+        throw new Error(
+          `Corrupt DAO proposal archive at ${archivePath}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      mergeArchive(state, archive);
     }
+    // Counters must account for archived ids (issue #157): a restored old
+    // state.json next to an existing archive can never reuse ids.
+    repairCounters(state);
     const repository = new FileDaoStateRepository(state, daoRoot, rawState, state.stateRevision);
     repository.lastArchiveSignature = archiveSignature(state);
     repository.archiveOnDiskKnown = rawArchive !== null;

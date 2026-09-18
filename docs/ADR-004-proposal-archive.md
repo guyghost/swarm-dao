@@ -108,15 +108,17 @@ nothing changed" trust no longer covers the archive. Three mechanisms make it
 sound:
 
 1. **Structural signature (automatic).** A cheap O(closed) probe — closed
-   proposal count + max archived id + satellite map key counts — is compared
-   per persist. Closures, and first-time creation of a satellite entry, are
-   caught with zero API change (~0.05 ms at 2000 closed).
-2. **`markArchivedDirty()` on the repository port (explicit).** Use cases that
-   mutate *values inside* archived satellite records (re-rating an existing
-   outcome, replacing an artefact) must call it before `persist()`. Known call
-   sites today (all in `application/` + `delivery/`): `rate-proposal`,
-   `control-proposal`, `execute-proposal`, `delivery/execution.ts`, plus
-   status-transition paths. The port documents the contract.
+   proposal count + max archived id + `id:status` per closed proposal +
+   satellite map key counts — is compared per persist. Closures, status
+   transitions (all flow through `dispatchProposalEvent`), and first-time
+   creation of a satellite entry (e.g. the lazy delivery-plan creation in
+   `delivery/execution.ts`) are caught with zero API change.
+2. **`markArchivedDirty()` on the repository port (explicit).** Mutations that
+   rewrite *values behind* an unchanged signature (re-rating an existing
+   outcome, replacing an artefact) must flag the archive. Wired call sites:
+   the `rate-proposal`, `control-proposal`, and `execute-proposal` use cases,
+   and the compat helpers in `persistence.ts` (`initOutcome`, `addRating`,
+   `addMetric`, `markReviewed`) via `flagArchivedMutation()`.
 3. **No-op inherits today's trust model.** A no-op persist (both checks clean)
    writes nothing — identical semantics to today, where a byte-identical
    `state.json` also skips everything.
