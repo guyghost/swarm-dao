@@ -237,9 +237,12 @@ export class FileDaoStateRepository implements DaoStateRepositoryPort {
       }
     }
     if (rawAudit !== undefined) {
-      const entries = parseAuditJsonl(rawAudit);
+      const { entries, skipped } = parseAuditJsonl(rawAudit);
       mergeAuditEntries(state.auditLog, entries);
       auditIds = new Set(entries.map((entry) => entry.id));
+      if (skipped > 0) {
+        logger.warn(`⚠ Skipped ${skipped} corrupt audit.jsonl line(s) at ${auditPath} (torn tail or damaged entries)`);
+      }
     }
     // Counters must account for archived proposal AND audit-trail ids
     // (issue #157): a restored old state.json can never reuse ids.

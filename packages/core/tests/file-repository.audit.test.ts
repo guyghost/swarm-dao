@@ -2,28 +2,10 @@ import { beforeEach, describe, expect, it } from "bun:test";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import type { AuditEntry, Proposal } from "@guyghost/swarm-dao-core";
+import type { AuditEntry } from "@guyghost/swarm-dao-core";
 import { FileDaoStateRepository } from "@guyghost/swarm-dao-core";
 
 let workDir: string;
-
-function proposal(id: number, status: Proposal["status"]): Proposal {
-  return {
-    id,
-    title: `Proposal #${id}`,
-    type: "product-feature",
-    description: "d",
-    problemStatement: "p",
-    acceptanceCriteria: [],
-    successMetrics: [],
-    rollbackConditions: [],
-    proposedBy: "tester",
-    status,
-    votes: [],
-    agentOutputs: [],
-    createdAt: "2031-01-01T00:00:00.000Z",
-  };
-}
 
 function audit(id: number, action = "vote_cast"): AuditEntry {
   return {

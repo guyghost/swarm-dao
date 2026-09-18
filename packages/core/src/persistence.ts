@@ -452,9 +452,12 @@ export async function loadState(cwd: string, options?: { legacyDirectories?: str
   }
   let persistedAuditIds: Set<number> | undefined;
   if (rawAudit !== undefined) {
-    const entries = parseAuditJsonl(rawAudit);
+    const { entries, skipped } = parseAuditJsonl(rawAudit);
     mergeAuditEntries(loaded.auditLog, entries);
     persistedAuditIds = new Set(entries.map((entry) => entry.id));
+    if (skipped > 0) {
+      logger.warn(`⚠ Skipped ${skipped} corrupt audit.jsonl line(s) at ${auditPath} (torn tail or damaged entries)`);
+    }
   }
 
   // Shared counter repair (issue #157): both load paths must produce

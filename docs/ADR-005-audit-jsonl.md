@@ -33,8 +33,10 @@ append-only:
   state — accepted governance semantics (a recorded action must not vanish);
   the next open dedupes by entry id, so a re-append after recovery is harmless.
 - **Tolerant parsing:** empty lines and corrupt lines (including a torn final
-  line from a mid-append crash) are skipped with a warning; audit entries are
-  deduplicated by id on load.
+  line from a mid-append crash) are skipped and counted; the persistence
+  adapters log a warning when lines were skipped. Audit entries are
+  deduplicated by id on load, and entries without a usable id are treated as
+  corrupt rather than folded into the trail.
 - **Migration:** legacy inline `auditLog` in `state.json` merges into memory at
   open and moves to the JSONL on the first writing persist. Read-only commands
   never write and still see everything.
@@ -43,8 +45,8 @@ append-only:
 
 ## Consequences
 
-- No-op persist becomes truly O(open): measured 1.23 ms → ~0.1 ms in the
-  2000-closed + 5000-audit regime.
+- **Consequences:** no-op persist becomes truly O(open): measured 1.23 ms →
+  0.33 ms in the 2000-closed + 5000-audit regime.
 - Appending an audit entry costs one line-sized append instead of a full
   state rewrite.
 - Old binaries reading a partitioned repo see no audit trail (same version-
