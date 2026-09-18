@@ -35,9 +35,23 @@ export const persistenceSuite: BenchmarkSuite = {
     // Long-lived DAO state regime: many closed proposals => non-empty decision
     // sweep on every persist, so no-op persists guard the decision shortcuts.
     // 20 open proposals keep the touch-open case realistic (ADR-004 criteria).
+    // 5000 audit entries guard the ADR-005 append-only trail (no-op stays
+    // O(open) instead of O(audit)).
     closedFileRepository = await openSeeded(path.join(workDir, "closed"), 2020);
     const closedState = closedFileRepository.get();
     for (let index = 0; index < 2000; index++) closedState.proposals[index] = deliberatedProposal(index + 1);
+    for (let index = 1; index <= 5000; index++) {
+      closedState.auditLog.push({
+        id: index,
+        timestamp: "2031-01-01T00:00:00.000Z",
+        proposalId: (index % 2000) + 1,
+        layer: "governance",
+        action: "vote_cast",
+        actor: `agent-${index % 8}`,
+        details: `Vote recorded on proposal #${(index % 2000) + 1}.`,
+      });
+    }
+    closedState.nextAuditId = 5001;
     await closedFileRepository.persist();
   },
   teardown: async () => {
@@ -84,6 +98,22 @@ export const persistenceSuite: BenchmarkSuite = {
         const state = closedFileRepository.get();
         const open = state.proposals.find((p) => p.status === "open");
         if (open) state.proposals[open.id - 1] = { ...open, title: `Retouched ${Math.random()}` };
+        await closedFileRepository.persist();
+      },
+    },
+    {
+      name: "file persist (append audit, 2000 closed)",
+      run: async () => {
+        const state = closedFileRepository.get();
+        state.auditLog.push({
+          id: state.nextAuditId++,
+          timestamp: "2031-01-01T00:00:00.000Z",
+          proposalId: 1,
+          layer: "governance",
+          action: "vote_cast",
+          actor: "bench",
+          details: "Append-path guard entry.",
+        });
         await closedFileRepository.persist();
       },
     },

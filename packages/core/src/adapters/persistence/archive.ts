@@ -70,6 +70,9 @@ export function partitionState(state: DAOState): { live: DAOState; archive: Arch
   const archivedProposals = state.proposals.filter((proposal) => isArchivedStatus(proposal.status));
   const archivedIds = new Set(archivedProposals.map((proposal) => proposal.id));
   const live = { ...state, proposals: state.proposals.filter((proposal) => !archivedIds.has(proposal.id)) };
+  // ADR-005: the audit trail lives in audit.jsonl — state.json never carries
+  // it anymore (the in-memory state keeps the full merged list).
+  live.auditLog = [];
   const archive: ArchivePartition = {
     version: ARCHIVE_VERSION,
     proposals: archivedProposals,
