@@ -12,7 +12,8 @@ hosts the agent: `pi`, `claude`, `codex`, `copilot`, `opencode`, …) using a **
 (e.g. `z.ai/GLM-5.1`, `gpt-5.4`, `claude-opus-4-6`).
 
 Today the harness is a single global value (`.dao/config.json` → `herdr.kind`) and the model
-follows a fixed resolution chain. This model makes both **per-agent configurable** while
+follows a fixed inheritance chain (pinned in configuration or inherited from the main model —
+ADR-006). This model makes both **per-agent configurable** while
 keeping every decision deterministic, validated, and free of any LLM influence.
 
 ## 2. Why a contract, not a state machine
@@ -92,10 +93,21 @@ over legacy field; `herdr.kind` remains effective when `runtime.defaultHarness` 
 
 ### 4.4 D2 — Model resolution
 
-Unchanged: existing chain in `packages/core/src/intelligence/model.ts`
-(`agent.model` → profile default → parent agent → parent session → `DAOConfig.defaultModel`
-→ host default). The value `"default"` means "host default" and disables explicit flag
-emission (D3 row 3).
+Implemented in `packages/core/src/intelligence/model.ts` (ADR-006 — no DAO-wide
+default model). First match wins:
+
+| # | Source | Nature |
+|---|--------|--------|
+| 1 | `agent.model` (≠ `"inherit"`) | user spec (agent frontmatter) |
+| 2 | `delegationProfile[archetype].model` | user spec (delegated child archetype) |
+| 3 | parent agent's resolved model | inheritance (delegation) |
+| 4 | parent session model | the main model |
+| 5 | host main model (`hostDefaultModel`) | inheritance |
+| 6 | none of the above | sentinel `"default"` |
+
+A model is either pinned explicitly in configuration or inherited from the
+main model; there is no `DAOConfig.defaultModel` layer. The value `"default"`
+means "host decides" and disables explicit flag emission (D3 row 3).
 
 ### 4.5 D3 — Model flag emission (herdr path and rendered instructions)
 
@@ -123,7 +135,7 @@ Config override values must match `^--[a-z][a-z0-9-]*$`; violation → **E5**.
 |------|-----------|------------------|
 | E1 | harness id violates §4.1 | fix `harness` in agent definition or `runtime.defaultHarness` |
 | E2 | no harness resolvable (D1 exhausted) | set `runtime.defaultHarness` or `agent.harness` |
-| E3 | model id violates §4.2 | fix `model` in agent definition or `defaultModel` |
+| E3 | model id violates §4.2 | fix `model` in the agent definition or delegation profile |
 | E4 | model requested for harness with unknown flag | set `runtime.harnessModelFlag[harness]` or drop per-agent model |
 | E5 | `harnessModelFlag` value violates flag syntax | use form `--flag-name` |
 

@@ -64,7 +64,6 @@ describe("config", () => {
     const base: DAOConfig = {
       quorumPercent: 60,
       approvalThreshold: 55,
-      defaultModel: "test/model",
       maxConcurrent: 3,
       riskThreshold: 7,
       requiredGates: [],

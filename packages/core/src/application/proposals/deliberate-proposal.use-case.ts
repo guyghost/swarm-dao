@@ -55,7 +55,7 @@ export class DeliberateProposalUseCase {
       // Everything after the DELIBERATE commit is inside the rollback guard:
       // model resolution, swarm dispatch, delegation drain — any throw here
       // would otherwise strand the proposal in `deliberating` (issue #160).
-      const modelContext = createDispatchModelContext(state.config.defaultModel, this.dependencies.worker, {
+      const modelContext = createDispatchModelContext(this.dependencies.worker, {
         parentSessionModel: command.parentSessionModel,
         hostDefaultModel: command.hostDefaultModel,
       });

@@ -8,9 +8,8 @@ export interface ModelResolutionContext {
   /** Model set on a parent agent (delegation inheritance). */
   parentAgentModel?: string;
   /** Model declared by the delegation profile for the child's archetype. */
-  profileDefaultModel?: string;
+  profileModel?: string;
   parentSessionModel?: string;
-  configDefaultModel: string;
   hostDefaultModel?: string;
 }
 
@@ -27,27 +26,22 @@ function pickModel(...candidates: Array<string | undefined>): string | undefined
  * Resolve the model for a DAO agent using the inheritance chain:
  *
  *     agent.model
- *       → profile.defaultModel      (delegation profile, child archetype)
- *       → parentAgent.resolvedModel (delegation parent — default behaviour)
- *       → parentSessionModel
- *       → config.defaultModel
- *       → host default
+ *       → profile.model             (delegation profile, child archetype — user spec)
+ *       → parentAgent.resolvedModel (delegation parent)
+ *       → parentSessionModel        (the main model)
+ *       → host main model
+ *       → "default" sentinel (host decides; no flag emitted, D3 row 3)
  *
- * For a delegated child, `agent.model` carries the child's `DelegationSpec.model`
- * (where `"inherit"` / omitted ⇒ fall through to the parent). The chain is
- * strictly additive: every layer may only refine, never branch.
+ * There is no DAO-wide default model (ADR-006): a model is either pinned
+ * explicitly in configuration (agent frontmatter `model:`, delegation-profile
+ * `model:`) or inherited from the main model. The chain is strictly additive:
+ * every layer may only refine, never branch.
  */
 export function resolveAgentModel(agent: DAOAgent, ctx: ModelResolutionContext): string {
   const childOverride = agent.model && agent.model !== "inherit" ? agent.model : undefined;
   return (
-    pickModel(
-      childOverride,
-      ctx.profileDefaultModel,
-      ctx.parentAgentModel,
-      ctx.parentSessionModel,
-      ctx.configDefaultModel,
-      ctx.hostDefaultModel,
-    ) ?? "default"
+    pickModel(childOverride, ctx.profileModel, ctx.parentAgentModel, ctx.parentSessionModel, ctx.hostDefaultModel) ??
+    "default"
   );
 }
 
@@ -56,8 +50,8 @@ export function describeModelResolution(agent: DAOAgent, resolved: string, ctx: 
   if (childOverride && resolved === childOverride) {
     return `${resolved} (agent override)`;
   }
-  if (ctx.profileDefaultModel && resolved === ctx.profileDefaultModel) {
-    return `${resolved} (delegation profile default)`;
+  if (ctx.profileModel && resolved === ctx.profileModel) {
+    return `${resolved} (delegation profile model)`;
   }
   if (ctx.parentAgentModel && resolved === ctx.parentAgentModel) {
     return `${resolved} (inherited from parent agent)`;
@@ -65,50 +59,39 @@ export function describeModelResolution(agent: DAOAgent, resolved: string, ctx: 
   if (ctx.parentSessionModel && resolved === ctx.parentSessionModel) {
     return `${resolved} (inherited from parent session)`;
   }
-  if (resolved === ctx.configDefaultModel) {
-    return `${resolved} (DAO default)`;
-  }
   if (ctx.hostDefaultModel && resolved === ctx.hostDefaultModel) {
-    return `${resolved} (host default)`;
+    return `${resolved} (host main model)`;
   }
   return resolved;
 }
 
-export function buildModelResolutionContext(
-  configDefaultModel: string,
-  options?: {
-    parentAgentModel?: string;
-    parentSessionModel?: string;
-    hostDefaultModel?: string;
-  },
-): ModelResolutionContext {
+export function buildModelResolutionContext(options?: {
+  parentAgentModel?: string;
+  parentSessionModel?: string;
+  hostDefaultModel?: string;
+}): ModelResolutionContext {
   return {
     parentAgentModel: options?.parentAgentModel,
     parentSessionModel: options?.parentSessionModel,
-    configDefaultModel,
     hostDefaultModel: options?.hostDefaultModel,
   };
 }
 
 /**
- * Build a resolution context for a delegated child. `profileDefaultModel` is
- * sourced from the DAO's delegation profile for the child's archetype; the
- * parent agent's resolved model is the default the child inherits.
+ * Build a resolution context for a delegated child. `profileModel` is sourced
+ * from the DAO's delegation profile for the child's archetype (an explicit
+ * user spec); without it the child inherits the parent agent's resolved model.
  */
-export function buildChildModelResolutionContext(
-  configDefaultModel: string,
-  options: {
-    parentAgentModel: string;
-    profile?: DelegationProfileEntry;
-    parentSessionModel?: string;
-    hostDefaultModel?: string;
-  },
-): ModelResolutionContext {
+export function buildChildModelResolutionContext(options: {
+  parentAgentModel: string;
+  profile?: DelegationProfileEntry;
+  parentSessionModel?: string;
+  hostDefaultModel?: string;
+}): ModelResolutionContext {
   return {
     parentAgentModel: options.parentAgentModel,
-    profileDefaultModel: options.profile?.defaultModel,
+    profileModel: options.profile?.model,
     parentSessionModel: options.parentSessionModel,
-    configDefaultModel,
     hostDefaultModel: options.hostDefaultModel,
   };
 }

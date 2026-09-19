@@ -373,10 +373,10 @@ describe("opencode-adapter", () => {
       );
 
       expect(result).toContain("Swarm Dispatch Plan");
-      // Agents carry no per-agent model anymore: the plan resolves the DAO
-      // config default and labels it as such.
-      expect(result).toContain('model="z.ai/GLM-5.1"');
-      expect(result).toContain("DAO default");
+      // No default-model layer (ADR-006): with no agent override, no session
+      // model, and no host model, the plan resolves to the "default" sentinel
+      // — the host decides, no flag is emitted (D3 row 3).
+      expect(result).toContain('model="default"');
 
       const state = getState();
       expect(state.proposals[0]?.status).toBe("deliberating");

@@ -35,7 +35,7 @@ const briefAgent: DAOAgent = {
 
 describe("intelligence/swarm.ts project brief injection", () => {
   it("injects the shared project brief into every participant's prompt", () => {
-    const modelContext = buildModelResolutionContext("dao-default", {});
+    const modelContext = buildModelResolutionContext();
     const withBrief = buildDispatchInstructions(briefProposal, [briefAgent], modelContext, {
       projectBrief: "SCOUT-BRIEF-MARKER",
     });
@@ -79,7 +79,7 @@ describe("intelligence/swarm.ts", () => {
       },
     ];
 
-    const modelContext = buildModelResolutionContext("dao-default", {
+    const modelContext = buildModelResolutionContext({
       parentSessionModel: "parent-model",
     });
     const instructions = buildDispatchInstructions(proposal, agents, modelContext);
@@ -127,7 +127,7 @@ describe("intelligence/swarm.ts", () => {
       },
     } as unknown as HostAdapter;
 
-    const modelContext = buildModelResolutionContext("dao-default", {});
+    const modelContext = buildModelResolutionContext();
     const outputs = await dispatchSwarm(proposal, agents, adapter, 2, modelContext);
 
     // Every agent was resolved from the lookup map and dispatched exactly once.
@@ -230,7 +230,7 @@ describe("intelligence/swarm.ts harness runtime (models/agent-runtime.md)", () =
       { ...briefAgent, id: "architect", harness: "codex", model: "gpt-5.4" },
       { ...briefAgent, id: "critic", harness: "claude" },
     ];
-    const modelContext = buildModelResolutionContext("dao-default", {});
+    const modelContext = buildModelResolutionContext();
     const runtimeContext = buildRuntimeResolutionContext({
       projectRuntime: { defaultHarness: "claude" },
       hostDefaultHarness: "pi",
@@ -248,7 +248,7 @@ describe("intelligence/swarm.ts harness runtime (models/agent-runtime.md)", () =
 
   it("renders a warning line instead of throwing when runtime resolution fails (I1 totality)", () => {
     const agents: DAOAgent[] = [{ ...briefAgent, id: "critic", harness: "BAD ID" }];
-    const modelContext = buildModelResolutionContext("dao-default", {});
+    const modelContext = buildModelResolutionContext();
     const instructions = buildDispatchInstructions(harnessProposal, agents, modelContext, {
       runtime: buildRuntimeResolutionContext({}),
     });
@@ -259,7 +259,7 @@ describe("intelligence/swarm.ts harness runtime (models/agent-runtime.md)", () =
   });
 
   it("omits the Harness line entirely when no runtime context is provided", () => {
-    const modelContext = buildModelResolutionContext("dao-default", {});
+    const modelContext = buildModelResolutionContext();
     const instructions = buildDispatchInstructions(harnessProposal, [briefAgent], modelContext);
     const plan = formatDispatchPlan(harnessProposal, instructions);
     expect(plan).not.toContain("Harness:");
@@ -289,7 +289,7 @@ describe("intelligence/swarm.ts harness runtime (models/agent-runtime.md)", () =
       agents,
       fakeHost,
       4,
-      buildModelResolutionContext("dao-default", {}),
+      buildModelResolutionContext(),
       undefined,
       undefined,
       {
@@ -317,7 +317,7 @@ describe("intelligence/swarm.ts harness runtime (models/agent-runtime.md)", () =
       },
     };
     const agents: DAOAgent[] = [{ ...briefAgent, id: "critic", harness: "claude" }];
-    await dispatchSwarm(harnessProposal, agents, fakeHost, 4, buildModelResolutionContext("dao-default", {}));
+    await dispatchSwarm(harnessProposal, agents, fakeHost, 4, buildModelResolutionContext());
     expect(spawnCalls[0]?.harness).toBe("claude");
   });
 });

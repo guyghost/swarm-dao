@@ -364,9 +364,9 @@ export function __resetAgentDefinitionCache(): void {
 
 /**
  * Agents carry NO hardcoded model: the model resolves at dispatch time from
- * the agent override (frontmatter `model`), then the DAO config default
- * (`DAOConfig.defaultModel`), then the parent session / host default
- * (see `intelligence/model.ts`).
+ * the agent override (frontmatter `model`) or the delegation-profile `model`,
+ * otherwise it is inherited from the parent agent, the parent session, or the
+ * host main model (see `intelligence/model.ts` and docs/ADR-006).
  */
 
 /** Raw (uncomposed) merge result: role-level agents plus the project charter. */

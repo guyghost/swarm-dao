@@ -48,14 +48,13 @@ function makeConfig(overrides: Partial<DAOConfig> = {}): DAOConfig {
   return {
     quorumPercent: 60,
     approvalThreshold: 55,
-    defaultModel: "dao-default",
     maxConcurrent: 4,
     riskThreshold: 7,
     requiredGates: [],
     typeQuorum: {},
     quorumFloor: 60,
     delegation: { enabled: true, maxDepth: 1, maxChildrenPerParent: 3, foldTimeoutMs: 30_000 },
-    delegationProfile: { auditor: { defaultModel: "auditor-llm", promptId: "audit" } },
+    delegationProfile: { auditor: { model: "auditor-llm", promptId: "audit" } },
     ...overrides,
   };
 }
@@ -205,7 +204,7 @@ describe("delegation pure helpers", () => {
   });
 
   it("resolveDelegationProfile returns the registered entry", () => {
-    const profiles = { auditor: { promptId: "audit", defaultModel: "a-llm" } };
+    const profiles = { auditor: { promptId: "audit", model: "a-llm" } };
     expect(resolveDelegationProfile(profiles, "auditor")?.promptId).toBe("audit");
     expect(resolveDelegationProfile(profiles, "missing")).toBeUndefined();
   });
@@ -492,7 +491,7 @@ describe("model resolution — delegation inheritance", () => {
       archetype: "auditor",
       model: "inherit",
     });
-    const ctx = buildChildModelResolutionContext("dao-default", {
+    const ctx = buildChildModelResolutionContext({
       parentAgentModel: "parent-llm",
       profile: resolveDelegationProfile({ auditor: { promptId: "a" } }, "auditor"),
     });
@@ -505,21 +504,21 @@ describe("model resolution — delegation inheritance", () => {
       archetype: "auditor",
       model: "gpt-5",
     });
-    const ctx = buildChildModelResolutionContext("dao-default", {
+    const ctx = buildChildModelResolutionContext({
       parentAgentModel: "parent-llm",
-      profile: { promptId: "a", defaultModel: "auditor-llm" },
+      profile: { promptId: "a", model: "auditor-llm" },
     });
     expect(resolveAgentModel(child, ctx)).toBe("gpt-5");
   });
 
-  it("profile default sits between override and parent", () => {
+  it("profile model sits between override and parent", () => {
     const child = buildChildAgent(makeParent({ model: "parent-llm" }), {
       facet: "security",
       archetype: "auditor",
     });
-    const ctx = buildChildModelResolutionContext("dao-default", {
+    const ctx = buildChildModelResolutionContext({
       parentAgentModel: "parent-llm",
-      profile: { promptId: "a", defaultModel: "auditor-llm" },
+      profile: { promptId: "a", model: "auditor-llm" },
     });
     expect(resolveAgentModel(child, ctx)).toBe("auditor-llm");
   });
@@ -529,25 +528,34 @@ describe("model resolution — delegation inheritance", () => {
       facet: "security",
       archetype: "auditor",
     });
-    const ctx = buildChildModelResolutionContext("dao-default", {
+    const ctx = buildChildModelResolutionContext({
       parentAgentModel: "parent-llm",
       parentSessionModel: "session-llm",
     });
     expect(resolveAgentModel(child, ctx)).toBe("parent-llm");
   });
 
-  it("falls to config default when nothing else resolves", () => {
+  it("falls to host main model when nothing else resolves", () => {
     const child = buildChildAgent(makeParent({ model: undefined }), {
       facet: "security",
       archetype: "auditor",
     });
-    const ctx = buildChildModelResolutionContext("dao-default", { parentAgentModel: "" as string });
-    // parentAgentModel "" is falsy → next non-empty candidate is configDefaultModel
-    expect(resolveAgentModel(child, ctx)).toBe("dao-default");
+    const ctx = buildChildModelResolutionContext({ parentAgentModel: "" as string, hostDefaultModel: "host-llm" });
+    // parentAgentModel "" is falsy → next non-empty candidate is the host main model
+    expect(resolveAgentModel(child, ctx)).toBe("host-llm");
+  });
+
+  it('resolves to the "default" sentinel when nothing at all resolves (host decides)', () => {
+    const child = buildChildAgent(makeParent({ model: undefined }), {
+      facet: "security",
+      archetype: "auditor",
+    });
+    const ctx = buildChildModelResolutionContext({ parentAgentModel: "" as string });
+    expect(resolveAgentModel(child, ctx)).toBe("default");
   });
 
   it("describeModelResolution labels the chosen layer", () => {
-    const ctx = buildModelResolutionContext("dao-default", { parentAgentModel: "parent-llm" });
+    const ctx = buildModelResolutionContext({ parentAgentModel: "parent-llm" });
     // Child has no own model ⇒ resolved value is inherited from parentAgentModel.
     expect(describeModelResolution(makeParent({ model: undefined }), "parent-llm", ctx)).toMatch(
       /inherited from parent agent/,
@@ -570,7 +578,7 @@ describe("runDelegations orchestrator", () => {
       proposal: makeProposal(),
       adapter: fakeAdapter("audit findings"),
       config: makeConfig(),
-      parentModelContext: buildModelResolutionContext("dao-default", { parentAgentModel: "parent-llm" }),
+      parentModelContext: buildModelResolutionContext({ parentAgentModel: "parent-llm" }),
     });
     expect(result.delegated).toBe(true);
     expect(result.requests).toHaveLength(1);
@@ -590,7 +598,7 @@ describe("runDelegations orchestrator", () => {
       config: makeConfig({
         delegation: { enabled: false, maxDepth: 1, maxChildrenPerParent: 3, foldTimeoutMs: 30_000 },
       }),
-      parentModelContext: buildModelResolutionContext("dao-default"),
+      parentModelContext: buildModelResolutionContext(),
     });
     expect(result.delegated).toBe(false);
     expect(result.coordinators).toHaveLength(0);
@@ -604,7 +612,7 @@ describe("runDelegations orchestrator", () => {
       proposal: makeProposal(),
       adapter: fakeAdapter("x"),
       config: makeConfig(),
-      parentModelContext: buildModelResolutionContext("dao-default"),
+      parentModelContext: buildModelResolutionContext(),
     });
     expect(result.delegated).toBe(false);
     expect(result.requests).toHaveLength(0);
@@ -620,7 +628,7 @@ describe("runDelegations orchestrator", () => {
       proposal: makeProposal(),
       adapter: fakeAdapter("x"),
       config: makeConfig(),
-      parentModelContext: buildModelResolutionContext("dao-default"),
+      parentModelContext: buildModelResolutionContext(),
     });
     expect(result.delegated).toBe(false);
     expect(result.requests[0].status).toBe("blocked");
@@ -635,7 +643,7 @@ describe("runDelegations orchestrator", () => {
       proposal: makeProposal(),
       adapter: fakeAdapter("boom", "child exploded"),
       config: makeConfig(),
-      parentModelContext: buildModelResolutionContext("dao-default"),
+      parentModelContext: buildModelResolutionContext(),
     });
     expect(result.delegated).toBe(false);
     expect(result.requests[0].status).toBe("failed");
@@ -660,7 +668,7 @@ describe("runDelegations orchestrator", () => {
       config: makeConfig({
         delegation: { enabled: true, maxDepth: 1, maxChildrenPerParent: 1, foldTimeoutMs: 30_000 },
       }),
-      parentModelContext: buildModelResolutionContext("dao-default"),
+      parentModelContext: buildModelResolutionContext(),
     });
     // runDelegations awaits each child sequentially, so with the coordinator
     // releasing slots on REQUEST_RESOLVED in `open`, both requests complete and

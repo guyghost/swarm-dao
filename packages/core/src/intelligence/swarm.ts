@@ -137,11 +137,10 @@ After collecting all outputs, call \`dao_record_outputs\` with the collected res
 }
 
 export function createDispatchModelContext(
-  configDefaultModel: string,
   adapter: AgentWorkerPort,
   options?: { hostDefaultModel?: string; parentSessionModel?: string },
 ): ModelResolutionContext {
-  return buildModelResolutionContext(configDefaultModel, {
+  return buildModelResolutionContext({
     parentSessionModel: options?.parentSessionModel ?? adapter.getSessionModel?.(),
     hostDefaultModel: options?.hostDefaultModel,
   });
