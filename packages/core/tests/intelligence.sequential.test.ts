@@ -126,7 +126,7 @@ describe("dispatchSequentialSwarm", () => {
       proposal(),
       [agent("first", "First"), agent("second", "Second")],
       recordingWorker(calls),
-      createDispatchModelContext("test-model", recordingWorker([])),
+      createDispatchModelContext(recordingWorker([])),
     );
 
     expect(calls.map((call) => call.agentId)).toEqual(["first", "second"]);
@@ -162,7 +162,7 @@ describe("dispatchSequentialSwarm", () => {
       proposal(),
       [agent("boom", "Boom"), agent("after", "After")],
       worker,
-      createDispatchModelContext("test-model", worker),
+      createDispatchModelContext(worker),
     );
     expect(outputs).toHaveLength(2);
     expect(outputs[0]?.error).toBe("spawn failed");
