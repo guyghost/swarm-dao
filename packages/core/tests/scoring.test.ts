@@ -71,8 +71,20 @@ describe("governance/scoring.ts", () => {
     //            = 2.1 + 1.2 + 0.75 + 1.5 + 1.275 = 6.825 -> round(68.25)/10 = 6.8
     // riskZone   : 6.8 >= 4.0 -> "orange"
     const result = calculateCompositeScore([
-      { content: "userImpact: 8 businessImpact: 7 effort: 4 securityRisk: 3 confidence: 9" },
-      { content: "userImpact: 6 businessImpact: 5 effort: 6 securityRisk: 2 confidence: 8" },
+      {
+        agentId: "a",
+        agentName: "A",
+        role: "r",
+        content: "userImpact: 8 businessImpact: 7 effort: 4 securityRisk: 3 confidence: 9",
+        durationMs: 1,
+      },
+      {
+        agentId: "b",
+        agentName: "B",
+        role: "r",
+        content: "userImpact: 6 businessImpact: 5 effort: 6 securityRisk: 2 confidence: 8",
+        durationMs: 1,
+      },
     ]);
     expect(result.axes).toEqual({ userImpact: 7, businessImpact: 6, effort: 5, securityRisk: 2.5, confidence: 8.5 });
     expect(result.weighted).toBe(6.8);

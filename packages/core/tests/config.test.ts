@@ -68,14 +68,14 @@ describe("config", () => {
       riskThreshold: 7,
       requiredGates: [],
       typeQuorum: {
-        "product-feature": { quorumPercent: 60, approvalThreshold: 55 },
-        "security-change": { quorumPercent: 80, approvalThreshold: 70 },
+        "product-feature": { quorumPercent: 60, approvalPercent: 55, description: "pf" },
+        "security-change": { quorumPercent: 80, approvalPercent: 70, description: "sc" },
       },
       quorumFloor: 40,
     };
     const merged = mergeConfig(base, {
       typeQuorum: {
-        "product-feature": { quorumPercent: 70, approvalThreshold: 55 },
+        "product-feature": { quorumPercent: 70, approvalPercent: 55, description: "pf" },
       },
     });
     expect(merged.typeQuorum["product-feature"]?.quorumPercent).toBe(70);
@@ -181,9 +181,10 @@ describe("config runtime + agentCommands validation (models/agent-runtime.md §8
     const daoRoot = await fs.mkdtemp(path.join(os.tmpdir(), "swarm-config-runtime-"));
     try {
       await saveConfig(daoRoot, {
+        mode: "opt-in",
         runtime: { defaultHarness: "codex", harnessModelFlag: { grok: "--model" } },
         tmux: { command: "echo run", agentCommands: { critic: "codex exec" } },
-      } as Partial<DAOConfig>);
+      });
       const loaded = await loadConfig(daoRoot);
       expect(loaded.runtime).toEqual({ defaultHarness: "codex", harnessModelFlag: { grok: "--model" } });
       expect(loaded.tmux?.agentCommands).toEqual({ critic: "codex exec" });

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from "bun:test";
+import type { Proposal } from "@guyghost/swarm-dao-core";
 import {
   createInitialState,
   executeProposal,
@@ -60,7 +61,7 @@ describe("delivery/execution", () => {
   });
 
   it("validates proposal quality", () => {
-    const proposal = {
+    const proposal: Proposal = {
       id: 1,
       title: "Test",
       type: "product-feature" as const,

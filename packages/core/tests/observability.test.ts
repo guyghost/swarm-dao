@@ -171,7 +171,7 @@ describe("observability/alerts", () => {
 
     const newAlerts = evaluateRules();
     expect(newAlerts.length).toBe(1);
-    expect(newAlerts[0].severity).toBe("critical");
+    expect(newAlerts[0]?.severity).toBe("critical");
   });
 
   it("resolves alerts", () => {

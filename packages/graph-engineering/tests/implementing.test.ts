@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { CLASSIFIER_CHARTER, DEFAULT_ATTEMPT_STATE } from "@guyghost/swarm-dao-core";
+import { CLASSIFIER_CHARTER, DEFAULT_ATTEMPT_STATE, type ToolEvidence } from "@guyghost/swarm-dao-core";
 import {
   composeImplementerPrompt,
   extractLastJsonObject,
@@ -87,7 +87,7 @@ async function reachImplementing(root: string, runId: string) {
 
 const scriptedPorts = (
   transcripts: string[],
-  tools = { tests: "passed", types: "passed", lint: "not_run" } as const,
+  tools: ToolEvidence = { tests: "passed", types: "passed", lint: "not_run" },
 ) => {
   const prompts: string[] = [];
   const ports: ImplementingPorts = {

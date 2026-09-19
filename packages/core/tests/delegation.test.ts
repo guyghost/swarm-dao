@@ -82,7 +82,7 @@ function fakeAdapter(childContent: string, error?: string): HostAdapter {
     hostId: "fake",
     spawnAgent: async () => outputFor("child", childContent, error),
     spawnAgents: async () => [],
-  } as HostAdapter;
+  } as unknown as HostAdapter;
 }
 
 // ── Pure helpers ─────────────────────────────────────────────
@@ -582,7 +582,7 @@ describe("runDelegations orchestrator", () => {
     });
     expect(result.delegated).toBe(true);
     expect(result.requests).toHaveLength(1);
-    expect(result.requests[0].status).toBe("delegated");
+    expect(result.requests[0]?.status).toBe("delegated");
     expect(result.foldedContent).toMatch(/## Delegated Facets/);
     expect(result.foldedContent).toMatch(/audit findings/);
     // INV-6: the ## Vote section is preserved verbatim.
@@ -631,7 +631,7 @@ describe("runDelegations orchestrator", () => {
       parentModelContext: buildModelResolutionContext(),
     });
     expect(result.delegated).toBe(false);
-    expect(result.requests[0].status).toBe("blocked");
+    expect(result.requests[0]?.status).toBe("blocked");
   });
 
   it("child error ⇒ request failed", async () => {
@@ -646,7 +646,7 @@ describe("runDelegations orchestrator", () => {
       parentModelContext: buildModelResolutionContext(),
     });
     expect(result.delegated).toBe(false);
-    expect(result.requests[0].status).toBe("failed");
+    expect(result.requests[0]?.status).toBe("failed");
   });
 
   it("sequential delegations with maxChildren=1 both complete; slots release between requests", async () => {
@@ -675,8 +675,8 @@ describe("runDelegations orchestrator", () => {
     // the in-flight counter cycles back to zero instead of accumulating.
     expect(result.requests).toHaveLength(2);
     expect(result.requests.every((r) => r.status === "delegated")).toBe(true);
-    expect(result.coordinators[0].activeRequests).toBe(0);
-    expect(result.coordinators[0].status).toBe("open");
+    expect(result.coordinators[0]?.activeRequests).toBe(0);
+    expect(result.coordinators[0]?.status).toBe("open");
   });
 });
 

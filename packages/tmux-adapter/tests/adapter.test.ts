@@ -122,10 +122,10 @@ describe("tmux host adapter", () => {
     // Stale-name purge before creation, then cleanup after harvest.
     const newSessionIndex = fake.calls.findIndex((c) => line(c).includes("tmux new-session"));
     expect(kill.length).toBe(2);
-    const firstKill = kill[0] ?? { command: "" };
-    const secondKill = kill[1] ?? { command: "" };
+    const firstKill = kill[0] ?? { argv: [] };
+    const secondKill = kill[1] ?? { argv: [] };
     expect(fake.calls.indexOf(firstKill)).toBeLessThan(newSessionIndex);
-    expect(fake.calls.indexOf(secondKill)).toBeGreaterThan(fake.calls.indexOf(capture ?? { command: "" }));
+    expect(fake.calls.indexOf(secondKill)).toBeGreaterThan(fake.calls.indexOf(capture ?? { argv: [] }));
 
     const prompt = await fs.readFile(path.join(workDir, ".dao/tmux/1/critic/prompt.md"), "utf8");
     expect(prompt).toBe("PROMPT-critic");
@@ -218,8 +218,8 @@ describe("tmux host adapter", () => {
   test("the per-call timeoutMs overrides the adapter default", async () => {
     const calls: Call[] = [];
     const runner = {
-      exec: async (command: string, options?: { cwd?: string }) => {
-        calls.push({ command, options });
+      exec: async (argv: readonly string[], options?: { cwd?: string }) => {
+        calls.push({ argv: [...argv], options });
         return { stdout: "", stderr: "", exitCode: 0 };
       },
     };
@@ -263,7 +263,7 @@ describe("tmux host adapter", () => {
     // Only the pre-creation purge: the pane idles so the operator can inspect
     // its scrollback after harvest.
     expect(kills).toHaveLength(1);
-    expect(fake.calls.indexOf(kills[0] ?? { command: "" })).toBeLessThan(newSessionIndex);
+    expect(fake.calls.indexOf(kills[0] ?? { argv: [] })).toBeLessThan(newSessionIndex);
     expect(line(fake.calls[newSessionIndex])).toContain("while :");
   });
 

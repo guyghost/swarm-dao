@@ -27,7 +27,7 @@ type Call = { argv: string[]; options?: { cwd?: string } };
 
 /** Shell-free assertions helper: the joined form is for `toContain` checks only —
  * the adapter never builds a shell line (argv elements stay verbatim). */
-const line = (call: Call): string => call.argv.join(" ");
+const line = (call: Call | undefined): string => call?.argv.join(" ") ?? "";
 type Response = { stdout?: string; stderr?: string; exitCode: number };
 
 const WORKSPACE_CREATED = JSON.stringify({
@@ -611,7 +611,7 @@ describe("child workspace linkage (parent herdr session)", () => {
     });
     expect(result).toEqual({ ok: true, paneId: "w3:p1", workspaceId: "w3" });
     expect(fake.calls).toHaveLength(1);
-    const argv = fake.calls[0].argv;
+    const argv = fake.calls[0]?.argv ?? [];
     expect(argv.slice(0, 3)).toEqual(["herdr", "worktree", "open"]);
     expect(argv).toContain("--workspace");
     expect(argv[argv.indexOf("--workspace") + 1]).toBe("wP");
@@ -649,7 +649,7 @@ describe("child workspace linkage (parent herdr session)", () => {
     });
     expect(result).toEqual({ ok: true, paneId: "w9:p1", workspaceId: "w9" });
     expect(fake.calls.map((call) => call.argv[2])).toEqual(["create", "get", "report-metadata"]);
-    const metadata = fake.calls[2].argv;
+    const metadata = fake.calls[2]?.argv ?? [];
     expect(metadata.slice(0, 3)).toEqual(["herdr", "workspace", "report-metadata"]);
     expect(metadata[3]).toBe("w9");
     expect(metadata).toContain("--source");

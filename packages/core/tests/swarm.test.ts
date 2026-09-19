@@ -270,12 +270,29 @@ describe("intelligence/swarm.ts harness runtime (models/agent-runtime.md)", () =
     const fakeHost: HostAdapter = {
       hostId: "herdr",
       getSessionModel: () => undefined,
+      spawnAgents: async ({ agents }) =>
+        agents.map((agent) => ({
+          agentId: agent.id,
+          agentName: agent.name,
+          role: agent.role,
+          content: "ok",
+          durationMs: 1,
+        })),
+      log: async () => undefined,
+      getWorkingDirectory: () => process.cwd(),
+      readFile: async () => "",
+      writeFile: async () => undefined,
+      exec: async () => ({ stdout: "", stderr: "", exitCode: 0 }),
+      hasCapability: () => false,
       spawnAgent: async (params) => {
         spawnCalls.push({ ...params });
         return {
           agentId: params.agent.id,
+          agentName: params.agent.name,
+          role: params.agent.role,
           content: "ok",
           model: "test",
+          durationMs: 1,
           error: undefined,
         };
       },
@@ -311,9 +328,30 @@ describe("intelligence/swarm.ts harness runtime (models/agent-runtime.md)", () =
     const fakeHost: HostAdapter = {
       hostId: "herdr",
       getSessionModel: () => undefined,
+      spawnAgents: async ({ agents }) =>
+        agents.map((agent) => ({
+          agentId: agent.id,
+          agentName: agent.name,
+          role: agent.role,
+          content: "ok",
+          durationMs: 1,
+        })),
+      log: async () => undefined,
+      getWorkingDirectory: () => process.cwd(),
+      readFile: async () => "",
+      writeFile: async () => undefined,
+      exec: async () => ({ stdout: "", stderr: "", exitCode: 0 }),
+      hasCapability: () => false,
       spawnAgent: async (params) => {
         spawnCalls.push({ ...params });
-        return { agentId: params.agent.id, content: "ok", model: "test" };
+        return {
+          agentId: params.agent.id,
+          agentName: params.agent.name,
+          role: params.agent.role,
+          content: "ok",
+          model: "test",
+          durationMs: 1,
+        };
       },
     };
     const agents: DAOAgent[] = [{ ...briefAgent, id: "critic", harness: "claude" }];

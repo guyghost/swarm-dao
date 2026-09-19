@@ -119,7 +119,7 @@ describe("product-loop — architectural regression invariants", () => {
     actor.send({ type: "PROPOSAL_DRAFTED", source: "ai", draft: draft() });
     // The four control events are tool/system-only; AI-sourced copies are ignored.
     actor.send({ type: "OPEN_PROPOSITION", source: "ai" });
-    actor.send({ type: "QUALIFICATION_RUN", source: "ai" });
+    actor.send({ type: "QUALIFICATION_RUN", source: "ai" } as never);
     actor.send({ type: "VOTE_EVALUATE", source: "ai" });
     actor.send({ type: "VERIFY_EVALUATE", source: "ai" });
     expect(actor.getSnapshot().value).toBe("exploration");

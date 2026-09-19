@@ -177,6 +177,7 @@ describe("attention: presentation", () => {
         runId: "g-2",
         state: "awaitingApproval",
         action: "Approve or reject the exact model hash",
+        command: null,
         detail: "h2",
       },
       {
@@ -184,6 +185,7 @@ describe("attention: presentation", () => {
         runId: "p-1",
         state: "review",
         action: "Resolve the review",
+        command: null,
         detail: null,
       },
     ]);

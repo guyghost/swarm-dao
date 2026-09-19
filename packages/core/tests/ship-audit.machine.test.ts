@@ -64,7 +64,7 @@ describe("ship-audit machine — permissions and immutability", () => {
   test("P1: SHIP_REQUESTED from ai or human is rejected", () => {
     for (const source of ["ai", "human"] as const) {
       const actor = createShipAuditActor(1);
-      actor.send({ ...systemRequest("fp"), source });
+      actor.send({ ...systemRequest("fp"), source } as never);
       expect(actor.getSnapshot().value).toBe("fresh");
     }
   });
@@ -73,9 +73,9 @@ describe("ship-audit machine — permissions and immutability", () => {
     for (const source of ["ai", "system"] as const) {
       const actor = createShipAuditActor(1);
       actor.send(systemRequest("fp"));
-      actor.send({ type: "FORCE_OVERRIDE", source, reason: "x", occurredAt: "2031-01-01T00:00:00.000Z" });
+      actor.send({ type: "FORCE_OVERRIDE", source, reason: "x", occurredAt: "2031-01-01T00:00:00.000Z" } as never);
       expect(actor.getSnapshot().value).toBe("challenged");
-      actor.send({ type: "CANCEL", source, reason: "x", occurredAt: "2031-01-01T00:00:00.000Z" });
+      actor.send({ type: "CANCEL", source, reason: "x", occurredAt: "2031-01-01T00:00:00.000Z" } as never);
       expect(actor.getSnapshot().value).toBe("challenged");
     }
   });

@@ -117,6 +117,7 @@ describe("dispatchSequentialSwarm", () => {
           durationMs: 1,
         };
       },
+      spawnAgents: async () => [],
     };
   }
 
@@ -145,6 +146,7 @@ describe("dispatchSequentialSwarm", () => {
   test("a failed spawn records an error output and later agents still run", async () => {
     const calls: Array<{ agentId: string; prompt: string }> = [];
     const worker: AgentWorkerPort = {
+      spawnAgents: async () => [],
       spawnAgent: async ({ agent, systemPrompt }) => {
         calls.push({ agentId: agent.id, prompt: systemPrompt });
         if (agent.id === "boom") throw new Error("spawn failed");

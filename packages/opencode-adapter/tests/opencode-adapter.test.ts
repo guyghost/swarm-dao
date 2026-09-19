@@ -65,7 +65,9 @@ async function setupPlugin(tmpDir: string) {
   const ctx = createMockCtx(tmpDir);
   const { OpenCodeDAO } = await import("@guyghost/swarm-dao-opencode-adapter");
   const plugin = await OpenCodeDAO(ctx);
-  return { plugin, ctx };
+  // The plugin always defines `tool`; the SDK type only marks it optional.
+  type Plugin = typeof plugin & { tool: NonNullable<typeof plugin.tool> };
+  return { plugin: plugin as Plugin, ctx };
 }
 
 describe("opencode-adapter", () => {

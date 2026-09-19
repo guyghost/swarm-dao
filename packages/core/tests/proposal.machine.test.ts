@@ -126,7 +126,7 @@ describe("proposal state machine — nominal transitions", () => {
       "2030-01-01T10:03:00.000Z",
     ];
     let index = 0;
-    const clock = { now: () => transitionTimes[index++] };
+    const clock = { now: (): string => transitionTimes[index++] ?? "" };
 
     expect(dispatchProposalEvent(proposal, { type: "DELIBERATE" }, { clock }).ok).toBe(true);
     expect(
@@ -155,7 +155,7 @@ describe("proposal state machine — nominal transitions", () => {
     dispatchProposalEvent(proposal, { type: "DELIBERATE" });
     dispatchProposalEvent(proposal, { type: "APPROVE", tally: makeTally(true) }, { config: guardConfig });
     expect(dispatchProposalEvent(proposal, { type: "CONTROL_FAIL" }).ok).toBe(true);
-    expect(proposal.status).toBe("failed");
+    expect(proposal.status as Proposal["status"]).toBe("failed");
   });
 
   it("allows REJECT from failed as an auditable closure (issue #141)", () => {
@@ -170,8 +170,9 @@ describe("proposal state machine — nominal transitions", () => {
     approveable(proposal);
     proposal.status = "approved";
     dispatchProposalEvent(proposal, { type: "CONTROL_PASS", result: makeControl(true) }, { config: guardConfig });
+    proposal.status = "controlled";
     expect(dispatchProposalEvent(proposal, { type: "FAIL" }).ok).toBe(true);
-    expect(proposal.status).toBe("failed");
+    expect(proposal.status as Proposal["status"]).toBe("failed");
   });
 });
 
