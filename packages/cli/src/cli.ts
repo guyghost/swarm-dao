@@ -27,6 +27,7 @@ import {
   collectAttention,
   configureGitHub,
   createExecutionWorkspace,
+  DryRunProposalUseCase,
   evaluateShipAuditChallenge,
   execCommand,
   FileDaoStateRepository,
@@ -52,6 +53,7 @@ import {
   loadAgentDefinitions,
   loadConfig,
   PROPOSAL_TYPES,
+  presentDryRun,
   RateProposalUseCase,
   RejectProposalUseCase,
   recordAudit,
@@ -138,19 +140,34 @@ function cliRunner(): CommandRunnerPort {
   };
 }
 
-function parseFlags(args: string[]): { flags: Record<string, string | true>; positional: string[] } {
+function parseFlags(args: string[]): {
+  flags: Record<string, string | true>;
+  positional: string[];
+  /** Every string-valued occurrence per flag, in order. `flags` keeps
+   * last-wins for compatibility; repeatable flags (e.g. --acceptance-criteria)
+   * read their full list from here. */
+  repeated: Record<string, string[]>;
+} {
   const flags: Record<string, string | true> = {};
   const positional: string[] = [];
+  const repeated: Record<string, string[]> = {};
+  const record = (name: string, value: string): void => {
+    const existing = repeated[name];
+    if (existing === undefined) repeated[name] = [value];
+    else existing.push(value);
+  };
   for (let i = 0; i < args.length; i++) {
     const a = args[i] as string;
     if (a.startsWith("--")) {
       const eq = a.indexOf("=");
       if (eq !== -1) {
         flags[a.slice(2, eq)] = a.slice(eq + 1);
+        record(a.slice(2, eq), a.slice(eq + 1));
       } else {
         const next = args[i + 1];
         if (next !== undefined && !next.startsWith("--")) {
           flags[a.slice(2)] = next;
+          record(a.slice(2), next);
           i++;
         } else {
           flags[a.slice(2)] = true;
@@ -160,7 +177,7 @@ function parseFlags(args: string[]): { flags: Record<string, string | true>; pos
       positional.push(a);
     }
   }
-  return { flags, positional };
+  return { flags, positional, repeated };
 }
 
 async function ensureLoaded(cwd: string): Promise<FileDaoStateRepository> {
@@ -336,6 +353,7 @@ const CLI_IMPLEMENTED = [
   "show",
   "vote",
   "control",
+  "dry-run",
   "reject-proposal",
   "ship",
   "implement",
@@ -363,7 +381,8 @@ const CLI_IMPLEMENTED = [
  * capture (flags, multi-line examples). Keyed by command id.
  */
 const CLI_USAGE_DETAILS: Record<string, string> = {
-  propose: "  propose --title <t> --type <T> --description <d> [--by <name>]\n        [--depends-on <id1,id2,...>]",
+  propose:
+    "  propose --title <t> --type <T> --description <d> [--by <name>]\n        [--acceptance-criteria <text>]… [--depends-on <id1,id2,...>]\n        --acceptance-criteria is repeatable; each occurrence adds one criterion",
   deliberate:
     "  deliberate <id> [--host <herdr|tmux|auto>] [--kind <pi|codex|claude|…>] [--keep-panes] [--timeout-ms <ms>]\n        every agent votes as a real coding agent in its own child session —\n        herdr by default; inside tmux, tmux sessions (--host overrides; herdr\n        kind default: .dao/config.json herdr.kind, else pi; tmux needs\n        .dao/config.json tmux.command)",
   roundtable:
@@ -374,6 +393,8 @@ const CLI_USAGE_DETAILS: Record<string, string> = {
   show: "  show <id>",
   vote: "  vote <id> --position <for|against|abstain> --reasoning <text>\n        [--weight <n>] [--agent <id>]\n        --weight defaults to the council agent's registry weight",
   control: "  control <id>\n        Run quality-control gates (alias: check)",
+  "dry-run":
+    "  dry-run <id>\n        Record the dry-run analysis a red-zone proposal needs before\n        `control` can pass (same analysis as the dao_dry_run host tool)",
   "reject-proposal": "  reject-proposal <id> --reason <text>",
   ship: "  ship <id> [--cascade] [--force]",
   rate: "  rate <id> --score <1-5> --comment <text> [--by <name>]\n        rate an executed proposal's outcome; every rating is recorded\n        with its author in the audit trail and feeds the overall score",
@@ -494,7 +515,11 @@ async function cmdGc(cwd: string, flags: Record<string, string | true>): Promise
   }
 }
 
-async function cmdPropose(cwd: string, flags: Record<string, string | true>): Promise<void> {
+async function cmdPropose(
+  cwd: string,
+  flags: Record<string, string | true>,
+  repeated: Record<string, string[]> = {},
+): Promise<void> {
   const title = typeof flags.title === "string" ? flags.title : "";
   const type = typeof flags.type === "string" ? flags.type : "";
   const description = typeof flags.description === "string" ? flags.description : "";
@@ -506,6 +531,13 @@ async function cmdPropose(cwd: string, flags: Record<string, string | true>): Pr
   if (!PROPOSAL_TYPES.includes(type as ProposalType)) {
     err(`invalid --type '${type}'. Allowed: ${PROPOSAL_TYPES.join(", ")}`);
   }
+
+  // Repeatable: --acceptance-criteria "…" --acceptance-criteria "…".
+  // The acceptance-criteria control gate reads these; without them the gate
+  // can only warn.
+  const acceptanceCriteria = (repeated["acceptance-criteria"] ?? [])
+    .map((criterion) => criterion.trim())
+    .filter((criterion) => criterion.length > 0);
 
   // Parse optional --depends-on flag (comma-separated proposal IDs)
   let dependsOn: number[] | undefined;
@@ -531,6 +563,7 @@ async function cmdPropose(cwd: string, flags: Record<string, string | true>): Pr
     description,
     proposedBy: by,
     dependsOn,
+    ...(acceptanceCriteria.length > 0 ? { acceptanceCriteria } : {}),
     auditAction: "proposal-created",
     auditDetails: `via cli: ${title}`,
   });
@@ -863,6 +896,28 @@ async function cmdRate(cwd: string, positional: string[], flags: Record<string, 
     info(c.dim(`  overall: ${outcome.overallScore.toFixed(1)}/5 across ${outcome.ratings.length} rating(s)`));
   }
   info(c.dim(`  → audit trail: swarm-dao audit --proposal ${id}`));
+}
+
+/** swarm-dao dry-run <id> — record the dry-run analysis of a proposal.
+ *
+ *  Red-zone proposals are blocked by the mandatory-dry-run control gate until
+ *  `dryRunAt` is set. Until now only the dao_dry_run host tool could write it,
+ *  so a red-zone proposal produced from the CLI could never pass `control`
+ *  without an MCP/pi session. This command runs the exact same
+ *  DryRunProposalUseCase, so both surfaces record identical evidence. */
+async function cmdDryRun(cwd: string, positional: string[]): Promise<void> {
+  const idStr = positional[0];
+  if (!idStr) err("usage: swarm-dao dry-run <id>");
+  const id = Number(idStr);
+  if (!Number.isInteger(id)) err(`invalid proposal id '${idStr}'`);
+
+  const repository = await ensureLoaded(cwd);
+  const result = await new DryRunProposalUseCase({ repository, clock: systemClock }).execute({
+    proposalId: id,
+  });
+  if (!result.ok) err(result.error);
+  info(presentDryRun(result.analysis));
+  info(c.dim(`  → next: swarm-dao control ${id}`));
 }
 
 async function cmdControl(cwd: string, positional: string[]): Promise<void> {
@@ -1792,7 +1847,7 @@ function suggestCliCommand(token: string): string {
 
 export async function main(argv: string[], cwd: string = process.cwd()): Promise<number> {
   const [cmd, ...rest] = argv;
-  const { flags, positional } = parseFlags(rest);
+  const { flags, positional, repeated } = parseFlags(rest);
 
   // Per-command help: `<cmd> --help` (or -h) prints that command's usage.
   if (
@@ -1832,7 +1887,10 @@ export async function main(argv: string[], cwd: string = process.cwd()): Promise
         await cmdSetup(cwd);
         return 0;
       case "propose":
-        await cmdPropose(cwd, flags);
+        await cmdPropose(cwd, flags, repeated);
+        return 0;
+      case "dry-run":
+        await cmdDryRun(cwd, positional);
         return 0;
       case "deliberate":
         await cmdDeliberate(cwd, positional, flags);
