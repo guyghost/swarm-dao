@@ -4,7 +4,14 @@ import { logger } from "../../observability/logging.js";
 import type { DaoStateRepositoryPort } from "../../ports/repository.js";
 import { createInitialState, type DAOState, type DecisionRecord } from "../../types/index.js";
 import { resolveDaoLayout } from "../dao-home/dao-home.js";
-import { ARCHIVE_FILE_NAME, archiveSignature, mergeArchive, parseArchive, partitionState } from "./archive.js";
+import {
+  ARCHIVE_FILE_NAME,
+  archiveSignature,
+  isArchivedStatus,
+  mergeArchive,
+  parseArchive,
+  partitionState,
+} from "./archive.js";
 import { AUDIT_JSONL_FILE_NAME, auditLine, mergeAuditEntries, parseAuditJsonl } from "./audit-jsonl.js";
 
 function formatJson(value: unknown): string {
@@ -204,6 +211,9 @@ export class FileDaoStateRepository implements DaoStateRepositoryPort {
     // live proposals (crash ordering: the archive is always the newer copy).
     const archivePath = path.join(daoRoot, FileDaoStateRepository.ARCHIVE_FILE);
     let rawArchive: string | null = null;
+    /** Ids the archive file itself supplied — a closed proposal in state.json
+     *  that is missing here has not reached the archive yet. */
+    const archivedOnDiskIds = new Set<number>();
     try {
       rawArchive = await fs.readFile(archivePath, "utf8");
     } catch (error) {
@@ -224,6 +234,7 @@ export class FileDaoStateRepository implements DaoStateRepositoryPort {
         );
       }
       mergeArchive(state, archive);
+      for (const proposal of archive.proposals) archivedOnDiskIds.add(proposal.id);
     }
     // ADR-005: fold the append-only audit trail into the in-memory log.
     // Tolerant by design — torn/corrupt lines are skipped, duplicates are
@@ -254,6 +265,14 @@ export class FileDaoStateRepository implements DaoStateRepositoryPort {
     const repository = new FileDaoStateRepository(state, daoRoot, rawState, state.stateRevision);
     repository.lastArchiveSignature = archiveSignature(state);
     repository.archiveOnDiskKnown = rawArchive !== null;
+    // Legacy layout guard: state.json used to carry closed proposals. The
+    // archive signature cannot see that they are missing from archive.json, so
+    // without this flag the first persist would drop them from the live
+    // partition while leaving the archive untouched — losing them from both
+    // files (ADR-004 exists precisely to prevent that).
+    repository.archivedDirty = state.proposals.some(
+      (proposal) => isArchivedStatus(proposal.status) && !archivedOnDiskIds.has(proposal.id),
+    );
     if (auditIds) repository.persistedAuditIds = auditIds;
     return repository;
   }
