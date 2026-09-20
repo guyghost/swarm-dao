@@ -1,6 +1,5 @@
 ---
 "@guyghost/swarm-dao-core": minor
-"@guyghost/swarm-dao-benchmarks": patch
 ---
 
 Move the audit trail to an append-only `audit.jsonl` (ADR-005, phase 2 of

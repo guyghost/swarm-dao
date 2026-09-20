@@ -1,6 +1,5 @@
 ---
 "@guyghost/swarm-dao-core": major
-"@guyghost/swarm-dao-benchmarks": patch
 ---
 
 Remove the default-model notion — agents inherit the main model (ADR-006).

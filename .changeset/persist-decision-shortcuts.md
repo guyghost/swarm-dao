@@ -1,6 +1,5 @@
 ---
 "@guyghost/swarm-dao-core": patch
-"@guyghost/swarm-dao-benchmarks": patch
 ---
 
 Skip the O(proposals) decision sweep when a persist has nothing to write.

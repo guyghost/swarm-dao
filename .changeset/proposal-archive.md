@@ -1,6 +1,5 @@
 ---
 "@guyghost/swarm-dao-core": minor
-"@guyghost/swarm-dao-benchmarks": patch
 ---
 
 Archive closed proposals out of `state.json` (ADR-004).
