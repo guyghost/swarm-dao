@@ -14,6 +14,17 @@ import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+// Value capture BEFORE mock.module: bun's mock.module mutates the live module
+// namespace in place, so `realChildProcess.spawn` looked up inside the factory
+// below would resolve to the mock itself at call time. Every non-`pi` command
+// (core's execCommand spawning git, for example) would then recurse into the
+// mock forever — the "infinite spawn-delegation loop, JS spin, 100% CPU, no
+// children spawned" that forced per-package test isolation (see the Test step
+// in .github/workflows/ci.yml). Capturing the function OBJECT here is immune:
+// the closure keeps the original implementation no matter what the registry
+// does afterwards.
+const realSpawn = realChildProcess.spawn;
+
 mock.module("@earendil-works/pi-ai", () => ({
   StringEnum: (values: string[]) => ({
     type: "string",
@@ -59,9 +70,9 @@ function createFakeChild(stdoutText: string, stderrText: string, code: number): 
 // `exec`/`execFile` so a leaked mock cannot brick git/worktree suites that
 // share the same bun test process. Restore after this file's suite.
 mock.module("node:child_process", () => {
-  const spawn = (cmd: string, args: string[], options?: Parameters<typeof realChildProcess.spawn>[2]) => {
+  const spawn = (cmd: string, args: string[], options?: Parameters<typeof realSpawn>[2]) => {
     if (cmd !== "pi") {
-      return realChildProcess.spawn(cmd, args, options ?? {});
+      return realSpawn(cmd, args, options ?? {});
     }
     spawnCalls.push({ cmd, args });
     return createFakeChild(stdoutFactory ? stdoutFactory() : "", spawnExit.stderr, spawnExit.code);
