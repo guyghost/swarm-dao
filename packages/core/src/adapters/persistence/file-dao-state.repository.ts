@@ -3,6 +3,7 @@ import path from "node:path";
 import { logger } from "../../observability/logging.js";
 import type { DaoStateRepositoryPort } from "../../ports/repository.js";
 import { createInitialState, type DAOState, type DecisionRecord } from "../../types/index.js";
+import { resolveDaoLayout } from "../dao-home/dao-home.js";
 import { ARCHIVE_FILE_NAME, archiveSignature, mergeArchive, parseArchive, partitionState } from "./archive.js";
 import { AUDIT_JSONL_FILE_NAME, auditLine, mergeAuditEntries, parseAuditJsonl } from "./audit-jsonl.js";
 
@@ -162,7 +163,10 @@ export class FileDaoStateRepository implements DaoStateRepositoryPort {
   }
 
   public static async open(cwd: string): Promise<FileDaoStateRepository> {
-    const daoRoot = path.join(cwd, ".dao");
+    // ADR-007: route through the DAO home layout (legacy `.dao` or the
+    // external home's branch dir). Ensures project.json + passive GC.
+    const layout = await resolveDaoLayout(cwd);
+    const daoRoot = layout.stateRoot;
     await fs.mkdir(daoRoot, { recursive: true });
     const statePath = path.join(daoRoot, "state.json");
     let state = createInitialState(daoRoot);

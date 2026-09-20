@@ -13,9 +13,9 @@ import {
   collectAttention,
   effectiveConfigVersion,
   FsAttentionStore,
-  getDaoRoot,
   loadConfig,
   type ProjectConfig,
+  resolveDaoLayout,
 } from "@guyghost/swarm-dao-core";
 import { loadProjectImprovementConfig } from "@guyghost/swarm-dao-improvement";
 import { c, GLYPH } from "./render.js";
@@ -95,7 +95,7 @@ export async function cmdDoctor(cwd: string): Promise<number> {
   // Project config — strict validation surfaces typos instead of fail-open.
   let projectConfig: ProjectConfig | null = null;
   try {
-    const config = await loadConfig(getDaoRoot(cwd));
+    const config = await loadConfig((await resolveDaoLayout(cwd, { ensure: false })).stateRoot);
     projectConfig = config;
     const enforceEmpty = config.mode === "enforce" && (!config.criticalPaths || config.criticalPaths.length === 0);
     checks.push(
