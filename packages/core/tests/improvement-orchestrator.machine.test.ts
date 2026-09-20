@@ -189,7 +189,7 @@ describe("improvement-orchestrator machine — worker failures", () => {
       type: "WORKERS_FAILED",
       source: "tool",
       reason: "x",
-      phase: "grounding",
+      phase: "grounding" as never, // unknown phase: the machine must reject it
     });
     expect(actor.getSnapshot().value).toBe("sampling");
   });

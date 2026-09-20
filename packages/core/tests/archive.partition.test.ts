@@ -105,8 +105,10 @@ describe("archive partition", () => {
 
     expect(state.proposals.map((p) => p.id)).toEqual([1, 2, 3]);
     expect(state.proposals.find((p) => p.id === 2)?.status).toBe("executed");
-    expect(state.outcomes[2]).toEqual({ proposalId: 2, overall: 3, ratedBy: "t", ratedAt: "x" });
-    expect(state.snapshots[3]).toEqual({ proposalId: 3, branch: "b", workspace: "/w" });
+    // biome-ignore lint/style/noNonNullAssertion: index capped by setup above
+    expect(state.outcomes[2]!).toEqual({ proposalId: 2, overall: 3, ratedBy: "t", ratedAt: "x" } as never);
+    // biome-ignore lint/style/noNonNullAssertion: index capped by setup above
+    expect(state.snapshots[3]!).toEqual({ proposalId: 3, branch: "b", workspace: "/w" } as never);
     expect(live.proposals.map((p) => p.id)).toEqual([1]);
   });
 
@@ -128,16 +130,16 @@ describe("archive signature", () => {
   it("changes when a closed proposal transitions between closed statuses", () => {
     const state = stateWith(proposal(2, "controlled"));
     const before = archiveSignature(state);
-    state.proposals[0] = { ...state.proposals[0], status: "executed" };
+    state.proposals[0] = { ...state.proposals[0]!, status: "executed" };
     expect(archiveSignature(state)).not.toBe(before);
   });
 
   it("changes when a proposal closes or reopens", () => {
     const state = stateWith(proposal(1, "open"), proposal(2, "executed"));
     const closed = archiveSignature(state);
-    state.proposals[0] = { ...state.proposals[0], status: "rejected" };
+    state.proposals[0] = { ...state.proposals[0]!, status: "rejected" };
     expect(archiveSignature(state)).not.toBe(closed);
-    state.proposals[0] = { ...state.proposals[0], status: "open" };
+    state.proposals[0] = { ...state.proposals[0]!, status: "open" };
     expect(archiveSignature(state)).toBe(closed);
   });
 
@@ -151,7 +153,7 @@ describe("archive signature", () => {
   it("does not change for open-proposal-only mutations", () => {
     const state = stateWith(proposal(1, "open"), proposal(2, "executed"));
     const before = archiveSignature(state);
-    state.proposals[0] = { ...state.proposals[0], title: "Retitled open proposal" };
+    state.proposals[0] = { ...state.proposals[0]!, title: "Retitled open proposal" };
     state.outcomes[1] = { proposalId: 1, overall: 2 } as never;
     expect(archiveSignature(state)).toBe(before);
   });

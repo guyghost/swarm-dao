@@ -57,7 +57,7 @@ describe("intelligence/roundtable", () => {
       adapter,
       [agent("strategist"), agent("critic")],
       2,
-      buildModelResolutionContext("dao-default", {}),
+      buildModelResolutionContext(),
       { now: () => "2031-01-01T00:00:00.000Z" },
       { projectBrief: "SCOUT-BRIEF-MARKER" },
     );
@@ -92,7 +92,7 @@ describe("intelligence/roundtable", () => {
       spawnAgents: async (): Promise<AgentOutput[]> => [],
     };
 
-    const suggestions = await runRoundTable(adapter, [agent], 1, buildModelResolutionContext("dao-default", {}), {
+    const suggestions = await runRoundTable(adapter, [agent], 1, buildModelResolutionContext(), {
       now: () => "2031-01-01T00:00:00.000Z",
     });
 

@@ -90,7 +90,9 @@ describe("control/gates", () => {
       agentOutputs: Array.from({ length: 10 }, (_, i) => ({
         agentId: `a${i}`,
         agentName: `Agent ${i}`,
+        role: "agent",
         content: "ok",
+        durationMs: 1,
       })),
       acceptanceCriteria: ["Gate should respect override"],
       successMetrics: ["Override applied"],

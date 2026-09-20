@@ -69,7 +69,6 @@ export function validateAmendmentPayload(payload: AmendmentPayload): AmendmentVa
       const validConfigFields = [
         "quorumPercent",
         "approvalThreshold",
-        "defaultModel",
         "maxConcurrent",
         "riskThreshold",
         "healthWeights",

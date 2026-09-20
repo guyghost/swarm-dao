@@ -134,7 +134,7 @@ export async function runDelegations(params: {
     const profile = profileFor(config, signal.archetype);
     const childModel = resolveAgentModel(
       childAgent,
-      buildChildModelResolutionContext(config.defaultModel, {
+      buildChildModelResolutionContext({
         parentAgentModel: parentResolvedModel,
         profile,
         parentSessionModel: parentModelContext.parentSessionModel,

@@ -41,7 +41,7 @@ export class RoundTableUseCase {
             .join("\n")}`
         : "";
     const brief = [command.projectBrief?.trim(), dedupSection].filter((part) => part && part.length > 0).join("\n\n");
-    const modelContext = createDispatchModelContext(state.config.defaultModel, this.dependencies.worker, {
+    const modelContext = createDispatchModelContext(this.dependencies.worker, {
       parentSessionModel: command.parentSessionModel,
       hostDefaultModel: command.hostDefaultModel,
     });

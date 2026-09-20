@@ -176,7 +176,7 @@ describe("ensureSeriesWorktree — dependency installation (dogfood-003 c7 findi
       await writeFile(join(worktreePath, ".git"), "gitdir: ../../.git/worktrees/s-1\n", "utf8");
 
       await ensureSeriesWorktree({ repoDir: repo, seriesId: "s-1", runner: fakeGit(commands) });
-      expect(commands.some((c) => c.startsWith("bun install"))).toBe(false);
+      expect(commands.some((c) => c.join(" ").startsWith("bun install"))).toBe(false);
     } finally {
       await rm(repo, { recursive: true, force: true });
     }

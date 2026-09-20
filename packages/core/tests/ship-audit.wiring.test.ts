@@ -108,6 +108,7 @@ describe("ship-audit wiring", () => {
       actor: "test",
     });
     expect(shipped.ok).toBe(true);
+    if (!second.proceed) throw new Error("expected second call to proceed");
     await second.consume?.();
     // A third call after consumption challenges again (INV-6).
     const third = await gate();
@@ -187,6 +188,7 @@ describe("ship-audit wiring", () => {
     // Same decision, same options → confirm.
     const sameOptions = await gate(false, { cascade: false });
     expect(sameOptions.proceed).toBe(true);
+    if (!sameOptions.proceed) throw new Error("expected same-options call to proceed");
     await sameOptions.consume?.();
     // New cycle: challenge, then confirm with DIFFERENT options → re-challenge.
     await gate();

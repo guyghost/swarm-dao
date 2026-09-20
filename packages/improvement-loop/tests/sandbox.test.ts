@@ -51,10 +51,10 @@ describe("improvement-loop — bounded sandbox execution", () => {
   });
 
   it("rejects relative workDir and hostile images before any shell sees them", () => {
-    expect(() => buildSandboxArgv({ mode: "docker", image: "ok", workDir: "relative/path" }, "x")).toThrow(
+    expect(() => buildSandboxArgv({ runtime: "docker", image: "ok", workDir: "relative/path" }, "x")).toThrow(
       /absolute host path/,
     );
-    expect(() => buildSandboxArgv({ mode: "docker", image: "a$(b)", workDir: "/r" }, "x")).toThrow(
+    expect(() => buildSandboxArgv({ runtime: "docker", image: "a$(b)", workDir: "/r" }, "x")).toThrow(
       /not a plain OCI reference/,
     );
   });

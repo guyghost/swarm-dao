@@ -71,14 +71,14 @@ function fakeHerdr(script: FakeScript = {}) {
       if (argv[1] === "agent") {
         if (argv[2] === "start") {
           const queue = script.start ?? ["ok"];
-          const response = queue[Math.min(counters.start++, queue.length - 1)];
+          const response = queue[Math.min(counters.start++, queue.length - 1)] ?? "ok";
           return response === "ok"
             ? { stdout: AGENT_STARTED, stderr: "", exitCode: 0 }
             : { stdout: "", stderr: response, exitCode: 1 };
         }
         if (argv[2] === "prompt") {
           const queue = script.prompt ?? [{ exitCode: 0 }];
-          const response = queue[Math.min(counters.prompt++, queue.length - 1)];
+          const response = queue[Math.min(counters.prompt++, queue.length - 1)] ?? {};
           return { stdout: response.stdout ?? "", stderr: response.stderr ?? "", exitCode: response.exitCode ?? 0 };
         }
         if (argv[2] === "read") {
@@ -86,7 +86,7 @@ function fakeHerdr(script: FakeScript = {}) {
           const response =
             typeof source === "function"
               ? source(counters.read++)
-              : source[Math.min(counters.read++, source.length - 1)];
+              : (source[Math.min(counters.read++, source.length - 1)] ?? {});
           return { stdout: response.stdout ?? "", stderr: response.stderr ?? "", exitCode: response.exitCode ?? 0 };
         }
       }
@@ -159,7 +159,7 @@ describe("runHerdrWorker transcript harvest", () => {
     expect(promptCall).toContain("PROMPT");
     expect(promptCall).not.toContain("--wait");
     expect(promptCall).not.toContain("--timeout");
-    const readCall = fake.callsOf("read")[0];
+    const readCall = fake.callsOf("read")[0] ?? [];
     expect(readCall).toContain("recent-unwrapped");
     expect(readCall.join(" ")).toMatch(/--lines \d+/);
   });

@@ -1,6 +1,6 @@
 {
   "name": "@guyghost/swarm-dao-codex-adapter",
-  "version": "0.2.19",
+  "version": "0.2.20",
   "description": "Swarm DAO governance adapter for OpenAI Codex — MCP server, native config.toml, and AGENTS.md",
   "type": "module",
   "main": "./dist/index.js",
@@ -29,8 +29,8 @@
     "prepublishOnly": "bun run build"
   },
   "dependencies": {
-    "@guyghost/swarm-dao-core": "^1.0.1",
-    "@guyghost/swarm-dao-mcp": "^0.9.1"
+    "@guyghost/swarm-dao-core": "^2.0.0",
+    "@guyghost/swarm-dao-mcp": "^0.9.3"
   },
   "devDependencies": {
     "@types/bun": "1.4.2"

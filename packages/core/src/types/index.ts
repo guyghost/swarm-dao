@@ -334,7 +334,6 @@ export interface HealthWeights {
 export interface DAOConfig {
   quorumPercent: number;
   approvalThreshold: number;
-  defaultModel: string;
   maxConcurrent: number;
   riskThreshold: number;
   requiredGates: string[];
@@ -351,8 +350,9 @@ export interface DAOConfig {
    */
   delegation?: DelegationConfig;
   /**
-   * Per-archetype profile. `defaultModel` (if set) sits between the child
-   * override and the parent agent's resolved model in the inheritance chain.
+   * Per-archetype profile. `model` (if set) is an explicit user spec that
+   * sits between the child override and the parent agent's resolved model in
+   * the inheritance chain (ADR-006).
    */
   delegationProfile?: Partial<Record<DelegationArchetype, DelegationProfileEntry>>;
 }
@@ -373,8 +373,9 @@ export interface DelegationConfig {
 }
 
 export interface DelegationProfileEntry {
-  /** Model used when a child does not override and the parent is not inherited. */
-  defaultModel?: string;
+  /** Explicit user-pinned model for children of this archetype (ADR-006).
+   *  Without it the child inherits the parent agent's resolved model. */
+  model?: string;
   /** Prompt template id the child agent is spawned with. */
   promptId: string;
 }
@@ -382,7 +383,6 @@ export interface DelegationProfileEntry {
 export const DEFAULT_CONFIG: DAOConfig = {
   quorumPercent: 60,
   approvalThreshold: 55,
-  defaultModel: "z.ai/GLM-5.1",
   maxConcurrent: 4,
   riskThreshold: 7,
   requiredGates: [

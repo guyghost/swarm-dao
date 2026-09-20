@@ -4,6 +4,7 @@ import {
   DEFAULT_ATTEMPT_STATE,
   evaluateAttempt,
   parseAndValidateVerdict,
+  type ToolEvidence,
   validateVerdict,
 } from "../src/domain/classifier-verdict.js";
 import { MAX_EDIT_PATHS } from "../src/governance/edit-gate.js";
@@ -17,10 +18,10 @@ const valid = {
   reason: "implicit cast in test X",
 };
 
-const tools = (overrides: Partial<{ tests: string; types: string; lint: string }> = {}) => ({
-  tests: "not_run" as const,
-  types: "not_run" as const,
-  lint: "not_run" as const,
+const tools = (overrides: Partial<ToolEvidence> = {}): ToolEvidence => ({
+  tests: "not_run",
+  types: "not_run",
+  lint: "not_run",
   ...overrides,
 });
 

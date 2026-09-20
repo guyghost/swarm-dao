@@ -117,6 +117,7 @@ describe("dispatchSequentialSwarm", () => {
           durationMs: 1,
         };
       },
+      spawnAgents: async () => [],
     };
   }
 
@@ -126,7 +127,7 @@ describe("dispatchSequentialSwarm", () => {
       proposal(),
       [agent("first", "First"), agent("second", "Second")],
       recordingWorker(calls),
-      createDispatchModelContext("test-model", recordingWorker([])),
+      createDispatchModelContext(recordingWorker([])),
     );
 
     expect(calls.map((call) => call.agentId)).toEqual(["first", "second"]);
@@ -145,6 +146,7 @@ describe("dispatchSequentialSwarm", () => {
   test("a failed spawn records an error output and later agents still run", async () => {
     const calls: Array<{ agentId: string; prompt: string }> = [];
     const worker: AgentWorkerPort = {
+      spawnAgents: async () => [],
       spawnAgent: async ({ agent, systemPrompt }) => {
         calls.push({ agentId: agent.id, prompt: systemPrompt });
         if (agent.id === "boom") throw new Error("spawn failed");
@@ -162,7 +164,7 @@ describe("dispatchSequentialSwarm", () => {
       proposal(),
       [agent("boom", "Boom"), agent("after", "After")],
       worker,
-      createDispatchModelContext("test-model", worker),
+      createDispatchModelContext(worker),
     );
     expect(outputs).toHaveLength(2);
     expect(outputs[0]?.error).toBe("spawn failed");
