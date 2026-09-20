@@ -41,8 +41,19 @@ describe("codex-adapter", () => {
   it("returns a manual-dispatch error from spawnAgent", async () => {
     const adapter = createCodexHostAdapter("/tmp/dao");
     const result = await adapter.spawnAgent({
-      agent: { id: "pm", name: "Product Manager", role: "product" },
-      prompt: "x",
+      agent: { id: "pm", name: "Product Manager", role: "product", description: "d", weight: 1, systemPrompt: "sp" },
+      proposal: {
+        id: 1,
+        title: "t",
+        type: "technical-change",
+        description: "d",
+        proposedBy: "test",
+        status: "open",
+        votes: [],
+        agentOutputs: [],
+        createdAt: "2031-01-01T00:00:00.000Z",
+      },
+      systemPrompt: "x",
     });
     expect(result.error).toBeDefined();
   });

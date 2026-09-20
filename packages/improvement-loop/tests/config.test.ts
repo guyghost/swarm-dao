@@ -20,7 +20,7 @@ const fourAnchors = (override: Record<string, string> = {}): Record<string, stri
 
 describe("improvement-loop — per-project config (.dao/improvement.json)", () => {
   it("maps the four command-backed anchors and excludes the machine-recorded pair", () => {
-    expect(COMMAND_BACKED_ANCHORS.sort()).toEqual(
+    expect([...COMMAND_BACKED_ANCHORS].sort()).toEqual(
       ["anchor-reality", "drift-audit", "frozen-set-intact", "regression"].sort(),
     );
   });

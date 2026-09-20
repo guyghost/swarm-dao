@@ -257,7 +257,7 @@ describe("FileDaoStateRepository concurrency", () => {
       // structural signature — the ADR-004 contract requires the flag (and the
       // test documents it for future call sites).
       repository.markArchivedDirty();
-      state.proposals[0] = { ...state.proposals[0], title: "Retitled while locked" };
+      state.proposals[0] = { ...state.proposals[0]!, title: "Retitled while locked" };
       await expect(repository.persist()).rejects.toThrow();
 
       // Remove the obstruction: the next persist must re-run the full sweep

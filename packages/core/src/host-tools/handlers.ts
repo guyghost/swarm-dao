@@ -191,7 +191,7 @@ export async function handleDaoDeliberate(ctx: DaoToolContext, proposalId: numbe
       clock: systemClock,
     }).execute({ proposalId });
     if (!deliberation.ok) return `Cannot deliberate: ${deliberation.error}`;
-    const modelContext = createDispatchModelContext(state.config.defaultModel, ctx.adapter, {
+    const modelContext = createDispatchModelContext(ctx.adapter, {
       parentSessionModel: ctx.getSessionModel?.(),
       hostDefaultModel: ctx.hostDefaultModel,
     });

@@ -61,7 +61,7 @@ function createFakeChild(stdoutText: string, stderrText: string, code: number): 
 mock.module("node:child_process", () => {
   const spawn = (cmd: string, args: string[], options?: Parameters<typeof realChildProcess.spawn>[2]) => {
     if (cmd !== "pi") {
-      return realChildProcess.spawn(cmd, args, options);
+      return realChildProcess.spawn(cmd, args, options ?? {});
     }
     spawnCalls.push({ cmd, args });
     return createFakeChild(stdoutFactory ? stdoutFactory() : "", spawnExit.stderr, spawnExit.code);
@@ -161,7 +161,7 @@ describe("pi adapter spawnAgent default-on", () => {
   /** Initialized DAO + registered extension; returns the dao_roundtable runner. */
   async function setupRoundtable(): Promise<{
     run: () => Promise<string>;
-    getState: () => Awaited<ReturnType<typeof import("@guyghost/swarm-dao-core")>["getState"]>;
+    getState: () => ReturnType<typeof import("@guyghost/swarm-dao-core")["getState"]>;
   }> {
     const core = await import("@guyghost/swarm-dao-core");
     await core.initStorage(process.cwd());

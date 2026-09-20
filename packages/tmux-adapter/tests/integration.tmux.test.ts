@@ -31,7 +31,7 @@ async function killAdapterSessions(): Promise<void> {
 }
 
 describe.skipIf(!hasTmux)("tmux adapter (real tmux)", () => {
-  let workDir: string;
+  let workDir: string = "";
 
   beforeAll(async () => {
     workDir = await fs.mkdtemp(path.join(tmpdir(), "swarm-dao-tmux-it-"));

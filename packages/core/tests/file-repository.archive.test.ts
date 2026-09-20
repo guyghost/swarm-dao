@@ -14,7 +14,8 @@ function proposal(id: number, status: Proposal["status"], title = `Proposal #${i
     type: "product-feature",
     description: `Full description of proposal ${id} — deliberation detail must survive archival.`,
     problemStatement: "problem",
-    acceptanceCriteria: [{ id: "ac1", given: "g", when: "w" }],
+    // biome-ignore lint/suspicious/noThenProperty: AcceptanceCriterion field name
+    acceptanceCriteria: [{ id: "ac1", given: "g", when: "w", then: "t" }],
     successMetrics: ["metric"],
     rollbackConditions: ["rollback"],
     proposedBy: "tester",
@@ -50,7 +51,8 @@ describe("file repository proposal archive (ADR-004)", () => {
     expect(two?.synthesis).toBe("synthesized decision");
     expect(two?.votes).toHaveLength(1);
     expect(two?.agentOutputs).toHaveLength(1);
-    expect(two?.acceptanceCriteria).toEqual([{ id: "ac1", given: "g", when: "w" }]);
+    // biome-ignore lint/suspicious/noThenProperty: AcceptanceCriterion field name
+    expect(two?.acceptanceCriteria).toEqual([{ id: "ac1", given: "g", when: "w", then: "t" }]);
   });
 
   it("keeps satellite records with their proposal: outcomes for archived ids leave state.json", async () => {
@@ -67,8 +69,8 @@ describe("file repository proposal archive (ADR-004)", () => {
     expect(Object.keys(archive.outcomes as object)).toEqual(["2"]);
 
     const reopened = await FileDaoStateRepository.open(workDir);
-    expect((reopened.get().outcomes[2] as { overall: number }).overall).toBe(4);
-    expect((reopened.get().outcomes[1] as { overall: number }).overall).toBe(5);
+    expect((reopened.get().outcomes[2] as unknown as { overall: number }).overall).toBe(4);
+    expect((reopened.get().outcomes[1] as unknown as { overall: number }).overall).toBe(5);
   });
 
   it("resolves the crash window via the shadow rule: archived copy wins over a stale open copy", async () => {
@@ -122,7 +124,7 @@ describe("file repository proposal archive (ADR-004)", () => {
     await reopened.persist();
 
     const afterFlag = await FileDaoStateRepository.open(workDir);
-    expect((afterFlag.get().outcomes[5] as { overall: number }).overall).toBe(3);
+    expect((afterFlag.get().outcomes[5] as unknown as { overall: number }).overall).toBe(3);
   });
 
   it("auto-detects structural archive changes (new satellite entry) without the flag", async () => {

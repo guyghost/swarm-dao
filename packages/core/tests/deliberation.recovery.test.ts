@@ -20,7 +20,7 @@ import {
 } from "@guyghost/swarm-dao-core";
 import { InMemoryDaoStateRepository } from "../src/adapters/persistence/in-memory-dao-state.repository.js";
 import { clearDelegationInFlight, markDelegationInFlight } from "../src/governance/delegation.utils.js";
-import type { HostAdapter } from "../src/types/index.js";
+import type { HostAdapter, Proposal } from "../src/types/index.js";
 
 /** A host whose model resolution explodes AFTER the DELIBERATE commit:
  *  models the dead-host/timeout window the rollback guard must cover. */
@@ -66,7 +66,7 @@ describe("deliberation recovery (issue #160)", () => {
   });
 
   test("ABORT_DELIBERATION returns a deliberating proposal to open for a re-run", () => {
-    const proposal = {
+    const proposal: Proposal = {
       id: 1,
       title: "Retry",
       type: "technical-change" as const,

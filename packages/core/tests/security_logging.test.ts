@@ -25,7 +25,6 @@ describe("Security Logging", () => {
 
   it("should redact sensitive information in logs if it appears in error messages", async () => {
     const originalReadFile = fs.readFile;
-    // @ts-expect-error
     fs.readFile = mock(async () => {
       throw new Error(`Failed to read config: secret=${SECRET_VALUE}, "password": "${PASSWORD_VALUE}"`);
     });
@@ -40,7 +39,6 @@ describe("Security Logging", () => {
     } catch (_e) {
       // Expected
     } finally {
-      // @ts-expect-error
       fs.readFile = originalReadFile;
     }
 

@@ -182,7 +182,7 @@ describe("persistence", () => {
     await recordAudit(p.id, "governance", "test_action", "user", "details");
     const entries = getAuditLog(p.id);
     expect(entries.length).toBe(1);
-    expect(entries[0].action).toBe("test_action");
+    expect(entries[0]?.action).toBe("test_action");
   });
 
   it("pads IDs correctly", () => {

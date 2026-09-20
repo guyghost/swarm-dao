@@ -818,8 +818,8 @@ describe("application architecture", () => {
       state.initialized = true;
       const base = {
         proposedBy: "user",
-        votes: [] as const,
-        agentOutputs: [] as const,
+        votes: [],
+        agentOutputs: [],
         createdAt: "2031-01-01T00:00:00.000Z",
       };
       state.proposals.push(

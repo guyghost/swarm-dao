@@ -70,7 +70,7 @@ describe("health-score", () => {
     const outcomes = {
       1: {
         proposalId: 1,
-        ratings: [{ proposalId: 1, rater: "user", score: 4, comment: "Good", ratedAt: "" }],
+        ratings: [{ proposalId: 1, rater: "user", score: 4 as const, comment: "Good", ratedAt: "" }],
         metrics: [],
         overallScore: 4,
         status: "tracked" as const,
@@ -219,7 +219,7 @@ describe("health-score", () => {
       const currentState = getState();
       expect(currentState.healthSnapshots).toBeDefined();
       expect(currentState.healthSnapshots?.length).toBe(1);
-      expect(currentState.healthSnapshots?.[0].weekKey).toBe(snapshot.weekKey);
+      expect(currentState.healthSnapshots?.[0]?.weekKey).toBe(snapshot.weekKey);
     });
 
     it("getLatestHealthSnapshot returns the most recent snapshot", async () => {
@@ -299,9 +299,9 @@ describe("health-score", () => {
 
       // Should still have only 1 snapshot (same weekKey replaced)
       expect(snapshots.length).toBe(1);
-      expect(snapshots[0].weekKey).toBe(firstWeekKey);
+      expect(snapshots[0]?.weekKey).toBe(firstWeekKey);
       // The snapshot object should be the latest one (same weekKey)
-      expect(snapshots[0].createdAt).toBe(second.createdAt);
+      expect(snapshots[0]?.createdAt).toBe(second.createdAt);
     });
 
     it("different-week dedup: calling recordHealthSnapshot in different weeks appends", async () => {
@@ -314,7 +314,7 @@ describe("health-score", () => {
       await recordHealthSnapshot();
       const firstSnapshots = getHealthSnapshots();
       expect(firstSnapshots.length).toBe(1);
-      const firstWeekKey = firstSnapshots[0].weekKey;
+      const firstWeekKey = firstSnapshots[0]?.weekKey ?? "";
 
       // Manually inject a snapshot for a different week
       const currentState = getState();
@@ -391,7 +391,7 @@ describe("health-score", () => {
       );
 
       // Dashboard should include trend info when snapshots exist
-      expect(dashboard).toContain("Trend") || expect(dashboard).toContain("📈") || expect(dashboard).toContain("+");
+      expect(/Trend|📈|\+/.test(dashboard)).toBe(true);
     });
   });
 });

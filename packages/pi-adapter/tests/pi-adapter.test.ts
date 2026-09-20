@@ -8,6 +8,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, mock 
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 mock.module("@earendil-works/pi-ai", () => ({
   StringEnum: (values: string[]) => ({
@@ -79,6 +80,8 @@ interface MockPi {
 }
 
 function createMockPi(): MockPi {
+  // Returns the raw mock; cast at the SDK boundary via asExtensionAPI() — the
+  // mock implements only the subset of ExtensionAPI the adapter touches.
   const tools: MockTool[] = [];
   const commands: MockCommand[] = [];
   const events: MockEvent[] = [];
@@ -99,6 +102,20 @@ function createMockPi(): MockPi {
 }
 
 // ── Expected tool names ─────────────────────────────────────
+
+/** The mock implements only the subset of ExtensionAPI the adapter touches —
+ *  cast at the SDK boundary instead of stubbing the full surface. */
+function asExtensionAPI(pi: MockPi): ExtensionAPI {
+  return pi as unknown as ExtensionAPI;
+}
+
+/** Fetch a registered event handler, failing loudly when absent (an optional
+ *  chain here would let the test pass vacuously). */
+function requireEventHandler(pi: MockPi, event: string): MockEvent["handler"] {
+  const handler = pi.events.find((e) => e.event === event)?.handler;
+  if (!handler) throw new Error(`no registered handler for "${event}"`);
+  return handler;
+}
 
 const EXPECTED_TOOLS = [
   "dao_setup",
@@ -211,7 +228,7 @@ describe("swarmDaoExtension", () => {
     it("registers all expected tools", async () => {
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
-      mod.default(pi);
+      mod.default(asExtensionAPI(pi));
 
       const registeredNames = pi.tools.map((t) => t.name);
       for (const name of EXPECTED_TOOLS) {
@@ -222,7 +239,7 @@ describe("swarmDaoExtension", () => {
     it("registers exactly the expected number of tools", async () => {
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
-      mod.default(pi);
+      mod.default(asExtensionAPI(pi));
 
       expect(pi.tools.length).toBe(EXPECTED_TOOLS.length);
     });
@@ -230,7 +247,7 @@ describe("swarmDaoExtension", () => {
     it("dao_attention lists pending gates with their resolution suggestion", async () => {
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
-      mod.default(pi);
+      mod.default(asExtensionAPI(pi));
 
       await fs.mkdir(path.join(DAO_ROOT, "graph-runs", "g1"), { recursive: true });
       await fs.writeFile(
@@ -256,7 +273,7 @@ describe("swarmDaoExtension", () => {
     it("dao_attention rejects an unknown source", async () => {
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
-      mod.default(pi);
+      mod.default(asExtensionAPI(pi));
 
       const tool = pi.tools.find((t) => t.name === "dao_attention");
       const result = await tool?.execute("test-id", { sources: ["vibes"] });
@@ -267,7 +284,7 @@ describe("swarmDaoExtension", () => {
     it("dao_graph_submit submits an AI artifact with the ai channel forced", async () => {
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
-      mod.default(pi);
+      mod.default(asExtensionAPI(pi));
 
       const tool = pi.tools.find((t) => t.name === "dao_graph_submit");
       const result = await tool?.execute("test-id", {
@@ -292,7 +309,7 @@ describe("swarmDaoExtension", () => {
     it("dao_graph_submit reports invalid payload JSON instead of throwing", async () => {
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
-      mod.default(pi);
+      mod.default(asExtensionAPI(pi));
 
       const tool = pi.tools.find((t) => t.name === "dao_graph_submit");
       const result = await tool?.execute("test-id", {
@@ -308,7 +325,7 @@ describe("swarmDaoExtension", () => {
     it("dao_improve_status reads a fresh series as idle", async () => {
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
-      mod.default(pi);
+      mod.default(asExtensionAPI(pi));
 
       const tool = pi.tools.find((t) => t.name === "dao_improve_status");
       const result = await tool?.execute("test-id", { seriesId: "probe" });
@@ -321,7 +338,7 @@ describe("swarmDaoExtension", () => {
     it("dao_graph_status rejects an absolute evidenceRoot", async () => {
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
-      mod.default(pi);
+      mod.default(asExtensionAPI(pi));
 
       const tool = pi.tools.find((t) => t.name === "dao_graph_status");
       await expect(tool?.execute("test-id", { runId: "g-escape", evidenceRoot: "/tmp/evil" })).rejects.toThrow(
@@ -332,7 +349,7 @@ describe("swarmDaoExtension", () => {
     it("dao_improve_once is a no-op for a fresh idle series", async () => {
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
-      mod.default(pi);
+      mod.default(asExtensionAPI(pi));
 
       const tool = pi.tools.find((t) => t.name === "dao_improve_once");
       const result = await tool?.execute("test-id", { seriesId: "pi-idle-1" });
@@ -347,7 +364,7 @@ describe("swarmDaoExtension", () => {
     it("each tool has name, description, and execute function", async () => {
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
-      mod.default(pi);
+      mod.default(asExtensionAPI(pi));
 
       for (const tool of pi.tools) {
         expect(typeof tool.name).toBe("string");
@@ -365,7 +382,7 @@ describe("swarmDaoExtension", () => {
     it("registers the /dao command", async () => {
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
-      mod.default(pi);
+      mod.default(asExtensionAPI(pi));
 
       const daoCommand = pi.commands.find((c) => c.name === "dao");
       expect(daoCommand).toBeDefined();
@@ -376,7 +393,7 @@ describe("swarmDaoExtension", () => {
     it("displays /dao help as a framed panel through ui.custom", async () => {
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
-      mod.default(pi);
+      mod.default(asExtensionAPI(pi));
 
       const commandCtx = createMockCommandContext();
       await pi.commands.find((c) => c.name === "dao")?.handler("help", commandCtx.ctx);
@@ -392,7 +409,7 @@ describe("swarmDaoExtension", () => {
     it("falls back to stdout when no ui is available (print/headless mode)", async () => {
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
-      mod.default(pi);
+      mod.default(asExtensionAPI(pi));
 
       const writes: string[] = [];
       const originalWrite = process.stdout.write.bind(process.stdout);
@@ -415,7 +432,7 @@ describe("swarmDaoExtension", () => {
     it("falls back to stdout when ui.custom resolves without invoking the factory (print mode)", async () => {
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
-      mod.default(pi);
+      mod.default(asExtensionAPI(pi));
 
       const writes: string[] = [];
       const originalWrite = process.stdout.write.bind(process.stdout);
@@ -445,7 +462,7 @@ describe("swarmDaoExtension", () => {
     it("falls back to stdout when ui.custom rejects", async () => {
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
-      mod.default(pi);
+      mod.default(asExtensionAPI(pi));
 
       const writes: string[] = [];
       const originalWrite = process.stdout.write.bind(process.stdout);
@@ -474,7 +491,7 @@ describe("swarmDaoExtension", () => {
     it("completes subcommands for the first token only", async () => {
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
-      mod.default(pi);
+      mod.default(asExtensionAPI(pi));
 
       const daoCommand = pi.commands.find((c) => c.name === "dao");
       const complete = daoCommand?.getArgumentCompletions;
@@ -500,7 +517,7 @@ describe("swarmDaoExtension", () => {
     it("/dao command returns uninitialized message when DAO is not set up", async () => {
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
-      mod.default(pi);
+      mod.default(asExtensionAPI(pi));
 
       const daoCommand = pi.commands.find((c) => c.name === "dao");
       const commandCtx = createMockCommandContext();
@@ -519,7 +536,7 @@ describe("swarmDaoExtension", () => {
 
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
-      mod.default(pi);
+      mod.default(asExtensionAPI(pi));
 
       const daoCommand = pi.commands.find((c) => c.name === "dao");
       const commandCtx = createMockCommandContext();
@@ -584,7 +601,7 @@ describe("swarmDaoExtension", () => {
 
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
-      mod.default(pi);
+      mod.default(asExtensionAPI(pi));
 
       const daoCommand = pi.commands.find((c) => c.name === "dao");
       const commandCtx = createMockCommandContext();
@@ -601,7 +618,7 @@ describe("swarmDaoExtension", () => {
     it("/dao help returns the registry-driven command list", async () => {
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
-      mod.default(pi);
+      mod.default(asExtensionAPI(pi));
 
       const daoCommand = pi.commands.find((c) => c.name === "dao");
       const commandCtx = createMockCommandContext();
@@ -624,7 +641,7 @@ describe("swarmDaoExtension", () => {
 
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
-      mod.default(pi);
+      mod.default(asExtensionAPI(pi));
 
       const daoCommand = pi.commands.find((c) => c.name === "dao");
       const commandCtx = createMockCommandContext();
@@ -646,7 +663,7 @@ describe("swarmDaoExtension", () => {
 
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
-      mod.default(pi);
+      mod.default(asExtensionAPI(pi));
 
       const daoCommand = pi.commands.find((c) => c.name === "dao");
       const commandCtx = createMockCommandContext();
@@ -665,7 +682,7 @@ describe("swarmDaoExtension", () => {
 
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
-      mod.default(pi);
+      mod.default(asExtensionAPI(pi));
 
       const daoCommand = pi.commands.find((c) => c.name === "dao");
       const commandCtx = createMockCommandContext();
@@ -685,7 +702,7 @@ describe("swarmDaoExtension", () => {
 
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
-      mod.default(pi);
+      mod.default(asExtensionAPI(pi));
 
       const daoCommand = pi.commands.find((c) => c.name === "dao");
       const commandCtx = createMockCommandContext();
@@ -708,7 +725,7 @@ describe("swarmDaoExtension", () => {
 
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
-      mod.default(pi);
+      mod.default(asExtensionAPI(pi));
 
       const daoCommand = pi.commands.find((c) => c.name === "dao");
       const commandCtx = createMockCommandContext();
@@ -736,7 +753,7 @@ describe("swarmDaoExtension", () => {
 
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
-      mod.default(pi);
+      mod.default(asExtensionAPI(pi));
 
       const daoCommand = pi.commands.find((c) => c.name === "dao");
       const commandCtx = createMockCommandContext();
@@ -760,7 +777,7 @@ describe("swarmDaoExtension", () => {
 
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
-      mod.default(pi);
+      mod.default(asExtensionAPI(pi));
 
       const daoCommand = pi.commands.find((c) => c.name === "dao");
       const commandCtx = createMockCommandContext();
@@ -780,7 +797,7 @@ describe("swarmDaoExtension", () => {
 
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
-      mod.default(pi);
+      mod.default(asExtensionAPI(pi));
 
       const daoCommand = pi.commands.find((c) => c.name === "dao");
       const commandCtx = createMockCommandContext();
@@ -820,7 +837,7 @@ describe("swarmDaoExtension", () => {
 
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
-      mod.default(pi);
+      mod.default(asExtensionAPI(pi));
 
       const daoCommand = pi.commands.find((c) => c.name === "dao");
       const commandCtx = createMockCommandContext();
@@ -852,7 +869,7 @@ describe("swarmDaoExtension", () => {
 
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
-      mod.default(pi);
+      mod.default(asExtensionAPI(pi));
 
       const daoCommand = pi.commands.find((c) => c.name === "dao");
       const commandCtx = createMockCommandContext();
@@ -872,7 +889,7 @@ describe("swarmDaoExtension", () => {
 
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
-      mod.default(pi);
+      mod.default(asExtensionAPI(pi));
 
       const daoCommand = pi.commands.find((c) => c.name === "dao");
       const commandCtx = createMockCommandContext();
@@ -884,7 +901,7 @@ describe("swarmDaoExtension", () => {
     it("/dao setup initializes DAO when uninitialized", async () => {
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
-      mod.default(pi);
+      mod.default(asExtensionAPI(pi));
 
       const daoCommand = pi.commands.find((c) => c.name === "dao");
       const commandCtx = createMockCommandContext();
@@ -908,7 +925,7 @@ describe("swarmDaoExtension", () => {
 
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
-      mod.default(pi);
+      mod.default(asExtensionAPI(pi));
 
       const daoCommand = pi.commands.find((c) => c.name === "dao");
       const commandCtx = createMockCommandContext();
@@ -929,7 +946,7 @@ describe("swarmDaoExtension", () => {
 
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
-      mod.default(pi);
+      mod.default(asExtensionAPI(pi));
 
       const daoCommand = pi.commands.find((c) => c.name === "dao");
       const commandCtx = createMockCommandContext();
@@ -946,7 +963,7 @@ describe("swarmDaoExtension", () => {
     it("registers session_start event handler", async () => {
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
-      mod.default(pi);
+      mod.default(asExtensionAPI(pi));
 
       const sessionHandler = pi.events.find((e) => e.event === "session_start");
       expect(sessionHandler).toBeDefined();
@@ -956,7 +973,7 @@ describe("swarmDaoExtension", () => {
     it("registers before_agent_start event handler", async () => {
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
-      mod.default(pi);
+      mod.default(asExtensionAPI(pi));
 
       const agentHandler = pi.events.find((e) => e.event === "before_agent_start");
       expect(agentHandler).toBeDefined();
@@ -966,7 +983,7 @@ describe("swarmDaoExtension", () => {
     it("registers exactly 2 event handlers", async () => {
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
-      mod.default(pi);
+      mod.default(asExtensionAPI(pi));
 
       expect(pi.events.length).toBe(2);
     });
@@ -978,9 +995,9 @@ describe("swarmDaoExtension", () => {
     it("initializes storage and creates state on session start", async () => {
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
-      mod.default(pi);
+      mod.default(asExtensionAPI(pi));
 
-      const handler = pi.events.find((e) => e.event === "session_start")?.handler;
+      const handler = requireEventHandler(pi, "session_start");
       await handler({}, {});
 
       // After session_start, .dao directory should exist
@@ -1002,18 +1019,18 @@ describe("swarmDaoExtension", () => {
 
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
-      mod.default(pi);
+      mod.default(asExtensionAPI(pi));
 
-      const handler = pi.events.find((e) => e.event === "session_start")?.handler;
+      const handler = requireEventHandler(pi, "session_start");
       await expect(handler({}, {})).resolves.toBeUndefined();
     });
 
     it("deselects a previously opened repository when a reopen fails", async () => {
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
-      mod.default(pi);
+      mod.default(asExtensionAPI(pi));
 
-      const handler = pi.events.find((e) => e.event === "session_start")?.handler;
+      const handler = requireEventHandler(pi, "session_start");
       // First open succeeds and selects the core repository.
       await handler({}, {});
       const { getState } = await import("@guyghost/swarm-dao-core");
@@ -1033,7 +1050,7 @@ describe("swarmDaoExtension", () => {
     it("appends DAO context to system prompt when DAO is not initialized", async () => {
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
-      mod.default(pi);
+      mod.default(asExtensionAPI(pi));
 
       // Simulate what session_start would do: create state so getState() works
       // but leave initialized=false to test the uninitialized path
@@ -1043,7 +1060,7 @@ describe("swarmDaoExtension", () => {
       state.initialized = false;
       setState(state);
 
-      const handler = pi.events.find((e) => e.event === "before_agent_start")?.handler;
+      const handler = requireEventHandler(pi, "before_agent_start");
       const result = await handler({ systemPrompt: "You are an AI assistant." }, {});
 
       expect(result).toBeDefined();
@@ -1060,9 +1077,9 @@ describe("swarmDaoExtension", () => {
 
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
-      mod.default(pi);
+      mod.default(asExtensionAPI(pi));
 
-      const handler = pi.events.find((e) => e.event === "before_agent_start")?.handler;
+      const handler = requireEventHandler(pi, "before_agent_start");
       await expect(handler({ systemPrompt: "You are an AI assistant." }, {})).resolves.toBeDefined();
     });
 
@@ -1076,9 +1093,9 @@ describe("swarmDaoExtension", () => {
 
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
-      mod.default(pi);
+      mod.default(asExtensionAPI(pi));
 
-      const handler = pi.events.find((e) => e.event === "before_agent_start")?.handler;
+      const handler = requireEventHandler(pi, "before_agent_start");
       const result = await handler({ systemPrompt: "base" }, {});
 
       const match = result.systemPrompt.match(/Available tools: (.+)/);
@@ -1086,7 +1103,7 @@ describe("swarmDaoExtension", () => {
       const advertised =
         match?.[1]
           .split(", ")
-          .map((s) => s.trim())
+          .map((s: string) => s.trim())
           .sort() ?? [];
       const registered = pi.tools.map((t) => t.name).sort();
       expect(advertised).toEqual(registered);
@@ -1105,9 +1122,9 @@ describe("swarmDaoExtension", () => {
 
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
-      mod.default(pi);
+      mod.default(asExtensionAPI(pi));
 
-      const handler = pi.events.find((e) => e.event === "before_agent_start")?.handler;
+      const handler = requireEventHandler(pi, "before_agent_start");
       const result = await handler({ systemPrompt: "You are an AI assistant." }, {});
 
       expect(result).toBeDefined();
@@ -1134,7 +1151,7 @@ describe("swarmDaoExtension", () => {
 
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
-      mod.default(pi);
+      mod.default(asExtensionAPI(pi));
 
       // biome-ignore lint/style/noNonNullAssertion: test expects tool to be registered
       const setupTool = pi.tools.find((t) => t.name === "dao_setup")!;
@@ -1164,7 +1181,7 @@ describe("swarmDaoExtension", () => {
 
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
-      mod.default(pi);
+      mod.default(asExtensionAPI(pi));
 
       // biome-ignore lint/style/noNonNullAssertion: test expects tool to be registered
       const setupTool = pi.tools.find((t) => t.name === "dao_setup")!;
@@ -1189,7 +1206,7 @@ describe("swarmDaoExtension", () => {
 
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
-      mod.default(pi);
+      mod.default(asExtensionAPI(pi));
 
       // biome-ignore lint/style/noNonNullAssertion: test expects tool to be registered
       const tool = pi.tools.find((t) => t.name === "dao_config_github")!;
@@ -1220,7 +1237,7 @@ describe("swarmDaoExtension", () => {
 
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
-      mod.default(pi);
+      mod.default(asExtensionAPI(pi));
 
       // biome-ignore lint/style/noNonNullAssertion: test expects tool to be registered
       const tool = pi.tools.find((t) => t.name === "dao_github_create_branch")!;
@@ -1242,7 +1259,7 @@ describe("swarmDaoExtension", () => {
 
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
-      mod.default(pi);
+      mod.default(asExtensionAPI(pi));
 
       // biome-ignore lint/style/noNonNullAssertion: test expects tool to be registered
       const proposeTool = pi.tools.find((t) => t.name === "dao_propose")!;
@@ -1267,7 +1284,7 @@ describe("swarmDaoExtension", () => {
 
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
-      mod.default(pi);
+      mod.default(asExtensionAPI(pi));
 
       // biome-ignore lint/style/noNonNullAssertion: test expects tool to be registered
       const proposeTool = pi.tools.find((t) => t.name === "dao_propose")!;
@@ -1296,7 +1313,7 @@ describe("swarmDaoExtension", () => {
 
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
-      mod.default(pi);
+      mod.default(asExtensionAPI(pi));
 
       // biome-ignore lint/style/noNonNullAssertion: test expects tool to be registered
       const proposeTool = pi.tools.find((t) => t.name === "dao_propose")!;
@@ -1325,7 +1342,7 @@ describe("swarmDaoExtension", () => {
 
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
-      mod.default(pi);
+      mod.default(asExtensionAPI(pi));
 
       // biome-ignore lint/style/noNonNullAssertion: test expects tool to be registered
       const proposeTool = pi.tools.find((t) => t.name === "dao_propose")!;
@@ -1354,7 +1371,7 @@ describe("swarmDaoExtension", () => {
 
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
-      mod.default(pi);
+      mod.default(asExtensionAPI(pi));
 
       // biome-ignore lint/style/noNonNullAssertion: test expects tool to be registered
       const proposeTool = pi.tools.find((t) => t.name === "dao_propose")!;
@@ -1385,7 +1402,7 @@ describe("swarmDaoExtension", () => {
 
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
-      mod.default(pi);
+      mod.default(asExtensionAPI(pi));
 
       // biome-ignore lint/style/noNonNullAssertion: test expects tool to be registered
       const proposeTool = pi.tools.find((t) => t.name === "dao_propose")!;
@@ -1425,11 +1442,11 @@ describe("swarmDaoExtension", () => {
       setState(state);
     }
 
-    async function createOpenProposal(): Promise<MockTool> {
+    async function createOpenProposal(): Promise<MockPi> {
       await setupDao();
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
-      mod.default(pi);
+      mod.default(asExtensionAPI(pi));
 
       // Create an open proposal first
       // biome-ignore lint/style/noNonNullAssertion: test expects tool to be registered
@@ -1483,7 +1500,7 @@ describe("swarmDaoExtension", () => {
       await setupDao();
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
-      mod.default(pi);
+      mod.default(asExtensionAPI(pi));
 
       // biome-ignore lint/style/noNonNullAssertion: test expects tool to be registered
       const updateTool = pi.tools.find((t) => t.name === "dao_update_proposal")!;
@@ -1531,7 +1548,7 @@ describe("swarmDaoExtension", () => {
 
       const mod = await import("@guyghost/swarm-dao-pi-adapter");
       const pi = createMockPi();
-      mod.default(pi);
+      mod.default(asExtensionAPI(pi));
 
       // biome-ignore lint/style/noNonNullAssertion: test expects tool to be registered
       const dashboardTool = pi.tools.find((t) => t.name === "dao_dashboard")!;
@@ -1563,7 +1580,7 @@ describe("swarmDaoExtension", () => {
 
         const mod = await import("@guyghost/swarm-dao-pi-adapter");
         const pi = createMockPi();
-        mod.default(pi);
+        mod.default(asExtensionAPI(pi));
 
         // biome-ignore lint/style/noNonNullAssertion: test expects tool to be registered
         const proposeTool = pi.tools.find((t) => t.name === "dao_propose")!;

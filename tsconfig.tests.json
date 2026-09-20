@@ -1,0 +1,22 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node", "bun"],
+    "paths": {
+      "@guyghost/swarm-dao-core": ["./packages/core/src/index.ts"],
+      "@guyghost/swarm-dao-core/adapters": ["./packages/core/src/adapters/index.ts"],
+      "@guyghost/swarm-dao-core/ports": ["./packages/core/src/ports/index.ts"],
+      "@guyghost/swarm-dao-cli": ["./packages/cli/src/cli.ts"],
+      "@guyghost/swarm-dao-graph": ["./packages/graph-engineering/src/index.ts"],
+      "@guyghost/swarm-dao-improvement": ["./packages/improvement-loop/src/index.ts"],
+      "@guyghost/swarm-dao-mcp": ["./packages/mcp-server/src/index.ts"],
+      "@guyghost/swarm-dao-herdr-adapter": ["./packages/herdr-adapter/src/index.ts"],
+      "@guyghost/swarm-dao-copilot-adapter": ["./packages/copilot-adapter/src/index.ts"],
+      "@guyghost/swarm-dao-codex-adapter": ["./packages/codex-adapter/src/index.ts"],
+      "@guyghost/swarm-dao-claude-adapter": ["./packages/claude-adapter/src/index.ts"]
+    }
+  },
+  "include": ["packages/*/tests/**/*.ts", "packages/*/src/**/*.d.ts"],
+  "exclude": ["node_modules", "dist"]
+}

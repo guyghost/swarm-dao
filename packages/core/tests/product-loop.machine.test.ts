@@ -108,7 +108,7 @@ describe("product-loop machine — nominal transitions", () => {
     actor.send({ type: "VOTE_EXPIRED", source: "tool" });
     const snap = actor.getSnapshot();
     expect(snap.value).toBe("rejected");
-    expect(PRODUCT_TERMINAL_STATES).toContain(snap.value);
+    expect(PRODUCT_TERMINAL_STATES).toContain(snap.value as (typeof PRODUCT_TERMINAL_STATES)[number]);
     expect(snap.status).toBe("done");
     actor.stop();
   });
@@ -247,7 +247,8 @@ describe("product-loop machine — nominal transitions", () => {
     actor.send({ type: "PROPOSAL_DRAFTED", source: "ai", draft: baseDraft });
     actor.send({ type: "OPEN_PROPOSITION", source: "tool" });
     // QUALIFICATION_RUN without permission fields is rejected by the guard.
-    actor.send({ type: "QUALIFICATION_RUN", source: "tool" as const });
+    // Intentionally permission-less: the guard must reject it.
+    actor.send({ type: "QUALIFICATION_RUN", source: "tool" as const } as never);
     expect(actor.getSnapshot().value).toBe("proposition");
     actor.stop();
   });

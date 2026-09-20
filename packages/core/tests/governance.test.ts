@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from "bun:test";
+import type { Proposal } from "@guyghost/swarm-dao-core";
 import {
   calculateCompositeScore,
   calculateRICEScore,
@@ -24,8 +25,8 @@ describe("governance/agents", () => {
   it("initializes default agents", () => {
     const agents = initializeAgents();
     expect(agents.length).toBe(8);
-    expect(agents[0].id).toBe("strategist");
-    expect(agents[0].weight).toBe(3);
+    expect(agents[0]?.id).toBe("strategist");
+    expect(agents[0]?.weight).toBe(3);
   });
 
   it("formats agent table", () => {
@@ -353,7 +354,13 @@ Child reasoning.`;
     expect(under.approved).toBe(false); // but the decision uses the exact fraction
 
     // 3/1 = 75% clears it.
-    const over = tallyVotes({ ...make(), votes: [...votes, { ...votes[0], agentId: "d", agentName: "D" }] }, config);
+    const over = tallyVotes(
+      {
+        ...make(),
+        votes: [...votes, { agentId: "d", agentName: "D", position: "for" as const, reasoning: "ok", weight: 1 }],
+      },
+      config,
+    );
     expect(over.approved).toBe(true);
   });
 
@@ -480,7 +487,7 @@ describe("governance/lifecycle", () => {
   });
 
   it("transitions proposal states", () => {
-    const proposal = {
+    const proposal: Proposal = {
       id: 1,
       title: "Test",
       type: "product-feature" as const,

@@ -55,7 +55,7 @@ describe("observability/logging", () => {
   });
 
   it("custom log handlers still receive filtered levels", () => {
-    const handler = mock(() => {});
+    const handler = mock((_message: string) => {});
     setLogHandler(handler);
     setMinLogLevel("error");
 

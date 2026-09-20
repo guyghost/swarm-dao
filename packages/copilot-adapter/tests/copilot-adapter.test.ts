@@ -46,8 +46,19 @@ describe("copilot-adapter", () => {
   it("returns a manual-dispatch error from spawnAgent", async () => {
     const adapter = createCopilotHostAdapter("/tmp/dao");
     const result = await adapter.spawnAgent({
-      agent: { id: "pm", name: "Product Manager", role: "product" },
-      prompt: "do something",
+      agent: { id: "pm", name: "Product Manager", role: "product", description: "d", weight: 1, systemPrompt: "sp" },
+      proposal: {
+        id: 1,
+        title: "t",
+        type: "technical-change",
+        description: "d",
+        proposedBy: "test",
+        status: "open",
+        votes: [],
+        agentOutputs: [],
+        createdAt: "2031-01-01T00:00:00.000Z",
+      },
+      systemPrompt: "do something",
     });
     expect(result.error).toBeDefined();
     expect(result.content).toBe("");

@@ -26,10 +26,17 @@ describe("intelligence/synthesis.ts", () => {
       },
     ];
     const result = synthesize(proposal, [], outputs, {
+      proposalId: 1,
       approved: true,
+      quorumMet: true,
+      totalAgents: 1,
+      votingAgents: 1,
+      quorumPercent: 100,
+      weightedFor: 1,
+      weightedAgainst: 0,
+      totalVotingWeight: 1,
       approvalScore: 70,
-      summary: "ok",
-      breakdown: [],
+      votes: [],
     });
     expect(formatSynthesis(result)).toContain("Synthesis");
     expect(result).toContain("APPROVED");

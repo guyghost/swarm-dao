@@ -65,7 +65,9 @@ async function setupPlugin(tmpDir: string) {
   const ctx = createMockCtx(tmpDir);
   const { OpenCodeDAO } = await import("@guyghost/swarm-dao-opencode-adapter");
   const plugin = await OpenCodeDAO(ctx);
-  return { plugin, ctx };
+  // The plugin always defines `tool`; the SDK type only marks it optional.
+  type Plugin = typeof plugin & { tool: NonNullable<typeof plugin.tool> };
+  return { plugin: plugin as Plugin, ctx };
 }
 
 describe("opencode-adapter", () => {
@@ -373,10 +375,10 @@ describe("opencode-adapter", () => {
       );
 
       expect(result).toContain("Swarm Dispatch Plan");
-      // Agents carry no per-agent model anymore: the plan resolves the DAO
-      // config default and labels it as such.
-      expect(result).toContain('model="z.ai/GLM-5.1"');
-      expect(result).toContain("DAO default");
+      // No default-model layer (ADR-006): with no agent override, no session
+      // model, and no host model, the plan resolves to the "default" sentinel
+      // — the host decides, no flag is emitted (D3 row 3).
+      expect(result).toContain('model="default"');
 
       const state = getState();
       expect(state.proposals[0]?.status).toBe("deliberating");
