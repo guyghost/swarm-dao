@@ -124,8 +124,9 @@ export interface ConfigUpgradeResult {
 }
 
 /** Align .dao/config.json with CURRENT_CONFIG_VERSION and persist it.
- *  No-op result when already current; throws when the file was written
- *  by a newer tool (downgrade is not supported). */
+ *  No write when already current (the load→save round-trip would
+ *  materialize defaults and drop unknown keys); throws when the file was
+ *  written by a newer tool (downgrade is not supported). */
 export async function upgradeConfig(daoRoot: string): Promise<ConfigUpgradeResult> {
   const current = await loadConfig(daoRoot);
   const from = effectiveConfigVersion(current);
@@ -135,8 +136,11 @@ export async function upgradeConfig(daoRoot: string): Promise<ConfigUpgradeResul
     );
   }
   const config = migrateProjectConfig(current);
-  await saveConfig(daoRoot, config);
-  return { from, to: effectiveConfigVersion(config), config };
+  const to = effectiveConfigVersion(config);
+  if (to !== from) {
+    await saveConfig(daoRoot, config);
+  }
+  return { from, to, config };
 }
 
 const CONFIG_FILE = "config.json";

@@ -324,6 +324,21 @@ describe("config schema version", () => {
     }
   });
 
+  it("upgradeConfig does not rewrite an already-current config (no-op is byte-identical)", async () => {
+    const daoRoot = await fs.mkdtemp(path.join(os.tmpdir(), "swarm-config-version-"));
+    try {
+      // Unknown keys must survive; defaults must not materialize on a no-op.
+      const raw = '{"configVersion":1,"futureField":{"a":1}}';
+      await fs.writeFile(path.join(daoRoot, "config.json"), raw, "utf-8");
+      const result = await upgradeConfig(daoRoot);
+      expect(result.from).toBe(1);
+      expect(result.to).toBe(1);
+      expect(await fs.readFile(path.join(daoRoot, "config.json"), "utf-8")).toBe(raw);
+    } finally {
+      await fs.rm(daoRoot, { recursive: true, force: true }).catch(() => {});
+    }
+  });
+
   it("upgradeConfig refuses a config newer than this tool", async () => {
     const daoRoot = await fs.mkdtemp(path.join(os.tmpdir(), "swarm-config-version-"));
     try {
