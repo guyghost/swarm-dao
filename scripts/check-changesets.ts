@@ -46,6 +46,56 @@ if (!baseSha) {
   }
 }
 
+// Private packages are ignored by changesets, and a changeset mixing an
+// ignored package with a publishable one is REJECTED by assemble-release-plan
+// ("Found mixed changeset") — the failure only shows up in the Release
+// workflow, after merge. Gate it here instead.
+const privatePackages = new Set<string>();
+const packagesDir = "packages";
+if (existsSync(packagesDir)) {
+  for (const entry of readdirSync(packagesDir)) {
+    const manifest = path.join(packagesDir, entry, "package.json");
+    if (!existsSync(manifest)) continue;
+    const pkg = JSON.parse(readFileSync(manifest, "utf8")) as { name?: string; private?: boolean };
+    if (pkg.name && pkg.private) privatePackages.add(pkg.name);
+  }
+}
+
+const declared = new Set<string>();
+const privateDeclared = new Map<string, string>();
+const changesetDir = ".changeset";
+if (existsSync(changesetDir)) {
+  for (const entry of readdirSync(changesetDir)) {
+    if (!entry.endsWith(".md")) continue;
+    const text = readFileSync(path.join(changesetDir, entry), "utf8");
+    const frontmatter = text.match(/^---\n([\s\S]*?)\n---/);
+    if (!frontmatter) continue;
+    for (const line of frontmatter[1].split("\n")) {
+      // Keys in changeset frontmatter are package names ("@scope/pkg": bump
+      // or "pkg": bump); skip $schema and anything key-less.
+      const key = line
+        .split(":")[0]
+        .trim()
+        .replace(/^["']|["']$/g, "");
+      if (!key || key.startsWith("$")) continue;
+      declared.add(key);
+      if (privatePackages.has(key)) privateDeclared.set(key, entry);
+    }
+  }
+}
+
+if (privateDeclared.size > 0) {
+  console.error("check:changesets — FAILED");
+  console.error(
+    "Changesets must not declare private (never-published) packages:\n" +
+      [...privateDeclared].map(([pkg, file]) => `  ${file}: ${pkg}`).join("\n") +
+      "\nchangesets treats private packages as ignored, and a changeset mixing\n" +
+      "ignored with publishable packages aborts the Release workflow\n" +
+      '(assemble-release-plan: "Found mixed changeset"). Remove the entry.',
+  );
+  process.exit(1);
+}
+
 if (baseSha === sh("git rev-parse HEAD")) {
   console.log("check:changesets — base is HEAD; nothing to compare.");
   process.exit(0);
@@ -109,29 +159,6 @@ for (const file of srcTouched) {
 if (required.size === 0) {
   console.log("check:changesets — src/ changes only in private packages; nothing to cover.");
   process.exit(0);
-}
-
-// ── Pending changesets ───────────────────────────────────────
-
-const declared = new Set<string>();
-const changesetDir = ".changeset";
-if (existsSync(changesetDir)) {
-  for (const entry of readdirSync(changesetDir)) {
-    if (!entry.endsWith(".md")) continue;
-    const text = readFileSync(path.join(changesetDir, entry), "utf8");
-    const frontmatter = text.match(/^---\n([\s\S]*?)\n---/);
-    if (!frontmatter) continue;
-    for (const line of frontmatter[1].split("\n")) {
-      // Keys in changeset frontmatter are package names ("@scope/pkg": bump
-      // or "pkg": bump); skip $schema and anything key-less.
-      const key = line
-        .split(":")[0]
-        .trim()
-        .replace(/^["']|["']$/g, "");
-      if (!key || key.startsWith("$")) continue;
-      declared.add(key);
-    }
-  }
 }
 
 // ── Compare ──────────────────────────────────────────────────
