@@ -13,7 +13,7 @@
 // `project.json` repoPath match and never touching the current branch.
 
 import { execFile } from "node:child_process";
-import { promises as fs } from "node:fs";
+import { existsSync, promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -72,7 +72,29 @@ async function pathExists(candidate: string): Promise<boolean> {
  *  benchmark gate caught exactly that — ADR-007 follow-up). */
 const identityCache = new Map<string, Promise<{ repoRoot: string; repoName: string } | null>>();
 
+/**
+ * Cheap git-ness probe without spawning git: walk up from `cwd` looking for
+ * a `.git` entry (directory, or file for linked worktrees/submodules). The
+ * subprocess probe on throwaway non-git dirs dominated open() on the
+ * benchmark runner (PR #205 gate).
+ */
+function hasGitWorkTree(cwd: string): boolean {
+  let dir = path.resolve(cwd);
+  for (;;) {
+    try {
+      if (existsSync(path.join(dir, ".git"))) return true;
+    } catch {
+      return false;
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) return false;
+    dir = parent;
+  }
+}
+
 async function resolveRepoIdentityUncached(cwd: string): Promise<{ repoRoot: string; repoName: string } | null> {
+  // No `.git` anywhere up the tree → not a repo, no git subprocess at all.
+  if (!hasGitWorkTree(cwd)) return null;
   let commonDir = await git(cwd, "rev-parse", "--path-format=absolute", "--git-common-dir");
   if (commonDir === null) {
     // git < 2.31: --git-dir may be relative to cwd.
