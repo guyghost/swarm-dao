@@ -4,6 +4,7 @@
 
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { resolveConfigFilePath } from "./adapters/dao-home/dao-home.js";
 import { composeSystemPrompt } from "./governance/charter.js";
 import type { RuntimeConfig } from "./intelligence/runtime.js";
 import { isValidHarnessId, isValidModelFlag } from "./intelligence/runtime.js";
@@ -207,7 +208,9 @@ export function getConfigPath(daoRoot: string): string {
 }
 
 export async function loadConfig(daoRoot: string): Promise<ProjectConfig> {
-  const configPath = getConfigPath(daoRoot);
+  // ADR-007: `daoRoot` may be the branch state dir; config is shared at the
+  // project root and resolved through the project.json markers.
+  const configPath = await resolveConfigFilePath(daoRoot);
   let raw: string;
   try {
     raw = await fs.readFile(configPath, "utf-8");
@@ -407,9 +410,9 @@ function validateProjectConfig(input: Record<string, unknown>, configPath: strin
 }
 
 export async function saveConfig(daoRoot: string, config: ProjectConfig): Promise<void> {
-  const configPath = getConfigPath(daoRoot);
+  const configPath = await resolveConfigFilePath(daoRoot);
   const redacted = redactSensitiveFields(config);
-  await fs.mkdir(daoRoot, { recursive: true });
+  await fs.mkdir(path.dirname(configPath), { recursive: true });
   await writeAtomic(configPath, `${JSON.stringify(redacted, null, 2)}\n`);
 }
 

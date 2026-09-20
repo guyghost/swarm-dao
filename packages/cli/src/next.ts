@@ -12,7 +12,7 @@ import {
   collectAttention,
   FileDaoStateRepository,
   FsAttentionStore,
-  getDaoRoot,
+  resolveDaoLayout,
 } from "@guyghost/swarm-dao-core";
 import { c, formatRemaining, GLYPH } from "./render.js";
 import { locateRoot, readJsonOrNull, SERIES_ROOT_CANDIDATES } from "./roots.js";
@@ -91,7 +91,10 @@ export async function renderNext(cwd: string): Promise<string> {
  */
 async function unratedProposals(cwd: string): Promise<{ id: number; title: string }[]> {
   try {
-    await fs.access(path.join(getDaoRoot(cwd), "state.json"));
+    // Read-only gate: ensure:false never creates project state as a side
+    // effect (ADR-007).
+    const layout = await resolveDaoLayout(cwd, { ensure: false });
+    await fs.access(path.join(layout.stateRoot, "state.json"));
   } catch {
     return [];
   }

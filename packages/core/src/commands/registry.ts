@@ -350,6 +350,13 @@ export const DAO_COMMANDS: readonly DaoCommand[] = [
 
   // ── Meta (CLI-native) ─────────────────────────────────────
   { id: "init", phase: "init", summary: "Initialize the .dao/ storage directory", args: "", hosts: ["cli"] },
+  {
+    id: "gc",
+    phase: "init",
+    summary: "Delete DAO state of deleted branches/worktrees (external home, ADR-007)",
+    args: "[--dry-run]",
+    hosts: ["cli"],
+  },
   { id: "config", phase: "discover", summary: "Print the DAO configuration", hosts: ["cli"] },
   {
     id: "improve",

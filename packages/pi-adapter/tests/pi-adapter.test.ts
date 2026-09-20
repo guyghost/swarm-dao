@@ -154,6 +154,11 @@ const EXPECTED_TOOLS = [
 let DAO_ROOT: string;
 let testRoot: string;
 let cwdBefore: string;
+let savedDaoHome: string;
+
+/** ADR-007: evidence roots stay cwd-relative (`.dao/graph-runs`, …) while
+ *  state moves to the external home — tests need both roots. */
+let EVIDENCE_ROOT: string;
 
 // ── Test Suite ──────────────────────────────────────────────
 
@@ -164,12 +169,22 @@ describe("swarmDaoExtension", () => {
     cwdBefore = process.cwd();
     testRoot = await fs.mkdtemp(path.join(tmpdir(), "swarm-pi-tests-"));
     await Bun.$`git init -q`.cwd(testRoot);
+    // ADR-007: the throwaway checkout is a git repo, so the tools resolve the
+    // external DAO home. Pin it inside the test root — never the real
+    // ~/.swarm-dao — and derive DAO_ROOT from the resolved branch state dir.
+    savedDaoHome = process.env.SWARM_DAO_HOME ?? "";
+    process.env.SWARM_DAO_HOME = path.join(testRoot, "dao-home");
+    const { resolveDaoLayout } = await import("@guyghost/swarm-dao-core");
+    const layout = await resolveDaoLayout(testRoot);
     process.chdir(testRoot);
-    DAO_ROOT = path.join(testRoot, ".dao");
+    DAO_ROOT = layout.stateRoot;
+    EVIDENCE_ROOT = path.join(testRoot, ".dao");
   });
 
   afterAll(async () => {
     process.chdir(cwdBefore);
+    if (savedDaoHome === "") delete process.env.SWARM_DAO_HOME;
+    else process.env.SWARM_DAO_HOME = savedDaoHome;
     await fs.rm(testRoot, { recursive: true, force: true });
   });
 
@@ -178,20 +193,25 @@ describe("swarmDaoExtension", () => {
     // Clear any in-memory state from core (module-level `state` variable)
     const { setState } = await import("@guyghost/swarm-dao-core");
     setState(null);
-    // Clean .dao directory
-    try {
-      await fs.rm(DAO_ROOT, { recursive: true, force: true });
-    } catch {
-      /* ignore */
+    // Clean both storage roots: the external home branch dir and the
+    // cwd-relative `.dao` (evidence + legacy sync-path spill, ADR-007).
+    for (const root of [DAO_ROOT, EVIDENCE_ROOT]) {
+      try {
+        await fs.rm(root, { recursive: true, force: true });
+      } catch {
+        /* ignore */
+      }
     }
   });
 
   afterEach(async () => {
-    // Clean .dao directory after each test
-    try {
-      await fs.rm(DAO_ROOT, { recursive: true, force: true });
-    } catch {
-      /* ignore */
+    // Clean both storage roots after each test
+    for (const root of [DAO_ROOT, EVIDENCE_ROOT]) {
+      try {
+        await fs.rm(root, { recursive: true, force: true });
+      } catch {
+        /* ignore */
+      }
     }
   });
 
@@ -249,9 +269,9 @@ describe("swarmDaoExtension", () => {
       const pi = createMockPi();
       mod.default(asExtensionAPI(pi));
 
-      await fs.mkdir(path.join(DAO_ROOT, "graph-runs", "g1"), { recursive: true });
+      await fs.mkdir(path.join(EVIDENCE_ROOT, "graph-runs", "g1"), { recursive: true });
       await fs.writeFile(
-        path.join(DAO_ROOT, "graph-runs", "g1", "snapshot.json"),
+        path.join(EVIDENCE_ROOT, "graph-runs", "g1", "snapshot.json"),
         JSON.stringify({
           runId: "g1",
           state: "awaitingApproval",
@@ -299,7 +319,7 @@ describe("swarmDaoExtension", () => {
       expect(parsed.accepted).toBe(true);
       expect(parsed.snapshot.state).toBe("modelReview");
 
-      const journal = (await fs.readFile(path.join(DAO_ROOT, "graph-runs", "g2", "journal.ndjson"), "utf8"))
+      const journal = (await fs.readFile(path.join(EVIDENCE_ROOT, "graph-runs", "g2", "journal.ndjson"), "utf8"))
         .trim()
         .split("\n")
         .map((line) => JSON.parse(line));

@@ -34,11 +34,10 @@ import {
   FsShipAuditStore,
   formatAttention,
   formatControlResult,
+  gcDaoHome,
   getAllAuditLog,
   getAuditLog,
-  getConfigPath,
   getDaoCommandsByPhase,
-  getDaoRoot,
   getOutcome,
   getProposal,
   getState,
@@ -56,6 +55,8 @@ import {
   RateProposalUseCase,
   RejectProposalUseCase,
   recordAudit,
+  resolveConfigFilePath,
+  resolveDaoLayout,
   ShipProposalUseCase,
   saveState,
   setRepository,
@@ -326,6 +327,7 @@ function announceChildren(header: string, child: ChildSessionOptions, names: str
  */
 const CLI_IMPLEMENTED = [
   "init",
+  "gc",
   "setup",
   "propose",
   "deliberate",
@@ -444,10 +446,18 @@ function buildCliHelp(): string {
 const HELP = buildCliHelp();
 
 async function cmdInit(cwd: string): Promise<void> {
-  const root = getDaoRoot(cwd);
+  const layout = await resolveDaoLayout(cwd);
   setRepository(await FileDaoStateRepository.open(cwd));
   await saveState();
-  info(`✓ DAO storage initialized at ${root}`);
+  info(`✓ DAO storage initialized at ${layout.stateRoot}`);
+  if (layout.mode === "home") {
+    info(`   External DAO home (ADR-007) — project root: ${layout.projectRoot}`);
+  }
+}
+
+/** ADR-007: resolved DAO state root — legacy `<cwd>/.dao` or the home branch dir. */
+async function daoStateRoot(cwd: string): Promise<string> {
+  return (await resolveDaoLayout(cwd)).stateRoot;
 }
 
 async function cmdSetup(cwd: string): Promise<void> {
@@ -464,6 +474,23 @@ async function cmdSetup(cwd: string): Promise<void> {
   info(`✓ DAO initialized with ${agents.length} agents`);
   for (const a of agents) {
     info(`  - ${a.name} (w=${a.weight}) — ${a.role}`);
+  }
+}
+
+/** swarm-dao gc — remove DAO state of deleted branches/worktrees (ADR-007 §5). */
+async function cmdGc(cwd: string, flags: Record<string, string | true>): Promise<void> {
+  const dryRun = flags["dry-run"] === true;
+  const result = await gcDaoHome(cwd, { dryRun });
+  if (result.mode !== "home") {
+    info("DAO home GC: legacy .dao storage in use — nothing to collect.");
+    return;
+  }
+  if (result.removed.length === 0) {
+    info(`DAO home GC: nothing stale under ${result.projectRoot}`);
+    return;
+  }
+  for (const dir of result.removed) {
+    info(`${dryRun ? "[dry-run] would remove" : "removed"} ${dir}`);
   }
 }
 
@@ -537,12 +564,12 @@ async function cmdDeliberate(cwd: string, positional: string[], flags: Record<st
   const id = Number(idStr);
   if (!Number.isInteger(id)) err(`invalid proposal id '${idStr}'`);
 
-  const projectConfig = await loadConfig(getDaoRoot(cwd));
+  const projectConfig = await loadConfig(await daoStateRoot(cwd));
   const child = childSessionOptionsFrom(flags, projectConfig);
   const repository = await ensureLoaded(cwd);
   if (!getProposal(id)) err(`proposal #${id} not found`);
 
-  const agents = await loadAgentDefinitions(getDaoRoot(cwd), projectConfig);
+  const agents = await loadAgentDefinitions(await daoStateRoot(cwd), projectConfig);
   announceChildren(
     `${agents.length} child sessions vote on proposal #${id}`,
     child,
@@ -568,12 +595,12 @@ async function cmdDeliberate(cwd: string, positional: string[], flags: Record<st
  *  herdr child session (children are named swarm-dao-p0-<agent>-<hash>:
  *  roundtable runs on the synthetic proposal #0). */
 async function cmdRoundtable(cwd: string, flags: Record<string, string | true>): Promise<void> {
-  const projectConfig = await loadConfig(getDaoRoot(cwd));
+  const projectConfig = await loadConfig(await daoStateRoot(cwd));
   const child = childSessionOptionsFrom(flags, projectConfig);
   const repository = await ensureLoaded(cwd);
   if (!getState().initialized) err("DAO not initialized. Run: swarm-dao setup");
 
-  const agents = await loadAgentDefinitions(getDaoRoot(cwd), projectConfig);
+  const agents = await loadAgentDefinitions(await daoStateRoot(cwd), projectConfig);
   announceChildren(
     `${agents.length} child sessions suggest proposal ideas`,
     child,
@@ -660,11 +687,12 @@ async function cmdShow(cwd: string, positional: string[]): Promise<void> {
 async function cmdConfig(cwd: string, positional: string[]): Promise<number> {
   const [sub] = positional;
   if (sub === "upgrade") {
-    const result = await upgradeConfig(getDaoRoot(cwd));
+    const stateRoot = await daoStateRoot(cwd);
+    const result = await upgradeConfig(stateRoot);
     if (result.from === result.to) {
       info(`✓ config already current (v${result.to})`);
     } else {
-      info(`✓ config upgraded v${result.from} → v${result.to} (${getConfigPath(getDaoRoot(cwd))})`);
+      info(`✓ config upgraded v${result.from} → v${result.to} (${await resolveConfigFilePath(stateRoot)})`);
     }
     return 0;
   }
@@ -868,7 +896,7 @@ async function cmdShip(cwd: string, positional: string[], flags: Record<string, 
   const force = flags.force === true;
 
   const repository = await ensureLoaded(cwd);
-  const projectConfig = await loadConfig(getDaoRoot(cwd));
+  const projectConfig = await loadConfig(await daoStateRoot(cwd));
 
   // Ship audit challenge (opt-in): first call challenges, unchanged second
   // call proceeds (models/ship-audit.md).
@@ -965,7 +993,7 @@ async function cmdImplement(cwd: string, positional: string[], flags: Record<str
   const bad = positional.find((_, i) => !Number.isInteger(ids[i]));
   if (bad !== undefined) err(`invalid proposal id '${bad}'`);
 
-  const projectConfig = await loadConfig(getDaoRoot(cwd));
+  const projectConfig = await loadConfig(await daoStateRoot(cwd));
   const child = childSessionOptionsFrom(flags, projectConfig);
   await ensureLoaded(cwd);
   const proposals: Proposal[] = [];
@@ -1057,11 +1085,11 @@ async function cmdGithubConfig(cwd: string, flags: Record<string, string | true>
 
   const githubConfig = { owner, repo, issues: flags.issues === true, enabled: true };
 
-  // Persist to .dao/config.json — no credentials are stored: authentication
-  // is delegated to the GitHub CLI (`gh auth login`).
-  const daoRoot = getDaoRoot(cwd);
-  await fs.mkdir(daoRoot, { recursive: true });
-  const configPath = path.join(daoRoot, "config.json");
+  // Persist to the resolved project config — no credentials are stored:
+  // authentication is delegated to the GitHub CLI (`gh auth login`).
+  const layout = await resolveDaoLayout(cwd);
+  const configPath = await resolveConfigFilePath(layout.stateRoot);
+  await fs.mkdir(path.dirname(configPath), { recursive: true });
   let configData: Record<string, unknown> = {};
   try {
     configData = JSON.parse(await fs.readFile(configPath, "utf-8"));
@@ -1087,8 +1115,7 @@ async function cmdGithubConfig(cwd: string, flags: Record<string, string | true>
  * Returns true if GitHub is configured, false otherwise.
  */
 async function loadGitHubConfigFromStorage(cwd: string): Promise<boolean> {
-  const daoRoot = getDaoRoot(cwd);
-  const configPath = path.join(daoRoot, "config.json");
+  const configPath = await resolveConfigFilePath(await daoStateRoot(cwd));
   try {
     const configData = JSON.parse(await fs.readFile(configPath, "utf-8"));
     const github = configData.github;
@@ -1328,7 +1355,7 @@ async function cmdGraphImplement(cwd: string, flags: Record<string, string | tru
     err(`run is in ${peek.snapshot().state}, not implementing`);
   }
 
-  const projectConfig = await loadConfig(getDaoRoot(cwd));
+  const projectConfig = await loadConfig(await daoStateRoot(cwd));
   const child = childSessionOptionsFrom(flags, projectConfig);
   const proposal = graphImplementProposal(runId);
   const adapter = childAdapter(child, cwd);
@@ -1797,6 +1824,9 @@ export async function main(argv: string[], cwd: string = process.cwd()): Promise
         return 0;
       case "init":
         await cmdInit(cwd);
+        return 0;
+      case "gc":
+        await cmdGc(cwd, flags);
         return 0;
       case "setup":
         await cmdSetup(cwd);

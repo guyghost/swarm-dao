@@ -4,6 +4,7 @@
 
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { resolveConfigFilePath, resolveDaoLayout } from "./adapters/dao-home/dao-home.js";
 import { ARCHIVE_FILE_NAME, mergeArchive, parseArchive } from "./adapters/persistence/archive.js";
 import { AUDIT_JSONL_FILE_NAME, mergeAuditEntries, parseAuditJsonl } from "./adapters/persistence/audit-jsonl.js";
 import {
@@ -55,7 +56,6 @@ let activeRepository: DaoStateRepositoryPort | null = null;
 
 const STATE_FILE = "state.json";
 const DECISIONS_DIR = "decisions";
-const CONFIG_FILE = "config.json";
 
 /**
  * Name of the now-removed per-proposal sidecar directory. Kept only for the
@@ -228,6 +228,11 @@ function normalizeStorageSettings(value: unknown, daoRoot: string): StorageSetti
 
 // ── Paths ────────────────────────────────────────────────────
 
+/**
+ * Legacy synchronous mapping: `<cwd>/.dao`. Kept for compatibility callers
+ * that cannot await; new code resolves through `resolveDaoLayout` (ADR-007),
+ * which routes git repos to `~/.swarm-dao/<project>/branches/<branch>`.
+ */
 export function getDaoRoot(cwd: string): string {
   return path.join(cwd, ".dao");
 }
@@ -258,9 +263,12 @@ function resolveSafeLegacyDirectory(cwd: string, directory: string): string | nu
 // ── Storage Init ─────────────────────────────────────────────
 
 export async function initStorage(cwd: string): Promise<string> {
-  const daoRoot = getDaoRoot(cwd);
-  await fs.mkdir(daoRoot, { recursive: true });
-  return daoRoot;
+  // ADR-007: resolves legacy `.dao` or the external DAO home, ensures the
+  // project manifest, and runs the passive GC sweep. Returns the state root
+  // (branch dir in home mode).
+  const layout = await resolveDaoLayout(cwd);
+  await fs.mkdir(layout.stateRoot, { recursive: true });
+  return layout.stateRoot;
 }
 
 // ── Legacy Migration ─────────────────────────────────────────
@@ -576,7 +584,7 @@ async function persistDecisions(state: DAOState): Promise<void> {
 // ── Storage Settings ─────────────────────────────────────────
 
 export async function getStorageSettings(daoRoot: string): Promise<StorageSettings> {
-  const configPath = path.join(daoRoot, CONFIG_FILE);
+  const configPath = await resolveConfigFilePath(daoRoot);
   try {
     const parsed = await readJsonFile<unknown>(configPath);
     if (isRecord(parsed) && isRecord(parsed.storageSettings)) {
@@ -592,11 +600,13 @@ export async function updateStorageSettings(
   daoRoot: string,
   updates: Partial<StorageSettings>,
 ): Promise<StorageSettings> {
-  const configPath = path.join(daoRoot, CONFIG_FILE);
-  await fs.mkdir(daoRoot, { recursive: true });
+  const configPath = await resolveConfigFilePath(daoRoot);
+  await fs.mkdir(path.dirname(configPath), { recursive: true });
   // Read-modify-write under the DAO lock (issue #167.4): otherwise a
   // concurrent config.json writer (e.g. saveGitHubConfigToDaoRoot) can drop
-  // the storage update, or vice versa.
+  // the storage update, or vice versa. The lock lives at the state root; a
+  // project-root config shared across branches is not cross-branch locked in
+  // v1 (ADR-007 — acceptable: config writes are rare and operator-driven).
   return withFileLock(daoRoot, async () => {
     const current = await getStorageSettings(daoRoot);
     const next = normalizeStorageSettings({ ...current, ...updates }, daoRoot);
