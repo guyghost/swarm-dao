@@ -37,7 +37,7 @@ If a user asks "what's the state of the DAO?" without a specific proposal, call
 
 Always follow this order. Do not skip steps.
 
-1. **Setup** — `dao_setup` once per repo (creates the 7 default agents).
+1. **Setup** — `dao_setup` once per repo (creates the 8 default agents).
 2. **Propose** — `dao_propose title type description`.
 3. **Deliberate** — `dao_deliberate proposalId=N` returns a **dispatch plan**.
 4. **Spawn** — read the plan, spawn one sub-agent per entry (see *Spawn patterns* below).
