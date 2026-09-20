@@ -33,7 +33,13 @@ interface Check {
 
 const ran = async (command: string): Promise<string | null> => {
   try {
-    const { stdout } = await execAsync(command, { timeout: 10_000 });
+    // Version probes must stay far below the 5s test timeout: a CLI that is
+    // installed but wedged (e.g. docker with a dead daemon) otherwise makes
+    // every doctor call — and every test that runs doctor — hang. The E2E
+    // suite spawns doctor twice in one 5s test, so the probe budget is
+    // 2 × timeout + process startup ≪ 5000ms; a probe that needs longer is
+    // reporting "unavailable", which doctor treats as an optional-tool warn.
+    const { stdout } = await execAsync(command, { timeout: 800 });
     return stdout.trim();
   } catch {
     return null;
@@ -49,6 +55,13 @@ export async function cmdDoctor(cwd: string): Promise<number> {
     level: "ok",
     detail: `bun ${process.versions.bun ?? "?"}`,
   });
+
+  // External tool probes run in parallel: each can wait for its own timeout
+  // when the binary hangs, so sequential awaits would stack the worst cases.
+  const [herdrVersion, dockerVersion] = await Promise.all([
+    ran("herdr --version"),
+    ran("docker version --format {{.Server.Version}}"),
+  ]);
 
   // Git repository (worktrees, branches, evidence history).
   const gitDir = await fs.stat(path.join(cwd, ".git")).then(
@@ -67,7 +80,6 @@ export async function cmdDoctor(cwd: string): Promise<number> {
   );
 
   // herdr — the worker agent runtime for improvement loops.
-  const herdrVersion = await ran("herdr --version");
   checks.push(
     herdrVersion
       ? { name: "herdr (worker agents)", level: "ok" as Level, detail: herdrVersion.split("\n")[0] ?? herdrVersion }
@@ -80,7 +92,6 @@ export async function cmdDoctor(cwd: string): Promise<number> {
   );
 
   // Docker — optional, for container sandboxes.
-  const dockerVersion = await ran("docker version --format {{.Server.Version}}");
   checks.push(
     dockerVersion
       ? { name: "docker (container sandbox)", level: "ok" as Level, detail: `server ${dockerVersion}` }

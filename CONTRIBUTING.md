@@ -21,8 +21,11 @@ bun run setup-workspace
 # `prepare` deliberately does not build on every install).
 bun run build
 
-# Run tests
-bun test
+# Run tests (per package, mirroring CI). Root-level `bun test` also works
+# since the mock.module passthrough recursion was fixed — but per-package
+# runs stay the standard: module mocks are process-global in bun, so
+# isolation keeps suites order-independent by construction.
+bun run test
 
 # Integration tests (cross-host, MCP protocol, on-disk state)
 bun run test:integration

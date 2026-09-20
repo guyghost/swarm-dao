@@ -18,9 +18,10 @@ jobs:
   quality:
     name: Quality gates
     runs-on: ubuntu-latest
-    # TEMPORARY (test-hang diagnosis): bound the job so a hung Test step
-    # produces a log instead of burning the 6h GitHub timeout. Remove once
-    # the hang is root-caused.
+    # Permanent safety net, not a workaround: a hung Test step must produce a
+    # log instead of burning the 6h GitHub timeout. The historical test hang
+    # was root-caused (mock.module passthrough self-recursion, fixed in
+    # packages/pi-adapter/tests/pi-spawn.test.ts) — the bound stays.
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v7
@@ -83,15 +84,33 @@ jobs:
 
       - name: Test
         # Run per-package so each package's bun test process is isolated.
-        # `bun test` at the workspace root runs all test files in a single
-        # process, which lets a mock.module installed by pi-spawn.test.ts
-        # leak into dry-run.test.ts and trigger an infinite spawn-delegation
-        # loop (JS spin, 100% CPU, no children spawned). `bun run test` uses
-        # --filter '*' which invokes each package's own `bun test` separately.
+        # Historical note (root-caused): `bun test` at the workspace root runs
+        # all test files in a single process, and bun's mock.module mutates
+        # the live module registry for the whole run. pi-spawn.test.ts's
+        # child_process passthrough used to re-read the namespace at call
+        # time and recurse into itself for every non-`pi` command — an
+        # infinite JS spin with no children spawned (fixed by value-capturing
+        # the real spawn before mocking). Per-package execution stays the
+        # standard anyway: module mocks are process-global in bun, so
+        # isolation keeps suites order-independent by construction.
         run: bun run test
 
       - name: Integration tests
         run: bun run test:integration
+
+      - name: Coverage gate
+        # Single-process root run (safe since the mock.module passthrough
+        # recursion fix) with dist excluded, then an explicit line/function
+        # gate in scripts/check-coverage.ts (bun's own coverageThreshold
+        # enforces metrics its lcov output does not report — see bunfig).
+        run: bun run test:coverage
+
+      - name: Upload coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-lcov
+          path: coverage/lcov.info
 
       - name: Type check tools
         # tools/ holds the frozen-model contract validators and their tests;

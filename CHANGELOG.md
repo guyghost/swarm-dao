@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial unified architecture combining pi-swarm-dao and opencode-dao
 - **Core** (`@guyghost/swarm-dao-core`): Pure business logic for AI agent governance
   - 4-layer architecture: Governance, Intelligence, Delivery, Control
-  - 7 default specialized agents with weighted voting
+  - 8 default specialized agents with weighted voting
   - Proposal lifecycle: open → deliberating → approved → controlled → executed
   - Composite scoring (RICE + weighted axes)
   - Quality control gates with type-specific severity

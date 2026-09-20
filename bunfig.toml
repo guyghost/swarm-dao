@@ -1,0 +1,21 @@
+# Bun runtime configuration.
+#
+# Coverage is opt-in (`bun run test:coverage` / the CI coverage step): the
+# keys below only take effect when coverage instrumentation is requested
+# (`bun test --coverage`). Plain `bun test` runs are unaffected.
+#
+# dist/** is excluded: tests import the built output of workspace packages,
+# so without this every dist file is measured a second time next to its src
+# (double-counted, and lagging src on stale builds).
+#
+# Threshold gotcha (bun 1.4.2): coverageThreshold is NOT configured here —
+# bun enforces statement and branch metrics its own lcov output does not
+# emit, so every threshold form fails opaquely regardless of the measured
+# line/function numbers (reproduced 2026-09-20: scalar 0.65 exits 1 while
+# lcov reports 66.02% lines / 74.55% functions). The gate lives in
+# scripts/check-coverage.ts, run by the test:coverage script.
+[test]
+coverageReporter = ["text", "lcov"]
+coverageDir = "coverage"
+coverageSkipTestFiles = true
+coveragePathIgnorePatterns = ["**/dist/**", "**/node_modules/**"]
