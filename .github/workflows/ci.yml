@@ -98,6 +98,20 @@ jobs:
       - name: Integration tests
         run: bun run test:integration
 
+      - name: Coverage gate
+        # Single-process root run (safe since the mock.module passthrough
+        # recursion fix) with dist excluded, then an explicit line/function
+        # gate in scripts/check-coverage.ts (bun's own coverageThreshold
+        # enforces metrics its lcov output does not report — see bunfig).
+        run: bun run test:coverage
+
+      - name: Upload coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-lcov
+          path: coverage/lcov.info
+
       - name: Type check tools
         # tools/ holds the frozen-model contract validators and their tests;
         # they are not workspace packages, so they need their own gates
