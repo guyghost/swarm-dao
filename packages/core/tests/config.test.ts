@@ -2,17 +2,21 @@ import { describe, expect, it } from "bun:test";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { DAOConfig } from "@guyghost/swarm-dao-core";
+import type { DAOConfig, ProjectConfig } from "@guyghost/swarm-dao-core";
 import {
+  CURRENT_CONFIG_VERSION,
   canEditWithoutProposal,
   DEFAULT_PROJECT_CONFIG,
+  effectiveConfigVersion,
   filterEnabledAgents,
   initializeAgents,
   isCriticalPath,
   loadConfig,
   mergeConfig,
+  migrateProjectConfig,
   saveConfig,
   shouldSuggestProposal,
+  upgradeConfig,
   validateWeights,
 } from "@guyghost/swarm-dao-core";
 
@@ -236,6 +240,114 @@ describe("config runtime + agentCommands validation (models/agent-runtime.md §8
         "utf-8",
       );
       await expect(loadConfig(daoRoot)).rejects.toThrow("agentCommands");
+    } finally {
+      await fs.rm(daoRoot, { recursive: true, force: true }).catch(() => {});
+    }
+  });
+});
+
+describe("config schema version", () => {
+  it("treats a config without configVersion as legacy v0", async () => {
+    const daoRoot = await fs.mkdtemp(path.join(os.tmpdir(), "swarm-config-version-"));
+    try {
+      await fs.writeFile(path.join(daoRoot, "config.json"), JSON.stringify({ mode: "enforce" }), "utf-8");
+      const loaded = await loadConfig(daoRoot);
+      expect(effectiveConfigVersion(loaded)).toBe(0);
+    } finally {
+      await fs.rm(daoRoot, { recursive: true, force: true }).catch(() => {});
+    }
+  });
+
+  it("round-trips an explicit configVersion", async () => {
+    const daoRoot = await fs.mkdtemp(path.join(os.tmpdir(), "swarm-config-version-"));
+    try {
+      await fs.writeFile(
+        path.join(daoRoot, "config.json"),
+        JSON.stringify({ configVersion: 1, mode: "opt-in" }),
+        "utf-8",
+      );
+      const loaded = await loadConfig(daoRoot);
+      expect(loaded.configVersion).toBe(1);
+      expect(effectiveConfigVersion(loaded)).toBe(1);
+    } finally {
+      await fs.rm(daoRoot, { recursive: true, force: true }).catch(() => {});
+    }
+  });
+
+  it("rejects a non-integer or negative configVersion at load time", async () => {
+    const daoRoot = await fs.mkdtemp(path.join(os.tmpdir(), "swarm-config-version-"));
+    try {
+      await fs.writeFile(path.join(daoRoot, "config.json"), JSON.stringify({ configVersion: 1.5 }), "utf-8");
+      await expect(loadConfig(daoRoot)).rejects.toThrow("configVersion");
+      await fs.writeFile(path.join(daoRoot, "config.json"), JSON.stringify({ configVersion: -1 }), "utf-8");
+      await expect(loadConfig(daoRoot)).rejects.toThrow("configVersion");
+    } finally {
+      await fs.rm(daoRoot, { recursive: true, force: true }).catch(() => {});
+    }
+  });
+
+  it("migrateProjectConfig stamps the current version (pure)", () => {
+    const legacy: ProjectConfig = { mode: "enforce", criticalPaths: ["src/x/**"] };
+    const migrated = migrateProjectConfig(legacy);
+    expect(migrated.configVersion).toBe(CURRENT_CONFIG_VERSION);
+    // input untouched — migration is pure
+    expect(legacy.configVersion).toBeUndefined();
+    // already-current configs pass through unchanged
+    const current = migrateProjectConfig({ ...legacy, configVersion: CURRENT_CONFIG_VERSION });
+    expect(current).toEqual({ ...legacy, configVersion: CURRENT_CONFIG_VERSION });
+  });
+
+  it("upgradeConfig aligns a legacy file with the current version and is idempotent", async () => {
+    const daoRoot = await fs.mkdtemp(path.join(os.tmpdir(), "swarm-config-version-"));
+    try {
+      await fs.writeFile(
+        path.join(daoRoot, "config.json"),
+        JSON.stringify({ mode: "enforce", criticalPaths: ["src/custom/**"] }),
+        "utf-8",
+      );
+      const first = await upgradeConfig(daoRoot);
+      expect(first.from).toBe(0);
+      expect(first.to).toBe(CURRENT_CONFIG_VERSION);
+      const raw = JSON.parse(await fs.readFile(path.join(daoRoot, "config.json"), "utf-8")) as {
+        configVersion?: number;
+      };
+      expect(raw.configVersion).toBe(CURRENT_CONFIG_VERSION);
+      // preserved fields survive the upgrade
+      const loaded = await loadConfig(daoRoot);
+      expect(loaded.mode).toBe("enforce");
+      expect(loaded.criticalPaths).toEqual(["src/custom/**"]);
+      const second = await upgradeConfig(daoRoot);
+      expect(second.from).toBe(CURRENT_CONFIG_VERSION);
+      expect(second.to).toBe(CURRENT_CONFIG_VERSION);
+    } finally {
+      await fs.rm(daoRoot, { recursive: true, force: true }).catch(() => {});
+    }
+  });
+
+  it("upgradeConfig does not rewrite an already-current config (no-op is byte-identical)", async () => {
+    const daoRoot = await fs.mkdtemp(path.join(os.tmpdir(), "swarm-config-version-"));
+    try {
+      // Unknown keys must survive; defaults must not materialize on a no-op.
+      const raw = '{"configVersion":1,"futureField":{"a":1}}';
+      await fs.writeFile(path.join(daoRoot, "config.json"), raw, "utf-8");
+      const result = await upgradeConfig(daoRoot);
+      expect(result.from).toBe(1);
+      expect(result.to).toBe(1);
+      expect(await fs.readFile(path.join(daoRoot, "config.json"), "utf-8")).toBe(raw);
+    } finally {
+      await fs.rm(daoRoot, { recursive: true, force: true }).catch(() => {});
+    }
+  });
+
+  it("upgradeConfig refuses a config newer than this tool", async () => {
+    const daoRoot = await fs.mkdtemp(path.join(os.tmpdir(), "swarm-config-version-"));
+    try {
+      await fs.writeFile(
+        path.join(daoRoot, "config.json"),
+        JSON.stringify({ configVersion: CURRENT_CONFIG_VERSION + 1 }),
+        "utf-8",
+      );
+      await expect(upgradeConfig(daoRoot)).rejects.toThrow("newer than this tool");
     } finally {
       await fs.rm(daoRoot, { recursive: true, force: true }).catch(() => {});
     }

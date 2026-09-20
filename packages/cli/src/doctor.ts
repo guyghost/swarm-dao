@@ -8,7 +8,15 @@ import { exec } from "node:child_process";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
-import { collectAttention, FsAttentionStore, getDaoRoot, loadConfig } from "@guyghost/swarm-dao-core";
+import {
+  CURRENT_CONFIG_VERSION,
+  collectAttention,
+  effectiveConfigVersion,
+  FsAttentionStore,
+  getDaoRoot,
+  loadConfig,
+  type ProjectConfig,
+} from "@guyghost/swarm-dao-core";
 import { loadProjectImprovementConfig } from "@guyghost/swarm-dao-improvement";
 import { c, GLYPH } from "./render.js";
 
@@ -85,8 +93,10 @@ export async function cmdDoctor(cwd: string): Promise<number> {
   );
 
   // Project config — strict validation surfaces typos instead of fail-open.
+  let projectConfig: ProjectConfig | null = null;
   try {
     const config = await loadConfig(getDaoRoot(cwd));
+    projectConfig = config;
     const enforceEmpty = config.mode === "enforce" && (!config.criticalPaths || config.criticalPaths.length === 0);
     checks.push(
       enforceEmpty
@@ -109,6 +119,28 @@ export async function cmdDoctor(cwd: string): Promise<number> {
       detail: (error as Error).message,
       hint: "fix .dao/config.json (see models/CHOICE.md and README Configuration)",
     });
+  }
+
+  // Config schema version — aligned with the running tool?
+  if (projectConfig !== null) {
+    const version = effectiveConfigVersion(projectConfig);
+    checks.push(
+      version === CURRENT_CONFIG_VERSION
+        ? { name: "config version", level: "ok", detail: `v${version} (current)` }
+        : version < CURRENT_CONFIG_VERSION
+          ? {
+              name: "config version",
+              level: "warn",
+              detail: `v${version} (tool: v${CURRENT_CONFIG_VERSION})`,
+              hint: "swarm-dao config upgrade",
+            }
+          : {
+              name: "config version",
+              level: "fail",
+              detail: `v${version} is newer than this tool (v${CURRENT_CONFIG_VERSION})`,
+              hint: "upgrade swarm-dao",
+            },
+    );
   }
 
   // DAO storage + agents.

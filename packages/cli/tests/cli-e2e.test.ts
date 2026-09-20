@@ -3,6 +3,7 @@ import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { main } from "@guyghost/swarm-dao-cli";
+import { CURRENT_CONFIG_VERSION } from "@guyghost/swarm-dao-core";
 
 async function runCLI(args: string[], cwd: string): Promise<{ code: number; stdout: string; stderr: string }> {
   const stdout: string[] = [];
@@ -412,6 +413,48 @@ describe("CLI E2E", () => {
       await runCLI(["rate", String(id), "--score=5", "--comment=Great"], testDir);
       const after = await runCLI(["next"], testDir);
       expect(after.stdout).not.toContain("Retro loop");
+    });
+  });
+
+  describe("config version alignment", () => {
+    it("config upgrade aligns a legacy config with the current schema version", async () => {
+      await runCLI(["init"], testDir);
+      const configPath = path.join(testDir, ".dao", "config.json");
+      await fs.writeFile(configPath, JSON.stringify({ mode: "enforce", criticalPaths: ["src/x/**"] }), "utf-8");
+
+      const before = await runCLI(["doctor"], testDir);
+      expect(before.code).toBe(0);
+      expect(before.stdout).toContain("config version");
+      expect(before.stdout).toContain("swarm-dao config upgrade");
+
+      const upgrade = await runCLI(["config", "upgrade"], testDir);
+      expect(upgrade.code).toBe(0);
+      expect(upgrade.stdout).toContain("config upgraded v0");
+
+      const raw = JSON.parse(await fs.readFile(configPath, "utf-8")) as {
+        configVersion?: number;
+        mode?: string;
+        criticalPaths?: string[];
+      };
+      expect(raw.configVersion).toBe(CURRENT_CONFIG_VERSION);
+      expect(raw.mode).toBe("enforce");
+      expect(raw.criticalPaths).toEqual(["src/x/**"]);
+
+      const after = await runCLI(["doctor"], testDir);
+      expect(after.stdout).toContain("config version");
+      expect(after.stdout).toContain("(current)");
+      expect(after.stdout).not.toContain("swarm-dao config upgrade");
+
+      const again = await runCLI(["config", "upgrade"], testDir);
+      expect(again.code).toBe(0);
+      expect(again.stdout).toContain("already current");
+    });
+
+    it("config rejects an unknown subcommand", async () => {
+      await runCLI(["init"], testDir);
+      const result = await runCLI(["config", "frobnicate"], testDir);
+      expect(result.code).toBe(1);
+      expect(result.stderr).toContain("unknown config subcommand");
     });
   });
 });
