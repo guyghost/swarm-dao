@@ -258,7 +258,7 @@ export const DAO_COMMANDS: readonly DaoCommand[] = [
     summary: "Preview execution without applying changes",
     tool: "dao_dry_run",
     args: "proposalId",
-    hosts: ["mcp", "claude", "copilot", "codex", "pi", "opencode"],
+    hosts: ["mcp", "claude", "copilot", "codex", "pi", "opencode", "cli"],
   },
   {
     id: "roundtable",

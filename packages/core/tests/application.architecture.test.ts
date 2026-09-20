@@ -389,6 +389,42 @@ describe("application architecture", () => {
     expect(repository.get().proposals[0]?.status).toBe("approved");
   });
 
+  it("opens the mandatory-dry-run gate once a dry-run is recorded (CLI and host tool share the use case)", async () => {
+    const state = createInitialState("/project/.dao");
+    state.initialized = true;
+    state.proposals.push({
+      id: 6,
+      title: "Red zone with a recorded dry-run",
+      type: "security-change",
+      description: "The dry-run is the only thing standing between approved and controlled",
+      proposedBy: "cli",
+      status: "approved",
+      votes: [],
+      agentOutputs: [],
+      riskZone: "red",
+      createdAt: "2031-01-01T00:00:00.000Z",
+    });
+    const repository = new InMemoryDaoStateRepository(state);
+
+    const dryRun = await new DryRunProposalUseCase({
+      repository,
+      clock: { now: () => "2031-01-01T00:01:00.000Z" },
+    }).execute({ proposalId: 6 });
+    expect(dryRun.ok).toBe(true);
+    expect(repository.get().proposals[0]?.dryRunAt).toBe("2031-01-01T00:01:00.000Z");
+
+    const result = await new ControlProposalUseCase({
+      repository,
+      clock: { now: () => "2031-01-01T00:02:00.000Z" },
+    }).execute({ proposalId: 6, failOnGateFailure: false });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.control.gates.find((entry) => entry.gateId === "mandatory-dry-run")).toMatchObject({
+      passed: true,
+    });
+  });
+
   it("rejects a failed proposal as an auditable closure (issue #141)", async () => {
     const state = createInitialState("/project/.dao");
     state.initialized = true;
