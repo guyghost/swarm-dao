@@ -8,16 +8,19 @@
 import { createHash } from "node:crypto";
 
 /** Lowercase, `[a-z0-9-]` only, capped at 80 chars, never empty.
- *  Dash-trimming uses two anchored replaces (not an alternation) — an
- *  unambiguous, linear scan per pass (CodeQL polynomial-ReDoS check). */
+ *  Dash-trimming is a manual slice on purpose: chained dash regexes over
+ *  uncontrolled input make every pass re-scan the dash runs the previous
+ *  pass produced (CodeQL polynomial-ReDoS, PR #205). */
 export function slugifyDirName(value: string, fallback = "default"): string {
-  const slug = value
+  const collapsed = value
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+/, "")
-    .replace(/-+$/, "")
     .slice(0, 80);
-  return slug.length > 0 ? slug : fallback;
+  let start = 0;
+  let end = collapsed.length;
+  while (start < end && collapsed.charCodeAt(start) === 45 /* "-" */) start++;
+  while (end > start && collapsed.charCodeAt(end - 1) === 45) end--;
+  return end > start ? collapsed.slice(start, end) : fallback;
 }
 
 /**

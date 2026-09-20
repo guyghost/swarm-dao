@@ -46,6 +46,7 @@ describe("ADR-007 naming (pure)", () => {
   it("maps a branch to a flat, safe directory name", () => {
     expect(branchDirName("feature/adr-007", null)).toBe("feature-adr-007");
     expect(branchDirName("release/v1.2", null)).toBe("release-v1-2");
+    expect(branchDirName("--weird--branch--", null)).toBe("weird-branch");
     expect(branchDirName(null, "a1b2c3d4e5f6")).toBe("detached-a1b2c3d4");
     expect(branchDirName(null, null)).toBe("default");
   });
