@@ -6,6 +6,7 @@
 // is unit-testable without disk. The repository adapter owns the
 // I/O; this module owns the layout rules.
 
+import { isArchivedStatus } from "../../domain/proposal-status.js";
 import type { DAOState, Proposal, ProposalStatus } from "../../types/index.js";
 
 /** Bump on incompatible archive layout changes; `parseArchive` rejects
@@ -37,11 +38,10 @@ export interface ArchivePartition extends SatelliteMaps {
   proposals: Proposal[];
 }
 
-/** Closed proposals are archived; only these two statuses stay in `state.json`.
- *  Same predicate as the decisions sweep — keep them aligned. */
-export function isArchivedStatus(status: ProposalStatus): boolean {
-  return status !== "open" && status !== "deliberating";
-}
+/** Re-exported for the existing public surface (tests and adapters import it
+ *  from here); the rule itself lives in `domain/proposal-status.ts` so
+ *  application code can read it without depending on infrastructure. */
+export { isArchivedStatus };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
