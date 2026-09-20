@@ -3,7 +3,7 @@ import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { Proposal } from "@guyghost/swarm-dao-core";
-import { FileDaoStateRepository } from "@guyghost/swarm-dao-core";
+import { DryRunProposalUseCase, FileDaoStateRepository } from "@guyghost/swarm-dao-core";
 
 let workDir: string;
 
@@ -245,5 +245,69 @@ describe("file repository proposal archive (ADR-004)", () => {
     const stateBefore = await fs.readFile(path.join(daoDir, "state.json"), "utf8");
     await repository.persist();
     expect(await fs.readFile(path.join(daoDir, "state.json"), "utf8")).toBe(stateBefore);
+  });
+
+  it("keeps an inline closed proposal when archive.json already exists (no silent loss)", async () => {
+    // Regression: an existing archive made the archive-changed check skip the
+    // write, while partitionState still removed the inline closed proposal from
+    // the live partition — it vanished from both files.
+    const daoDir = path.join(workDir, ".dao");
+    await fs.mkdir(daoDir, { recursive: true });
+    await fs.writeFile(
+      path.join(daoDir, "state.json"),
+      JSON.stringify({
+        initialized: true,
+        daoRoot: daoDir,
+        nextProposalId: 3,
+        stateRevision: 9,
+        proposals: [proposal(1, "open"), proposal(2, "approved")],
+      }),
+    );
+    await fs.writeFile(
+      path.join(daoDir, "archive.json"),
+      JSON.stringify({
+        version: 1,
+        proposals: [proposal(4, "executed")],
+        controlResults: {},
+        deliveryPlans: {},
+        artefacts: {},
+        outcomes: {},
+        snapshots: {},
+        verifications: {},
+      }),
+    );
+
+    const repository = await FileDaoStateRepository.open(workDir);
+    expect(repository.get().proposals).toHaveLength(3);
+    await repository.persist();
+
+    const archived = await readJson(path.join(daoDir, "archive.json"));
+    expect((archived.proposals as Proposal[]).map((p) => p.id).sort()).toEqual([2, 4]);
+    const live = await readJson(path.join(daoDir, "state.json"));
+    expect((live.proposals as Proposal[]).map((p) => p.id)).toEqual([1]);
+
+    const reopened = await FileDaoStateRepository.open(workDir);
+    expect(reopened.get().proposals.find((p) => p.id === 2)?.description).toContain("Full description");
+  });
+
+  it("persists a dry-run recorded on an archived proposal", async () => {
+    // Regression: the archive signature only tracks id:status, so a field-level
+    // write on a closed proposal was skipped unless the use case marked the
+    // archive dirty — the recorded dry-run never reached disk.
+    const repository = await FileDaoStateRepository.open(workDir);
+    repository.get().proposals.push(proposal(3, "open"), proposal(5, "approved"));
+    await repository.persist();
+
+    const reopened = await FileDaoStateRepository.open(workDir);
+    const result = await new DryRunProposalUseCase({
+      repository: reopened,
+      clock: { now: () => "2031-01-01T00:05:00.000Z" },
+    }).execute({ proposalId: 5 });
+    expect(result.ok).toBe(true);
+
+    const archived = await readJson(path.join(workDir, ".dao", "archive.json"));
+    const stored = (archived.proposals as Proposal[]).find((p) => p.id === 5);
+    expect(stored?.dryRunAt).toBe("2031-01-01T00:05:00.000Z");
+    expect(stored?.dryRunCanProceed).toBeDefined();
   });
 });

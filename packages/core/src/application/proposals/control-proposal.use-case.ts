@@ -33,7 +33,7 @@ export class ControlProposalUseCase {
     if (proposal.riskZone === "red" && !proposal.dryRunAt) {
       return {
         ok: false,
-        error: `Risk zone 'red' requires a completed dry-run before control — run dao_dry_run proposalId=${proposal.id} first. No state change was made (the proposal stays approved).`,
+        error: `Risk zone 'red' requires a completed dry-run before control — run dao_dry_run proposalId=${proposal.id} (CLI: swarm-dao dry-run ${proposal.id}) first. No state change was made (the proposal stays approved).`,
       };
     }
 

@@ -275,3 +275,100 @@ describe("cli.ts — vote weights and control", () => {
     }
   });
 });
+
+describe("cli.ts — propose acceptance criteria and dry-run", () => {
+  it("records every --acceptance-criteria occurrence, in order", async () => {
+    const tmp = await fs.mkdtemp(path.join(tmpdir(), "swarm-cli-ac-"));
+    try {
+      await main(["init"], tmp);
+      await main(["setup"], tmp);
+      expect(
+        await main(
+          [
+            "propose",
+            "--title",
+            "Frozen surface",
+            "--type",
+            "technical-change",
+            "--description",
+            "registry",
+            "--acceptance-criteria",
+            "first criterion",
+            "--acceptance-criteria",
+            "second criterion",
+          ],
+          tmp,
+        ),
+      ).toBe(0);
+      const state = JSON.parse(await fs.readFile(path.join(tmp, ".dao/state.json"), "utf8")) as {
+        proposals: Array<{ acceptanceCriteria?: unknown }>;
+      };
+      expect(state.proposals[0]?.acceptanceCriteria).toEqual(["first criterion", "second criterion"]);
+
+      // A proposal without the flag stays free of the field (no empty array).
+      expect(await main(["propose", "--title", "Plain", "--type", "technical-change", "--description", "d"], tmp)).toBe(
+        0,
+      );
+      const after = JSON.parse(await fs.readFile(path.join(tmp, ".dao/state.json"), "utf8")) as {
+        proposals: Array<{ acceptanceCriteria?: unknown }>;
+      };
+      expect(after.proposals[1]?.acceptanceCriteria ?? []).toEqual([]);
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("fails fast without a proposal id, and on an unknown proposal", async () => {
+    const tmp = await fs.mkdtemp(path.join(tmpdir(), "swarm-cli-dry-usage-"));
+    try {
+      expect(await main(["dry-run"], tmp)).toBe(1);
+      expect(await main(["dry-run", "abc"], tmp)).toBe(1);
+      await main(["init"], tmp);
+      await main(["setup"], tmp);
+      expect(await main(["dry-run", "42"], tmp)).toBe(1);
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("records the dry-run analysis of a red-zone proposal and leaves its status untouched", async () => {
+    const tmp = await fs.mkdtemp(path.join(tmpdir(), "swarm-cli-dry-red-"));
+    try {
+      await main(["init"], tmp);
+      await main(["setup"], tmp);
+      expect(
+        await main(
+          ["propose", "--title", "Rotate the signing key", "--type", "security-change", "--description", "red zone"],
+          tmp,
+        ),
+      ).toBe(0);
+
+      const read = async () =>
+        JSON.parse(await fs.readFile(path.join(tmp, ".dao/state.json"), "utf8")) as {
+          proposals: Array<{
+            id: number;
+            status: string;
+            dryRunAt?: string;
+            dryRunCanProceed?: boolean;
+            riskZone?: string;
+          }>;
+        };
+
+      const before = (await read()).proposals[0];
+      expect(before?.riskZone).toBe("red");
+      expect(before?.dryRunAt).toBeUndefined();
+
+      expect(await main(["dry-run", "1"], tmp)).toBe(0);
+      const after = (await read()).proposals[0];
+      expect(typeof after?.dryRunAt).toBe("string");
+      expect(after?.dryRunCanProceed).toBe(false); // the red zone keeps its risk flag
+      expect(after?.status).toBe("open"); // recording a dry-run transitions nothing
+      // Control still refuses on the status, not on the missing dry-run: the
+      // gate-opening proof lives in the core application tests, where a
+      // proposal can be brought to `approved` through the repository.
+      expect(await main(["control", "1"], tmp)).toBe(1);
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
+});
