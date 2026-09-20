@@ -1,5 +1,31 @@
 # @guyghost/swarm-dao-cli
 
+## 0.16.0
+
+### Minor Changes
+
+- 05920af: cli: expose the proposal dry-run and acceptance criteria on the command line.
+  
+  A red-zone proposal could not complete the control gate from a plain CLI
+  session: `mandatory-dry-run` reads `dryRunAt`, and only the MCP host tool
+  (`dao_dry_run`) could write it. The CLI now implements `dry-run <id>` through
+  the exact same `DryRunProposalUseCase`, so both surfaces record identical
+  evidence, and the red-zone refusal message points at both.
+  
+  `propose` also gains a repeatable `--acceptance-criteria` flag. Without it the
+  acceptance-criteria gate could only ever warn, because the CLI had no way to
+  supply the criteria `CreateProposalCommand` already accepted.
+
+### Patch Changes
+
+- 09da494: doctor: cut tool probes at 0.8s and run them in parallel. A binary that is
+  installed but wedged (docker CLI with a dead daemon) previously stalled every
+  doctor call for up to 10s per probe — past the 5s test timeout, so three CLI
+  tests hung on machines with docker present, and doctor itself felt broken.
+- Updated dependencies [05920af]
+- Updated dependencies [10092d2]
+  - @guyghost/swarm-dao-core@2.2.1
+
 ## 0.15.0
 
 ### Minor Changes
