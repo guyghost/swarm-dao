@@ -1,5 +1,18 @@
 # @guyghost/swarm-dao-opencode-adapter
 
+## 0.6.3
+
+### Patch Changes
+
+- Updated dependencies [b7f55eb]
+- Updated dependencies [c20ef3d]
+- Updated dependencies [e256fbc]
+- Updated dependencies [fd1e0d1]
+  - @guyghost/swarm-dao-core@2.0.0
+  - @guyghost/swarm-dao-graph@0.4.1
+  - @guyghost/swarm-dao-improvement@0.6.9
+  - @guyghost/swarm-dao-product@0.3.8
+
 ## 0.6.2
 
 ### Patch Changes
