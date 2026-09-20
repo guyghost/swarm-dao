@@ -36,6 +36,7 @@ import {
   formatControlResult,
   getAllAuditLog,
   getAuditLog,
+  getConfigPath,
   getDaoCommandsByPhase,
   getDaoRoot,
   getOutcome,
@@ -59,6 +60,7 @@ import {
   saveState,
   setRepository,
   systemClock,
+  upgradeConfig,
 } from "@guyghost/swarm-dao-core";
 import { createGraphRunner, runGraphImplementing } from "@guyghost/swarm-dao-graph";
 import { createHerdrHostAdapter, herdrAgentName } from "@guyghost/swarm-dao-herdr-adapter";
@@ -376,7 +378,8 @@ const CLI_USAGE_DETAILS: Record<string, string> = {
   "github-config": "  github-config --owner <o> --repo <r> [--issues]",
   "github-branch": "  github-branch <proposal-id>",
   "github-pr": "  github-pr <proposal-id> --head-branch <b>",
-  config: "  config",
+  config:
+    "  config            show .dao/config.json\n  config upgrade    align .dao/config.json with the current schema version",
   audit: "  audit [--proposal <id>]",
   attention: "  attention [--source <graph-engineering|improvement-loop|improvement-series|product-loop>,...]",
   next: "  next              what needs you now (human gates + live workflows)",
@@ -654,9 +657,23 @@ async function cmdShow(cwd: string, positional: string[]): Promise<void> {
   }
 }
 
-async function cmdConfig(cwd: string): Promise<void> {
+async function cmdConfig(cwd: string, positional: string[]): Promise<number> {
+  const [sub] = positional;
+  if (sub === "upgrade") {
+    const result = await upgradeConfig(getDaoRoot(cwd));
+    if (result.from === result.to) {
+      info(`✓ config already current (v${result.to})`);
+    } else {
+      info(`✓ config upgraded v${result.from} → v${result.to} (${getConfigPath(getDaoRoot(cwd))})`);
+    }
+    return 0;
+  }
+  if (sub !== undefined) {
+    err(`unknown config subcommand: ${sub} (expected: upgrade)`);
+  }
   await ensureLoaded(cwd);
   info(JSON.stringify(getState().config, null, 2));
+  return 0;
 }
 
 async function cmdAudit(cwd: string, flags: Record<string, string | true>): Promise<void> {
@@ -1803,8 +1820,7 @@ export async function main(argv: string[], cwd: string = process.cwd()): Promise
         await cmdShow(cwd, positional);
         return 0;
       case "config":
-        await cmdConfig(cwd);
-        return 0;
+        return await cmdConfig(cwd, positional);
       case "audit":
         await cmdAudit(cwd, flags);
         return 0;

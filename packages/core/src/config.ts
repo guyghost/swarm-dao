@@ -60,6 +60,9 @@ export interface TmuxConfig {
 }
 
 export interface ProjectConfig {
+  /** Schema version of this config file. Absent = legacy (v0).
+   *  `swarm-dao config upgrade` aligns it with CURRENT_CONFIG_VERSION. */
+  configVersion?: number;
   mode: ActivationMode;
   agentOverrides?: Record<string, Partial<DAOAgent>>;
   criticalPaths?: string[];
@@ -84,6 +87,57 @@ export const DEFAULT_PROJECT_CONFIG: ProjectConfig = {
   mode: "opt-in",
   criticalPaths: ["src/auth/**", "src/payment/**", "src/migrations/**", ".env*", "**/secrets/**"],
 };
+
+// ── Config Schema Version ────────────────────────────────────
+
+/** Schema version written by the current core. A config file whose
+ *  `configVersion` is lower is outdated (upgrade available); higher means
+ *  it was written by a newer tool (this tool is outdated). */
+export const CURRENT_CONFIG_VERSION = 1;
+
+/** Effective schema version of a loaded config — files without a
+ *  `configVersion` field are legacy (v0). */
+export function effectiveConfigVersion(config: ProjectConfig): number {
+  return config.configVersion ?? 0;
+}
+
+/** Ordered migrations: CONFIG_MIGRATIONS[v] upgrades v → v+1. */
+const CONFIG_MIGRATIONS: Array<(config: ProjectConfig) => ProjectConfig> = [
+  // 0 → 1: introduce the explicit configVersion field.
+  (config) => ({ ...config, configVersion: 1 }),
+];
+
+/** Apply every migration between the config's schema version and
+ *  CURRENT_CONFIG_VERSION. Pure: persists nothing. */
+export function migrateProjectConfig(config: ProjectConfig): ProjectConfig {
+  let migrated = config;
+  for (let v = effectiveConfigVersion(migrated); v < CURRENT_CONFIG_VERSION; v++) {
+    migrated = CONFIG_MIGRATIONS[v]?.(migrated) ?? migrated;
+  }
+  return migrated;
+}
+
+export interface ConfigUpgradeResult {
+  from: number;
+  to: number;
+  config: ProjectConfig;
+}
+
+/** Align .dao/config.json with CURRENT_CONFIG_VERSION and persist it.
+ *  No-op result when already current; throws when the file was written
+ *  by a newer tool (downgrade is not supported). */
+export async function upgradeConfig(daoRoot: string): Promise<ConfigUpgradeResult> {
+  const current = await loadConfig(daoRoot);
+  const from = effectiveConfigVersion(current);
+  if (from > CURRENT_CONFIG_VERSION) {
+    throw new Error(
+      `config version ${from} is newer than this tool (${CURRENT_CONFIG_VERSION}) — upgrade swarm-dao first`,
+    );
+  }
+  const config = migrateProjectConfig(current);
+  await saveConfig(daoRoot, config);
+  return { from, to: effectiveConfigVersion(config), config };
+}
 
 const CONFIG_FILE = "config.json";
 
@@ -174,6 +228,13 @@ function validateProjectConfig(input: Record<string, unknown>, configPath: strin
     throw new Error(`Invalid config in ${configPath}: ${msg}`);
   };
   const out: ProjectConfig = { ...DEFAULT_PROJECT_CONFIG };
+
+  if (input.configVersion !== undefined) {
+    if (typeof input.configVersion !== "number" || !Number.isInteger(input.configVersion) || input.configVersion < 0) {
+      fail(`"configVersion" must be a non-negative integer`);
+    }
+    out.configVersion = input.configVersion as number;
+  }
 
   if (input.mode !== undefined) {
     if (input.mode !== "opt-in" && input.mode !== "suggest" && input.mode !== "enforce") {
