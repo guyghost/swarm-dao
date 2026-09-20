@@ -1,5 +1,40 @@
 # @guyghost/swarm-dao-core
 
+## 2.2.1
+
+### Patch Changes
+
+- 05920af: cli: expose the proposal dry-run and acceptance criteria on the command line.
+  
+  A red-zone proposal could not complete the control gate from a plain CLI
+  session: `mandatory-dry-run` reads `dryRunAt`, and only the MCP host tool
+  (`dao_dry_run`) could write it. The CLI now implements `dry-run <id>` through
+  the exact same `DryRunProposalUseCase`, so both surfaces record identical
+  evidence, and the red-zone refusal message points at both.
+  
+  `propose` also gains a repeatable `--acceptance-criteria` flag. Without it the
+  acceptance-criteria gate could only ever warn, because the CLI had no way to
+  supply the criteria `CreateProposalCommand` already accepted.
+- 10092d2: core: stop losing proposals the archive signature cannot see.
+  
+  Two related defects could destroy proposal data on a write:
+  
+  1. A closed proposal that only `state.json` carries (the layout older CLIs
+     wrote) was removed from the live partition by `partitionState`, but the
+     archive-changed check compared `id:status` signatures — which already
+     included it after loading. The archive was therefore not rewritten and the
+     proposal ended up in neither file. The loader now marks the archive dirty
+     when it takes over a closed proposal that `archive.json` does not hold yet.
+  
+  2. The archive signature ignores field-level changes, so any use case that
+     mutates a closed proposal must call `markArchivedDirty()`. The dry-run use
+     case did not, which silently dropped `dryRunAt`/`dryRunCanProceed`: the
+     mandatory-dry-run gate reported a completed dry-run that was never persisted.
+  
+  `isArchivedStatus` also moves to `domain/proposal-status.ts` (re-exported from
+  its previous home) so application code can consult the archived/live rule
+  without importing infrastructure.
+
 ## 2.2.0
 
 ### Minor Changes
