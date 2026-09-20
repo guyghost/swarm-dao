@@ -66,8 +66,13 @@ async function pathExists(candidate: string): Promise<boolean> {
   }
 }
 
-/** Realpath-resolved repo root + basename, or null outside a git repo. */
-async function resolveRepoIdentity(cwd: string): Promise<{ repoRoot: string; repoName: string } | null> {
+/** Realpath-resolved repo root + basename, or null outside a git repo.
+ *  Memoized per cwd: the identity of a checkout never changes within a
+ *  process, and the hot open() path must not re-pay the git execs (the
+ *  benchmark gate caught exactly that — ADR-007 follow-up). */
+const identityCache = new Map<string, Promise<{ repoRoot: string; repoName: string } | null>>();
+
+async function resolveRepoIdentityUncached(cwd: string): Promise<{ repoRoot: string; repoName: string } | null> {
   let commonDir = await git(cwd, "rev-parse", "--path-format=absolute", "--git-common-dir");
   if (commonDir === null) {
     // git < 2.31: --git-dir may be relative to cwd.
@@ -77,6 +82,21 @@ async function resolveRepoIdentity(cwd: string): Promise<{ repoRoot: string; rep
   }
   const repoRoot = await fs.realpath(path.dirname(commonDir));
   return { repoRoot, repoName: path.basename(repoRoot) };
+}
+
+function resolveRepoIdentity(cwd: string): Promise<{ repoRoot: string; repoName: string } | null> {
+  const key = path.resolve(cwd);
+  let pending = identityCache.get(key);
+  if (pending === undefined) {
+    pending = resolveRepoIdentityUncached(key);
+    identityCache.set(key, pending);
+    if (identityCache.size > 64) {
+      // Bounded: long-lived hosts visiting many workspaces stay flat.
+      const oldest = identityCache.keys().next().value;
+      if (oldest !== undefined) identityCache.delete(oldest);
+    }
+  }
+  return pending;
 }
 
 async function resolveBranchId(cwd: string): Promise<string> {
@@ -188,8 +208,13 @@ async function sweepStaleBranches(
 export async function resolveDaoLayout(cwd: string, options: ResolveDaoLayoutOptions = {}): Promise<DaoLayout> {
   const ensure = options.ensure ?? true;
   const legacyRoot = path.join(cwd, ".dao");
+  // Legacy check first — pure fs.stat, no git exec on the hot path.
+  if (await pathExists(legacyRoot)) {
+    return { mode: "legacy", projectRoot: legacyRoot, stateRoot: legacyRoot, branchId: null };
+  }
   const identity = await resolveRepoIdentity(cwd);
-  if (identity === null || (await pathExists(legacyRoot))) {
+  if (identity === null) {
+    // Fail closed: home mode needs a git-derived project identity.
     return { mode: "legacy", projectRoot: legacyRoot, stateRoot: legacyRoot, branchId: null };
   }
 
