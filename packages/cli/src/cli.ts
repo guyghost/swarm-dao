@@ -37,7 +37,6 @@ import {
   gcDaoHome,
   getAllAuditLog,
   getAuditLog,
-  getConfigPath,
   getDaoCommandsByPhase,
   getOutcome,
   getProposal,
@@ -328,6 +327,7 @@ function announceChildren(header: string, child: ChildSessionOptions, names: str
  */
 const CLI_IMPLEMENTED = [
   "init",
+  "gc",
   "setup",
   "propose",
   "deliberate",

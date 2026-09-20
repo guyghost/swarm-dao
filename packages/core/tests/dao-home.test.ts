@@ -84,6 +84,42 @@ describe("ADR-007 resolution precedence", () => {
     }
   });
 
+  it("an evidence-only .dao never flips a git repo out of home mode", async () => {
+    const repo = await mkRoot("evidence");
+    const home = await mkRoot("evidence-home");
+    process.env.SWARM_DAO_HOME = home;
+    try {
+      initRepo(repo);
+      await fs.mkdir(path.join(repo, ".dao", "graph-runs", "r1"), { recursive: true });
+      await fs.writeFile(path.join(repo, ".dao", "graph-runs", "r1", "snapshot.json"), "{}");
+
+      const layout = await resolveDaoLayout(repo);
+      expect(layout.mode).toBe("home");
+      expect(layout.stateRoot).toContain(path.join("branches", "main"));
+    } finally {
+      await fs.rm(repo, { recursive: true, force: true });
+      await fs.rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it("a .dao holding real state (state.json) keeps a git repo on legacy", async () => {
+    const repo = await mkRoot("legacy-git");
+    const home = await mkRoot("legacy-git-home");
+    process.env.SWARM_DAO_HOME = home;
+    try {
+      initRepo(repo);
+      await fs.mkdir(path.join(repo, ".dao"), { recursive: true });
+      await fs.writeFile(path.join(repo, ".dao", "state.json"), "{}");
+
+      const layout = await resolveDaoLayout(repo);
+      expect(layout.mode).toBe("legacy");
+      expect(layout.stateRoot).toBe(path.join(repo, ".dao"));
+    } finally {
+      await fs.rm(repo, { recursive: true, force: true });
+      await fs.rm(home, { recursive: true, force: true });
+    }
+  });
+
   it("non-git projects without home env stay on legacy cwd/.dao", async () => {
     const cwd = await mkRoot("nogit");
     try {

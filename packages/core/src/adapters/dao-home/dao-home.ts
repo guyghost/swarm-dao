@@ -200,6 +200,30 @@ async function sweepStaleBranches(
 }
 
 /**
+ * Evidence-only entries a home-mode project may accumulate under
+ * `<cwd>/.dao` (the pi/mcp graph, product, and improvement tools default
+ * their evidence root there). Their presence alone must never flip the
+ * project back to legacy mode (Copilot review, PR #205).
+ */
+const EVIDENCE_ONLY_ENTRIES = new Set(["graph-runs", "improvement-cycles", "improvement-series", "product-loops"]);
+
+/**
+ * True when `<root>` holds real DAO state: any entry that is not a bare
+ * evidence directory (state.json, config.json, decisions/, …). A legacy
+ * `.dao` keeps its project on legacy storage; an evidence-only or absent
+ * directory does not relocate a home-mode project back into the repo.
+ */
+async function isLegacyDaoRoot(root: string): Promise<boolean> {
+  let entries: string[];
+  try {
+    entries = await fs.readdir(root);
+  } catch {
+    return false;
+  }
+  return entries.some((entry) => !EVIDENCE_ONLY_ENTRIES.has(entry));
+}
+
+/**
  * Resolve the DAO layout for `cwd` (ADR-007 §1). Home mode additionally
  * ensures `project.json` and runs the passive GC sweep unless
  * `options.ensure === false` — read-only callers (status/doctor/next) must
@@ -208,8 +232,9 @@ async function sweepStaleBranches(
 export async function resolveDaoLayout(cwd: string, options: ResolveDaoLayoutOptions = {}): Promise<DaoLayout> {
   const ensure = options.ensure ?? true;
   const legacyRoot = path.join(cwd, ".dao");
-  // Legacy check first — pure fs.stat, no git exec on the hot path.
-  if (await pathExists(legacyRoot)) {
+  // Legacy detection by content, not bare existence: an evidence-only `.dao`
+  // must not flip a home-mode project (ADR-007 §1). Pure fs, no git exec.
+  if (await isLegacyDaoRoot(legacyRoot)) {
     return { mode: "legacy", projectRoot: legacyRoot, stateRoot: legacyRoot, branchId: null };
   }
   const identity = await resolveRepoIdentity(cwd);

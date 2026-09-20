@@ -7,12 +7,15 @@
 
 import { createHash } from "node:crypto";
 
-/** Lowercase, `[a-z0-9-]` only, capped at 80 chars, never empty. */
+/** Lowercase, `[a-z0-9-]` only, capped at 80 chars, never empty.
+ *  Dash-trimming uses two anchored replaces (not an alternation) — an
+ *  unambiguous, linear scan per pass (CodeQL polynomial-ReDoS check). */
 export function slugifyDirName(value: string, fallback = "default"): string {
   const slug = value
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
+    .replace(/^-+/, "")
+    .replace(/-+$/, "")
     .slice(0, 80);
   return slug.length > 0 ? slug : fallback;
 }

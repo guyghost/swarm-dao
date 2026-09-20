@@ -63,7 +63,10 @@ github-sync modes, which by nature require state inside the repo).
 
 Resolution precedence (first match wins):
 
-1. `<cwd>/.dao/` exists → use it (legacy projects keep working unchanged)
+1. `<cwd>/.dao/` holding real DAO state (any entry beyond the bare evidence
+   dirs `graph-runs`, `improvement-cycles`, `improvement-series`,
+   `product-loops`) → use it (legacy projects keep working unchanged; an
+   evidence-only `.dao` created by the tools must not flip the mode)
 2. git repo → `~/.swarm-dao/<project-id>/` (new default; `SWARM_DAO_HOME`
    overrides the home root)
 3. no git identity → legacy `<cwd>/.dao` (fail-closed: home mode needs a
@@ -72,13 +75,13 @@ Resolution precedence (first match wins):
 ### 2. Deterministic project identity — no registry index
 
 ```
-project-id = slug(basename(repo-root)) + "-" + sha256(realpath(git-common-dir))[0..8]
+project-id = slug(basename(repo-root)) + "-" + sha256(realpath(repo-root))[0..8]
 ```
 
 Example: `swarm-dao-a1b2c3d4`.
 
-- The git *common dir* (main checkout's `.git`), realpath-resolved, is the
-  identity anchor: linked worktrees of the same repo map to the same
+- The realpath-resolved **repo root** (the parent of the git common dir) is
+  the identity anchor: linked worktrees of the same repo map to the same
   project-id; two clones of the same repo at different paths get different
   ids; symlinked paths normalize through `realpath`.
 - The id is fully derivable — no index file to corrupt, no lookup to lose.
