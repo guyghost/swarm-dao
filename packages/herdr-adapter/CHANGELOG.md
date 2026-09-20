@@ -1,5 +1,15 @@
 # @guyghost/swarm-dao-herdr-adapter
 
+## 0.5.2
+
+### Patch Changes
+
+- Updated dependencies [b7f55eb]
+- Updated dependencies [c20ef3d]
+- Updated dependencies [e256fbc]
+- Updated dependencies [fd1e0d1]
+  - @guyghost/swarm-dao-core@2.0.0
+
 ## 0.5.1
 
 ### Patch Changes

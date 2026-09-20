@@ -1,5 +1,95 @@
 # @guyghost/swarm-dao-core
 
+## 2.0.0
+
+### Major Changes
+
+- c20ef3d: Remove the default-model notion — agents inherit the main model (ADR-006).
+  
+  A model is now either **pinned explicitly in configuration** or **inherited
+  from the main model**; there is no DAO-wide default layer anymore. Resolution
+  chain (first match wins): `agent.model` → `delegationProfile[archetype].model`
+  → parent agent → parent session (the main model) → host main model → the
+  `"default"` sentinel (host decides, no flag emitted).
+  
+  **Breaking:**
+  
+  - `DAOConfig.defaultModel` is removed (including its hardcoded
+    `"z.ai/GLM-5.1"` fallback in `DEFAULT_CONFIG`). DAOs that relied on it as a
+    fleet-wide pin must set `model:` per agent frontmatter or delegation
+    profile instead. Legacy `defaultModel` keys in `.dao/config.json` are
+    ignored (that file never carried the field).
+  - `DelegationProfileEntry.defaultModel` is renamed to `model` — it is an
+    explicit user spec, not a default; its rank in the chain is unchanged.
+  - `buildModelResolutionContext`, `buildChildModelResolutionContext`, and
+    `createDispatchModelContext` drop their `configDefaultModel` parameter.
+  - `config-update` amendments no longer accept `defaultModel`.
+  
+  Behavioral effect: on hosts without session-model detection (headless CLI,
+  MCP, CI), agents now run on the host's own main model — or emit no model flag
+  at all — instead of silently running on a hardcoded model.
+
+### Minor Changes
+
+- b7f55eb: Move the audit trail to an append-only `audit.jsonl` (ADR-005, phase 2 of
+  ADR-004).
+  
+  Audit entries now live in `.dao/audit.jsonl` — one compact JSON line each,
+  appended (never rewritten) on persist. `state.json` no longer carries the
+  trail, so no-op persist cost is O(open proposals) regardless of DAO age:
+  measured 1.23 ms → 0.33 ms with 5000 audit entries and no measurable change
+  to the other persistence cases.
+  
+  - Load merges the trail into the in-memory `auditLog`, deduplicating by id;
+    torn or corrupt lines (crash mid-append) are skipped with a warning and
+    never fatal
+  - The trail is appended **before** `state.json` in the same locked section:
+    a crash in between leaves the trail durably ahead of the state (a recorded
+    action must not vanish); post-recovery re-appends are harmless
+  - Legacy inline `auditLog` migrates to the JSONL on the first writing
+    persist; `nextAuditId` is repaired past the trail's max id
+  - `DaoStateRepositoryPort` API is unchanged
+- fd1e0d1: Archive closed proposals out of `state.json` (ADR-004).
+  
+  Closed proposals and their satellite records (`outcomes`, `artefacts`,
+  `snapshots`, `verifications`, `controlResults`, `deliveryPlans`) move to
+  `.dao/archive.json`; `state.json` keeps only open/deliberating proposals.
+  The in-memory `DAOState` stays a single merged view — `get()` is
+  unchanged for every consumer. On open, the archive is merged back
+  (archived ids shadow stale live copies); on persist, the archive is
+  written before `state.json` (crash ordering), and only when its
+  structural signature changed, `markArchivedDirty()` was called, or it is
+  not yet on disk.
+  
+  `DaoStateRepositoryPort` gains `markArchivedDirty()`: use cases mutating
+  values behind the archive's structural signature (re-rating an existing
+  outcome, re-executing plan/snapshot writes) must call it. Structural
+  changes (closures, status transitions, new satellite entries) are
+  detected automatically. Legacy monolithic `state.json` files migrate on
+  the first writing persist; `repairCounters` now accounts for archived
+  ids so restored backups cannot collide.
+  
+  Measured (2000 closed + 20 open proposals): no-op persist 17.5 ms →
+  **0.30 ms** (66×), touch-open persist → **1.57 ms**; `state.json`
+  11 MB → 2 KB.
+
+### Patch Changes
+
+- e256fbc: Skip the O(proposals) decision sweep when a persist has nothing to write.
+  
+  Decision records are a pure function of `state.proposals`, so when the
+  serialized state matches the last write the per-decision checks cannot
+  change: `hasPendingWrites` short-circuits after the state check and
+  `persistDecisions` returns early when the serialized index matches the
+  write cache. A `decisionsPending` flag forces the full sweep after a
+  persist that failed mid-way, keeping failure-retry behavior identical.
+  
+  Standalone effect is within noise on the official suite; kept as
+  groundwork for ADR-004 (proposal archive), where the index guard keeps
+  archive-only persists free of the O(closed) decision sweep. Adds a
+  persistence benchmark case for the unchanged-state-with-closed-proposals
+  regime.
+
 ## 1.1.0
 
 ### Minor Changes
