@@ -16,10 +16,11 @@ import { readFile } from "node:fs/promises";
 const LINES_THRESHOLD = 0.65; // baseline 66.02% (2026-09-20) minus ~1pt
 const FUNCTIONS_THRESHOLD = 0.72; // baseline 74.55% (2026-09-20) minus ~2pt
 
-/** Per package, about two points under the 2026-09-22 lcov measurement.
+/** Per package, under the 2026-09-22 Ubuntu CI lcov (bun 1.4.0).
  *  A package can no longer regress inside a healthy workspace total.
- *  opencode-adapter is absent: its tests never load `src/`, so bun records
- *  no lines for it. */
+ *  herdr-adapter is lower than a local mac run: several adapter branches
+ *  stay uncovered on the Linux runner. opencode-adapter is absent: its
+ *  tests never load `src/`, so bun records no lines for it. */
 const PACKAGE_FLOORS: Record<string, { lines: number; functions: number }> = {
   "packages/core": { lines: 0.64, functions: 0.66 },
   "packages/cli": { lines: 0.54, functions: 0.66 },
@@ -28,7 +29,7 @@ const PACKAGE_FLOORS: Record<string, { lines: number; functions: number }> = {
   "packages/improvement-loop": { lines: 0.86, functions: 0.88 },
   "packages/graph-engineering": { lines: 0.88, functions: 0.94 },
   "packages/product-loop": { lines: 0.84, functions: 0.9 },
-  "packages/herdr-adapter": { lines: 0.96, functions: 0.82 },
+  "packages/herdr-adapter": { lines: 0.88, functions: 0.76 },
   "packages/tmux-adapter": { lines: 0.96, functions: 0.84 },
   "packages/claude-adapter": { lines: 0.9, functions: 0.9 },
   "packages/codex-adapter": { lines: 0.9, functions: 0.9 },
