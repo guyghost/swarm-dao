@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { FileDaoStateRepository } from "@guyghost/swarm-dao-core";
+import { CreateProposalUseCase, FileDaoStateRepository } from "@guyghost/swarm-dao-core";
 
 async function mkRoot(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), "swarm-file-repo-"));
@@ -270,6 +270,68 @@ describe("FileDaoStateRepository concurrency", () => {
       expect(decisionAfter).toContain("Retitled while locked");
       const reopened = await FileDaoStateRepository.open(cwd);
       expect(reopened.get().proposals[0]?.title).toBe("Retitled while locked");
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("does not commit state.json after the lock token is stolen", async () => {
+    const cwd = await mkRoot();
+    try {
+      const repo = await FileDaoStateRepository.open(cwd);
+      repo.get().initialized = true;
+      await repo.persist();
+      const daoRoot = path.join(cwd, ".dao");
+      const before = await fs.readFile(path.join(daoRoot, "state.json"), "utf8");
+      repo.get().initialized = false;
+      FileDaoStateRepository.commitProbe = async () => {
+        await fs.writeFile(
+          path.join(daoRoot, "state.lock"),
+          JSON.stringify({ pid: 1, ts: Date.now(), token: "stolen" }),
+        );
+      };
+      await expect(repo.persist()).rejects.toThrow(/another writer took over/);
+      expect(await fs.readFile(path.join(daoRoot, "state.json"), "utf8")).toBe(before);
+    } finally {
+      FileDaoStateRepository.commitProbe = null;
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("replays a create onto the state another writer committed", async () => {
+    const cwd = await mkRoot();
+    try {
+      const a = await FileDaoStateRepository.open(cwd);
+      a.get().initialized = true;
+      await a.persist();
+      const b = await FileDaoStateRepository.open(cwd);
+      a.get().proposals.push({
+        id: 1,
+        title: "From A",
+        type: "technical-change",
+        description: "d",
+        proposedBy: "a",
+        status: "open",
+        votes: [],
+        agentOutputs: [],
+        createdAt: "2031-01-01T00:00:00.000Z",
+      } as never);
+      a.get().nextProposalId = 2;
+      await a.persist();
+
+      const created = await new CreateProposalUseCase({
+        repository: b,
+        clock: { now: () => "2031-01-01T00:00:00.000Z" },
+      }).execute({
+        title: "From B",
+        type: "technical-change",
+        description: "d",
+        proposedBy: "b",
+      });
+      expect(created.ok).toBe(true);
+      if (created.ok) expect(created.proposal.id).toBe(2);
+      const reloaded = await FileDaoStateRepository.open(cwd);
+      expect(reloaded.get().proposals.map((proposal) => proposal.id)).toEqual([1, 2]);
     } finally {
       await fs.rm(cwd, { recursive: true, force: true });
     }

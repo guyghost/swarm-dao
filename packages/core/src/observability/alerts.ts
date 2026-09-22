@@ -34,9 +34,21 @@ export interface Alert {
   status: "firing" | "resolved";
 }
 
+/** Retained alerts. Resolved alerts are dropped first, then the oldest. */
+const MAX_ALERTS = 256;
+
 const rules: AlertRule[] = [];
 const alerts: Alert[] = [];
 let alertIdCounter = 1;
+
+function retainAlert(alert: Alert): void {
+  alerts.push(alert);
+  while (alerts.length > MAX_ALERTS) {
+    const resolved = alerts.findIndex((item) => item.status === "resolved");
+    if (resolved >= 0) alerts.splice(resolved, 1);
+    else alerts.shift();
+  }
+}
 
 export function createAlertRule(rule: Omit<AlertRule, "id">): AlertRule {
   const newRule: AlertRule = { ...rule, id: `rule-${alertIdCounter++}` };
@@ -126,7 +138,7 @@ export function evaluateRules(): Alert[] {
         triggeredAt: new Date().toISOString(),
         status: "firing",
       };
-      alerts.push(alert);
+      retainAlert(alert);
       newAlerts.push(alert);
     } else if (!triggered && existing) {
       resolveAlert(existing.id);

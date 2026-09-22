@@ -13,4 +13,11 @@ export interface DaoStateRepositoryPort {
    *  are detected automatically and do not require this call. No-op on
    *  repositories that do not partition (in-memory, legacy). */
   markArchivedDirty(): void;
+  /**
+   * Discard in-memory state and re-read durable files. File repositories
+   * implement this so a retryable persist conflict can reapply a command
+   * against what another writer committed. Absent on repositories that
+   * cannot diverge from their own memory.
+   */
+  reload?(): Promise<void>;
 }

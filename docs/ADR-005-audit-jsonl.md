@@ -52,8 +52,12 @@ append-only:
 - Old binaries reading a partitioned repo see no audit trail (same version-
   skew caveat as ADR-004).
 - `audit.jsonl` is authoritative for the durable trail; truncating it loses
-  history (documented). Compaction/rotation is out of scope until a real need
-  appears.
+  history (documented).
+- Appends are fsynced (file, then directory) before `state.json` is renamed,
+  so a crash cannot commit state whose audit line is still only in the page cache.
+- A torn or corrupt line is still skipped on load. The next persist rewrites
+  a clean trail. The file is also rewritten every 2000 new entries so damage
+  cannot accumulate; between rewrites, persist stays an append.
 
 ## Test plan
 

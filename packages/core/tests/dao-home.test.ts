@@ -13,6 +13,7 @@ import {
   FileDaoStateRepository,
   gcDaoHome,
   loadConfig,
+  migrateDaoToHome,
   planGcDirs,
   resolveDaoLayout,
 } from "@guyghost/swarm-dao-core";
@@ -326,6 +327,28 @@ describe("ADR-007 wiring", () => {
       );
       const config = await loadConfig(layout.stateRoot);
       expect(config.mode).toBe("enforce");
+    } finally {
+      await fs.rm(repo, { recursive: true, force: true });
+      await fs.rm(home, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("ADR-007 migrate --to home", () => {
+  it("copies a legacy .dao, verifies the read-back, and is idempotent", async () => {
+    const repo = await mkRoot("migrate");
+    const home = await mkRoot("migrate-home");
+    const env = { ...process.env, SWARM_DAO_HOME: home };
+    try {
+      initRepo(repo);
+      await fs.mkdir(path.join(repo, ".dao"), { recursive: true });
+      await fs.writeFile(path.join(repo, ".dao", "state.json"), "{}\n");
+      const first = await migrateDaoToHome(repo, env);
+      expect(first.status).toBe("migrated");
+      expect(await fs.readFile(path.join(first.stateRoot ?? "", "state.json"), "utf8")).toBe("{}\n");
+      await expect(fs.access(path.join(repo, ".dao"))).rejects.toThrow();
+      const second = await migrateDaoToHome(repo, env);
+      expect(second.status).toBe("already-home");
     } finally {
       await fs.rm(repo, { recursive: true, force: true });
       await fs.rm(home, { recursive: true, force: true });

@@ -12,6 +12,7 @@ import {
   repairCounters,
   withFileLock,
 } from "./adapters/persistence/file-dao-state.repository.js";
+import { commitMutation } from "./application/commit-mutation.js";
 import { logger } from "./observability/logging.js";
 import { recordVoteCast } from "./observability/metrics.js";
 import type { DaoStateRepositoryPort } from "./ports/repository.js";
@@ -750,29 +751,42 @@ export type AddVoteResult = { ok: true; replaced: boolean } | { ok: false; error
  * - the weight is bounded by `config.maxVoteWeight` (default 3).
  */
 export async function addVote(proposalId: number, vote: Vote): Promise<AddVoteResult> {
-  const s = getState();
-  const proposal = s.proposals.find((p) => p.id === proposalId);
-  if (!proposal) return { ok: false, error: `Proposal #${proposalId} not found.` };
-  if (proposal.status !== "open" && proposal.status !== "deliberating") {
-    return {
-      ok: false,
-      error: `Proposal #${proposalId} is "${proposal.status}"; votes are only accepted while open or deliberating.`,
-    };
-  }
-  const maxWeight = s.config.maxVoteWeight ?? DEFAULT_MAX_VOTE_WEIGHT;
-  if (!Number.isFinite(vote.weight) || vote.weight <= 0) {
-    return { ok: false, error: `Vote weight must be a positive number (got ${vote.weight}).` };
-  }
-  if (vote.weight > maxWeight) {
-    return { ok: false, error: `Vote weight ${vote.weight} exceeds the maximum allowed weight (${maxWeight}).` };
-  }
-  const existingIndex = proposal.votes.findIndex((v) => v.agentId === vote.agentId);
-  const replaced = existingIndex >= 0;
-  if (replaced) proposal.votes[existingIndex] = vote;
-  else proposal.votes.push(vote);
-  recordVoteCast(vote.agentId, vote.position, vote.weight);
-  await saveState();
-  return { ok: true, replaced };
+  const repository = activeRepository;
+  if (!repository) return { ok: false, error: "DAO not initialized. Run dao_setup first." };
+  const result = await commitMutation<AddVoteResult>(repository, async () => {
+    const s = getState();
+    const proposal = s.proposals.find((p) => p.id === proposalId);
+    if (!proposal) return { persist: false, value: { ok: false, error: `Proposal #${proposalId} not found.` } };
+    if (proposal.status !== "open" && proposal.status !== "deliberating") {
+      return {
+        persist: false,
+        value: {
+          ok: false,
+          error: `Proposal #${proposalId} is "${proposal.status}"; votes are only accepted while open or deliberating.`,
+        },
+      };
+    }
+    const maxWeight = s.config.maxVoteWeight ?? DEFAULT_MAX_VOTE_WEIGHT;
+    if (!Number.isFinite(vote.weight) || vote.weight <= 0) {
+      return {
+        persist: false,
+        value: { ok: false, error: `Vote weight must be a positive number (got ${vote.weight}).` },
+      };
+    }
+    if (vote.weight > maxWeight) {
+      return {
+        persist: false,
+        value: { ok: false, error: `Vote weight ${vote.weight} exceeds the maximum allowed weight (${maxWeight}).` },
+      };
+    }
+    const existingIndex = proposal.votes.findIndex((v) => v.agentId === vote.agentId);
+    const replaced = existingIndex >= 0;
+    if (replaced) proposal.votes[existingIndex] = vote;
+    else proposal.votes.push(vote);
+    return { persist: true, value: { ok: true, replaced } };
+  });
+  if (result.ok) recordVoteCast(vote.agentId, vote.position, vote.weight);
+  return result;
 }
 
 export async function storeAgentOutput(proposalId: number, output: AgentOutput): Promise<boolean> {
@@ -848,17 +862,21 @@ export async function recordAudit(
   actor: string,
   details: string,
 ): Promise<void> {
-  const s = getState();
-  s.auditLog.push({
-    id: s.nextAuditId++,
-    timestamp: new Date().toISOString(),
-    proposalId,
-    layer,
-    action,
-    actor,
-    details,
+  const repository = activeRepository;
+  if (!repository) throw new Error("DAO not initialized. Run dao_setup first.");
+  await commitMutation(repository, async () => {
+    const s = getState();
+    s.auditLog.push({
+      id: s.nextAuditId++,
+      timestamp: new Date().toISOString(),
+      proposalId,
+      layer,
+      action,
+      actor,
+      details,
+    });
+    return { persist: true, value: undefined };
   });
-  await saveState();
 }
 
 export function getAuditLog(proposalId: number): AuditEntry[] {

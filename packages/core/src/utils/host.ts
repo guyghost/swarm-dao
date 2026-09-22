@@ -179,6 +179,18 @@ async function resolveContainedPath(filePath: string, baseDir: string): Promise<
  * `workDir`. Absolute paths, `..` segments, and symlink escapes are refused.
  */
 export async function resolveContainedRoot(workDir: string, root: string): Promise<string> {
+  if (root.includes("\0")) {
+    throw new Error("Path traversal denied: null bytes are not allowed");
+  }
+  if (root.trim() === "") {
+    throw new Error("Path traversal denied: empty roots are not allowed");
+  }
+  if (path.isAbsolute(root)) {
+    throw new Error(`Path traversal denied: absolute paths are not allowed ("${root}")`);
+  }
+  if (root.split(/[\\/]/).includes("..")) {
+    throw new Error(`Path traversal denied: ".." segments are not allowed ("${root}")`);
+  }
   return resolveContainedPath(root, workDir);
 }
 

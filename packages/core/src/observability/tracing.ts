@@ -28,12 +28,110 @@ export interface Trace {
   rootSpan: Span;
 }
 
-const activeSpans = new Map<string, Span>();
-const traces = new Map<string, Trace>();
+/** Finished traces retained per log. Older traces are dropped first. */
+const MAX_TRACES = 256;
 
 function generateId(): string {
   return `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 9)}`;
 }
+
+/**
+ * Bounded trace log. Each DAO repository owns one so a long-lived host does
+ * not mix spans from two roots in a single process-wide map.
+ */
+export class TraceLog {
+  private readonly activeSpans = new Map<string, Span>();
+  private readonly traces = new Map<string, Trace>();
+
+  startSpan(
+    name: string,
+    options?: {
+      traceId?: string;
+      parentId?: string;
+      tags?: Record<string, string>;
+    },
+  ): Span {
+    const traceId = options?.traceId || generateId();
+    const spanId = generateId();
+    const span: Span = {
+      id: spanId,
+      traceId,
+      parentId: options?.parentId,
+      name,
+      startTime: new Date().toISOString(),
+      status: "running",
+      tags: options?.tags || {},
+      logs: [],
+    };
+    this.activeSpans.set(spanId, span);
+    if (!options?.parentId) {
+      this.traces.set(traceId, { traceId, spans: [span], rootSpan: span });
+      this.evict();
+    } else {
+      const trace = this.traces.get(traceId);
+      if (trace) trace.spans.push(span);
+    }
+    return span;
+  }
+
+  finishSpan(spanId: string, error?: string): Span | undefined {
+    const span = this.activeSpans.get(spanId);
+    if (!span) return undefined;
+    span.endTime = new Date().toISOString();
+    span.status = error ? "error" : "success";
+    span.error = error;
+    span.durationMs = new Date(span.endTime).getTime() - new Date(span.startTime).getTime();
+    this.activeSpans.delete(spanId);
+    return span;
+  }
+
+  logToSpan(spanId: string, message: string, fields?: Record<string, unknown>): void {
+    const span = this.activeSpans.get(spanId);
+    if (!span) return;
+    span.logs.push({ timestamp: new Date().toISOString(), message, fields });
+  }
+
+  tagSpan(spanId: string, key: string, value: string): void {
+    const span = this.activeSpans.get(spanId);
+    if (!span) return;
+    span.tags[key] = value;
+  }
+
+  getSpan(spanId: string): Span | undefined {
+    return this.activeSpans.get(spanId);
+  }
+
+  getTrace(traceId: string): Trace | undefined {
+    return this.traces.get(traceId);
+  }
+
+  getAllTraces(): Trace[] {
+    return Array.from(this.traces.values());
+  }
+
+  getActiveSpans(): Span[] {
+    return Array.from(this.activeSpans.values());
+  }
+
+  reset(): void {
+    this.activeSpans.clear();
+    this.traces.clear();
+  }
+
+  private evict(): void {
+    while (this.traces.size > MAX_TRACES) {
+      const oldest = this.traces.keys().next().value;
+      if (oldest === undefined) return;
+      const removed = this.traces.get(oldest);
+      this.traces.delete(oldest);
+      if (!removed) continue;
+      for (const span of removed.spans) this.activeSpans.delete(span.id);
+    }
+  }
+}
+
+/** Process-wide log used by callers that do not hold a repository. */
+const processTraces = new TraceLog();
 
 export function startSpan(
   name: string,
@@ -43,86 +141,39 @@ export function startSpan(
     tags?: Record<string, string>;
   },
 ): Span {
-  const traceId = options?.traceId || generateId();
-  const spanId = generateId();
-
-  const span: Span = {
-    id: spanId,
-    traceId,
-    parentId: options?.parentId,
-    name,
-    startTime: new Date().toISOString(),
-    status: "running",
-    tags: options?.tags || {},
-    logs: [],
-  };
-
-  activeSpans.set(spanId, span);
-
-  if (!options?.parentId) {
-    traces.set(traceId, { traceId, spans: [span], rootSpan: span });
-  } else {
-    const trace = traces.get(traceId);
-    if (trace) {
-      trace.spans.push(span);
-    }
-  }
-
-  return span;
+  return processTraces.startSpan(name, options);
 }
 
 export function finishSpan(spanId: string, error?: string): Span | undefined {
-  const span = activeSpans.get(spanId);
-  if (!span) return undefined;
-
-  span.endTime = new Date().toISOString();
-  span.status = error ? "error" : "success";
-  span.error = error;
-
-  const start = new Date(span.startTime).getTime();
-  const end = new Date(span.endTime).getTime();
-  span.durationMs = end - start;
-
-  activeSpans.delete(spanId);
-  return span;
+  return processTraces.finishSpan(spanId, error);
 }
 
 export function logToSpan(spanId: string, message: string, fields?: Record<string, unknown>): void {
-  const span = activeSpans.get(spanId);
-  if (!span) return;
-
-  span.logs.push({
-    timestamp: new Date().toISOString(),
-    message,
-    fields,
-  });
+  processTraces.logToSpan(spanId, message, fields);
 }
 
 export function tagSpan(spanId: string, key: string, value: string): void {
-  const span = activeSpans.get(spanId);
-  if (!span) return;
-  span.tags[key] = value;
+  processTraces.tagSpan(spanId, key, value);
 }
 
 export function getSpan(spanId: string): Span | undefined {
-  return activeSpans.get(spanId);
+  return processTraces.getSpan(spanId);
 }
 
 export function getTrace(traceId: string): Trace | undefined {
-  return traces.get(traceId);
+  return processTraces.getTrace(traceId);
 }
 
 export function getAllTraces(): Trace[] {
-  return Array.from(traces.values());
+  return processTraces.getAllTraces();
 }
 
 export function getActiveSpans(): Span[] {
-  return Array.from(activeSpans.values());
+  return processTraces.getActiveSpans();
 }
 
 export function resetTracing(): void {
-  activeSpans.clear();
-  traces.clear();
+  processTraces.reset();
 }
 
 export function formatTrace(trace: Trace): string {

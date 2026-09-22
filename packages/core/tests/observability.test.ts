@@ -13,6 +13,7 @@ import {
   formatTrace,
   getActiveAlerts,
   getActiveSpans,
+  getAllAlerts,
   getGauge,
   getTrace,
   initializeDefaultAlertRules,
@@ -204,6 +205,22 @@ describe("observability/alerts", () => {
     initializeDefaultAlertRules();
     const rules = evaluateRules();
     expect(rules.length).toBeGreaterThanOrEqual(0);
+  });
+
+  it("keeps at most 256 alerts", () => {
+    for (let i = 0; i < 300; i++) {
+      createAlertRule({
+        name: `cap-${i}`,
+        description: "cap",
+        metric: "dao_agent_count",
+        condition: "lte",
+        threshold: 0,
+        severity: "info",
+        enabled: true,
+      });
+    }
+    evaluateRules();
+    expect(getAllAlerts().length).toBe(256);
   });
 
   it("formats alerts", () => {

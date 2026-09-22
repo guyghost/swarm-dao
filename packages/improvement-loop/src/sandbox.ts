@@ -129,15 +129,17 @@ export interface SandboxRequest {
 /**
  * Build the sandbox AnchorCommandRunner for an `improve once` invocation from
  * CLI flags layered over `.dao/improvement.json` options. Returns null when
- * the resolved mode is "none" (caller falls back to host execution). Explicit
- * flags win over config; a sandbox mode without an image fails loudly.
+ * the resolved mode is "none" (explicit host execution). An omitted mode is
+ * `auto`: a missing runtime fails closed instead of silently running on the
+ * host. Explicit flags win over config; a sandbox mode without an image fails
+ * loudly.
  */
 export async function resolveSandboxRunCommand(
   request: SandboxRequest,
   workDir: string,
   runner: SandboxExecRunner = defaultExecRunner,
 ): Promise<AnchorCommandRunner | null> {
-  const mode = await resolveSandboxMode(request.sandbox ?? "none", runner);
+  const mode = await resolveSandboxMode(request.sandbox ?? "auto", runner);
   if (mode === null) return null;
   const image = request.image;
   const imageError = image === undefined ? "sandbox execution requires an image" : validateSandboxImage(image);

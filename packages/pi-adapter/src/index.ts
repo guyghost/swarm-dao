@@ -56,6 +56,7 @@ import {
   // Types
   PROPOSAL_TYPES,
   readFileContained,
+  resolveContainedRoot,
   resolveDaoCommand,
   setRepository,
   suggestDaoCommand,
@@ -75,7 +76,6 @@ import {
   submitAiProductSignal,
 } from "@guyghost/swarm-dao-product";
 import { Type } from "typebox";
-import { resolveContainedRoot } from "./contained-root.js";
 
 // ── Pi Host Adapter Implementation ───────────────────────────
 

@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { resolveContainedRoot } from "../src/contained-root.js";
+import { resolveContainedRoot } from "@guyghost/swarm-dao-core";
 
 describe("resolveContainedRoot", () => {
   it("resolves a relative default root under workDir", async () => {

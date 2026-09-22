@@ -35,6 +35,9 @@ jobs:
         with:
           bun-version: "1.4.0"
 
+      - name: Check documentation links
+        run: bun run check:doc-links
+
       - name: Cache Bun install
         # Keyed on the lockfile: cold installs only when dependencies change.
         uses: actions/cache@v6

@@ -21,8 +21,17 @@ You will receive an acknowledgement within **7 days**. Please allow reasonable t
 This policy covers the packages published from this repository:
 
 - `@guyghost/swarm-dao-core`
+- `@guyghost/swarm-dao-mcp`
+- `@guyghost/swarm-dao-cli`
 - `@guyghost/swarm-dao-pi-adapter`
 - `@guyghost/swarm-dao-opencode-adapter`
-- `@guyghost/swarm-dao-cli`
+- `@guyghost/swarm-dao-claude-adapter`
+- `@guyghost/swarm-dao-codex-adapter`
+- `@guyghost/swarm-dao-copilot-adapter`
+- `@guyghost/swarm-dao-tmux-adapter`
+- `@guyghost/swarm-dao-herdr-adapter`
+- `@guyghost/swarm-dao-improvement`
+- `@guyghost/swarm-dao-graph`
+- `@guyghost/swarm-dao-product`
 
-It does **not** cover the host coding agents (Pi, OpenCode) themselves — report those to their respective maintainers.
+It does **not** cover the host coding agents (Pi, OpenCode, Claude, Codex, Copilot, herdr, tmux) themselves — report those to their respective maintainers.

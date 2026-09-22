@@ -18,6 +18,22 @@ async function gitRepo(label: string): Promise<string> {
   return root;
 }
 
+async function allowHostExecution(root: string): Promise<void> {
+  await fs.mkdir(path.join(root, ".dao"), { recursive: true });
+  await fs.writeFile(
+    path.join(root, ".dao/improvement.json"),
+    JSON.stringify({
+      sandbox: { mode: "none" },
+      anchorCommands: {
+        "drift-audit": "true",
+        "anchor-reality": "true",
+        "frozen-set-intact": "true",
+        regression: "true",
+      },
+    }),
+  );
+}
+
 async function startedSeries(root: string, seriesId: string): Promise<void> {
   const runner = await OrchestratorRunner.create({
     seriesId,
@@ -43,6 +59,7 @@ describe("advanceSeriesOnce", () => {
     const root = await gitRepo("advance");
     roots.push(root);
     await startedSeries(root, "s-adv-1");
+    await allowHostExecution(root);
 
     const result = await advanceSeriesOnce({ seriesId: "s-adv-1", workDir: root });
     expect(result.executed).toBe(true);
@@ -60,6 +77,7 @@ describe("advanceSeriesOnce", () => {
   it("is a no-op for a fresh (idle/terminal) series", async () => {
     const root = await gitRepo("idle");
     roots.push(root);
+    await allowHostExecution(root);
 
     const result = await advanceSeriesOnce({ seriesId: "s-idle-1", workDir: root });
     expect(result.executed).toBe(false);
@@ -72,12 +90,14 @@ describe("advanceSeriesOnce", () => {
     const root = await gitRepo("stale");
     roots.push(root);
     await startedSeries(root, "s-stale-1");
+    await allowHostExecution(root);
 
     // First advance creates the worktree; then the operator wipes .dao
     // (directory gone, registration stale, branch still around).
     await advanceSeriesOnce({ seriesId: "s-stale-1", workDir: root });
     await fs.rm(path.join(root, ".dao"), { recursive: true, force: true });
     await startedSeries(root, "s-stale-1");
+    await allowHostExecution(root);
 
     // The next advance must prune the stale registration and carve a fresh
     // worktree instead of failing on the lingering branch.
@@ -91,6 +111,7 @@ describe("advanceSeriesOnce", () => {
     const root = await gitRepo("cycleroot");
     roots.push(root);
     await startedSeries(root, "s-cyc-1");
+    await allowHostExecution(root);
 
     const result = await advanceSeriesOnce({
       seriesId: "s-cyc-1",
@@ -143,6 +164,7 @@ describe("advanceSeriesOnce", () => {
           "frozen-set-intact": "true",
           regression: "true",
         },
+        sandbox: { mode: "none" },
         worker: { kind: "../evil" },
       }),
       "utf8",
