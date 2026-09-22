@@ -78,9 +78,10 @@ import {
   OrchestratorRunner,
   type ProjectImprovementConfig,
   resolveAnchorCommands,
-  resolveSandboxRunCommand,
+  type resolveSandboxRunCommand,
   SAFE_HERDR_KIND,
   type SandboxMode,
+  sandboxAnchorRunner,
   type WorkerExecutionOptions,
   workerOptionsFromConfig,
 } from "@guyghost/swarm-dao-improvement";
@@ -1788,7 +1789,7 @@ async function cmdImprove(cwd: string, positional: string[], flags: Record<strin
   if (execMode === "container" && sandboxRequest.sandbox === undefined) {
     sandboxRequest.sandbox = "auto";
   }
-  const runCommand = await resolveSandboxRunCommand(sandboxRequest, workDir);
+  const runCommand = sandboxAnchorRunner(sandboxRequest, workDir);
   const deps: OrchestratorOnceDeps = {
     workDir,
     cycleEvidenceRoot: cycleRoot,

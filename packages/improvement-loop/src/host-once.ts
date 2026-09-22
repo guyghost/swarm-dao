@@ -21,7 +21,7 @@
 import { resolveContainedRoot } from "@guyghost/swarm-dao-core";
 import { loadProjectImprovementConfig, sandboxRequestFromConfig, workerOptionsFromConfig } from "./config.js";
 import { type OrchestratorOnceResult, OrchestratorRunner } from "./orchestrator.js";
-import { resolveSandboxRunCommand } from "./sandbox.js";
+import { sandboxAnchorRunner } from "./sandbox.js";
 import { ensureSeriesWorktree } from "./worktree.js";
 
 export interface AdvanceSeriesOnceOptions {
@@ -46,7 +46,7 @@ export async function advanceSeriesOnce(options: AdvanceSeriesOnceOptions): Prom
 
   const config = await loadProjectImprovementConfig(workDir);
   const worktree = await ensureSeriesWorktree({ repoDir: workDir, seriesId });
-  const runCommand = await resolveSandboxRunCommand(sandboxRequestFromConfig(config), worktree.path);
+  const runCommand = sandboxAnchorRunner(sandboxRequestFromConfig(config), worktree.path);
   const runner = await OrchestratorRunner.create({ seriesId, evidenceRoot });
   return runner.once({
     workDir: worktree.path,

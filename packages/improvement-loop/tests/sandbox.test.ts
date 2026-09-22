@@ -4,6 +4,7 @@ import {
   createSandboxRunCommand,
   resolveSandboxMode,
   resolveSandboxRunCommand,
+  sandboxAnchorRunner,
   validateSandboxImage,
 } from "../src/sandbox.js";
 
@@ -104,5 +105,12 @@ describe("improvement-loop — bounded sandbox execution", () => {
     );
     const runner = await resolveSandboxRunCommand({ sandbox: "container", image: "node:22" }, "/repo", fakeRunner([]));
     expect(runner).not.toBeNull();
+  });
+
+  it("defers the fail-closed check until an anchor command runs", async () => {
+    expect(sandboxAnchorRunner({ sandbox: "none" }, "/repo", fakeRunner([]))).toBeUndefined();
+    const deferred = sandboxAnchorRunner({}, "/repo", fakeRunner([]));
+    expect(deferred).toBeTypeOf("function");
+    await expect(deferred?.("echo hi")).rejects.toThrow(/sandbox execution requires an image/);
   });
 });

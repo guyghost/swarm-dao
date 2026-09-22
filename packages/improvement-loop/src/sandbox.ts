@@ -156,3 +156,26 @@ export async function resolveSandboxRunCommand(
     runner,
   );
 }
+
+/**
+ * Host anchors only when the operator set `sandbox` to `"none"`.
+ * Any other mode, including an omitted one, resolves the sandbox the first
+ * time an anchor command runs. An idle series or a cycle init stays a no-op,
+ * and a missing runtime still cannot fall back to the host.
+ */
+export function sandboxAnchorRunner(
+  request: SandboxRequest,
+  workDir: string,
+  runner: SandboxExecRunner = defaultExecRunner,
+): AnchorCommandRunner | undefined {
+  if (request.sandbox === "none") return undefined;
+  let resolved: AnchorCommandRunner | undefined;
+  return async (command) => {
+    if (!resolved) {
+      const built = await resolveSandboxRunCommand({ ...request, sandbox: request.sandbox ?? "auto" }, workDir, runner);
+      if (!built) throw new Error("sandbox execution requires a runtime");
+      resolved = built;
+    }
+    return resolved(command);
+  };
+}
