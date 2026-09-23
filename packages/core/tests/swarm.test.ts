@@ -139,58 +139,54 @@ describe("intelligence/swarm.ts", () => {
 describe("handleDaoRoundtable — batched audit writes (task 8)", () => {
   it("records all audit entries in a single save burst, not one-per-proposal", async () => {
     const daoRoot = `/tmp/dao-roundtable-perf-${Date.now()}`;
-    try {
-      const state = createInitialState(daoRoot);
-      state.initialized = true;
-      const repository = new InMemoryDaoStateRepository(state);
+    const state = createInitialState(daoRoot);
+    state.initialized = true;
+    const repository = new InMemoryDaoStateRepository(state);
 
-      // Fake adapter: every agent returns a parseable round-table suggestion, so
-      // each agent yields one created proposal (k = number of default agents).
-      const adapter = {
-        hostId: "test-host",
-        spawnAgent: async ({ agent }: { agent: DAOAgent }): Promise<AgentOutput> => ({
-          agentId: agent.id,
-          agentName: agent.name,
-          role: agent.role,
-          content: `## Suggested Proposal\n**Title:** Suggestion from ${agent.id}\n**Type:** product-feature\n**Description:** A feature proposed by ${agent.name}.`,
-          durationMs: 1,
-        }),
-      } as unknown as HostAdapter;
-      const ctx: DaoToolContext = {
-        adapter,
-        workDir: daoRoot,
-        deliberationMode: "auto",
-        controlToolName: "dao_control",
-        repository,
-      };
+    // Fake adapter: every agent returns a parseable round-table suggestion, so
+    // each agent yields one created proposal (k = number of default agents).
+    const adapter = {
+      hostId: "test-host",
+      spawnAgent: async ({ agent }: { agent: DAOAgent }): Promise<AgentOutput> => ({
+        agentId: agent.id,
+        agentName: agent.name,
+        role: agent.role,
+        content: `## Suggested Proposal\n**Title:** Suggestion from ${agent.id}\n**Type:** product-feature\n**Description:** A feature proposed by ${agent.name}.`,
+        durationMs: 1,
+      }),
+    } as unknown as HostAdapter;
+    const ctx: DaoToolContext = {
+      adapter,
+      workDir: daoRoot,
+      deliberationMode: "auto",
+      controlToolName: "dao_control",
+      repository,
+    };
 
-      await handleDaoRoundtable(ctx);
+    await handleDaoRoundtable(ctx);
 
-      const after = repository.get();
-      const createdProposals = after.proposals;
-      const entries = after.auditLog.filter((e) => e.action === "roundtable_proposal_created");
+    const after = repository.get();
+    const createdProposals = after.proposals;
+    const entries = after.auditLog.filter((e) => e.action === "roundtable_proposal_created");
 
-      // Correctness: one audit entry per created proposal, with the exact recordAudit shape.
-      expect(createdProposals.length).toBeGreaterThan(3);
-      expect(entries.length).toBe(createdProposals.length);
-      for (const entry of entries) {
-        expect(entry.layer).toBe("intelligence");
-        expect(entry.details).toBe("Auto-created from round table");
-        expect(typeof entry.id).toBe("number");
-        expect(typeof entry.timestamp).toBe("string");
-        expect(typeof entry.proposalId).toBe("number");
-        expect(typeof entry.actor).toBe("string");
-      }
-      // Each audit entry references a real created proposal id.
-      const proposalIds = new Set(createdProposals.map((p) => p.id));
-      for (const entry of entries) {
-        expect(proposalIds.has(entry.proposalId)).toBe(true);
-      }
-
-      // Audit batching correctness: one entry per created proposal (above).
-    } finally {
-      await fs.rm(daoRoot, { recursive: true, force: true }).catch(() => {});
+    // Correctness: one audit entry per created proposal, with the exact recordAudit shape.
+    expect(createdProposals.length).toBeGreaterThan(3);
+    expect(entries.length).toBe(createdProposals.length);
+    for (const entry of entries) {
+      expect(entry.layer).toBe("intelligence");
+      expect(entry.details).toBe("Auto-created from round table");
+      expect(typeof entry.id).toBe("number");
+      expect(typeof entry.timestamp).toBe("string");
+      expect(typeof entry.proposalId).toBe("number");
+      expect(typeof entry.actor).toBe("string");
     }
+    // Each audit entry references a real created proposal id.
+    const proposalIds = new Set(createdProposals.map((p) => p.id));
+    for (const entry of entries) {
+      expect(proposalIds.has(entry.proposalId)).toBe(true);
+    }
+
+    // Audit batching correctness: one entry per created proposal (above).
   });
 });
 
