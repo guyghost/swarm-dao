@@ -22,7 +22,7 @@ import { loadConfig } from "../config.js";
 import { formatAuditTrail } from "../control/audit.js";
 import { formatAllArtefacts, generateAllArtefacts } from "../delivery/artefacts.js";
 import { validateGitRef } from "../delivery/execution-isolation.js";
-import { formatPlan, getPlan } from "../delivery/plans.js";
+import { formatPlan } from "../delivery/plans.js";
 import { evaluateShipAuditChallenge } from "../delivery/ship-audit.js";
 import { formatAgentsTable, initializeAgents, loadAgentDefinitions } from "../governance/agents.js";
 import { evaluateEditGate, formatEditGate, MAX_EDIT_PATHS } from "../governance/edit-gate.js";
@@ -390,7 +390,7 @@ export async function handleDaoPlan(
   const state = repositoryOrLegacy(repository).get();
   const proposal = state.proposals.find((p) => p.id === proposalId);
   if (!proposal) return `Proposal #${proposalId} not found.`;
-  const plan = getPlan(proposalId);
+  const plan = state.deliveryPlans[proposalId];
   if (!plan) {
     if (proposal.status === "open") {
       return `Plan not available yet. Run \`dao_record_outputs\` (after starting deliberation with \`dao_propose\` and running deliberation), then \`${controlToolName}\`, to generate the plan.`;
