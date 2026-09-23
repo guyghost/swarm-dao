@@ -129,15 +129,17 @@ export interface SandboxRequest {
 /**
  * Build the sandbox AnchorCommandRunner for an `improve once` invocation from
  * CLI flags layered over `.dao/improvement.json` options. Returns null when
- * the resolved mode is "none" (caller falls back to host execution). Explicit
- * flags win over config; a sandbox mode without an image fails loudly.
+ * the resolved mode is "none" (explicit host execution). An omitted mode is
+ * `auto`: a missing runtime fails closed instead of silently running on the
+ * host. Explicit flags win over config; a sandbox mode without an image fails
+ * loudly.
  */
 export async function resolveSandboxRunCommand(
   request: SandboxRequest,
   workDir: string,
   runner: SandboxExecRunner = defaultExecRunner,
 ): Promise<AnchorCommandRunner | null> {
-  const mode = await resolveSandboxMode(request.sandbox ?? "none", runner);
+  const mode = await resolveSandboxMode(request.sandbox ?? "auto", runner);
   if (mode === null) return null;
   const image = request.image;
   const imageError = image === undefined ? "sandbox execution requires an image" : validateSandboxImage(image);
@@ -153,4 +155,27 @@ export async function resolveSandboxRunCommand(
     },
     runner,
   );
+}
+
+/**
+ * Host anchors only when the operator set `sandbox` to `"none"`.
+ * Any other mode, including an omitted one, resolves the sandbox the first
+ * time an anchor command runs. An idle series or a cycle init stays a no-op,
+ * and a missing runtime still cannot fall back to the host.
+ */
+export function sandboxAnchorRunner(
+  request: SandboxRequest,
+  workDir: string,
+  runner: SandboxExecRunner = defaultExecRunner,
+): AnchorCommandRunner | undefined {
+  if (request.sandbox === "none") return undefined;
+  let resolved: AnchorCommandRunner | undefined;
+  return async (command) => {
+    if (!resolved) {
+      const built = await resolveSandboxRunCommand({ ...request, sandbox: request.sandbox ?? "auto" }, workDir, runner);
+      if (!built) throw new Error("sandbox execution requires a runtime");
+      resolved = built;
+    }
+    return resolved(command);
+  };
 }

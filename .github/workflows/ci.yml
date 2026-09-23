@@ -35,6 +35,9 @@ jobs:
         with:
           bun-version: "1.4.0"
 
+      - name: Check documentation links
+        run: bun run check:doc-links
+
       - name: Cache Bun install
         # Keyed on the lockfile: cold installs only when dependencies change.
         uses: actions/cache@v6
@@ -161,14 +164,15 @@ jobs:
 
       # Runner timings are not comparable across machines, so the baseline is
       # the previous run of this job, restored from cache.
-      # v2: re-baseline after 9eee0bf (inter-process persist lock) made the
-      # persistence suite permanently slower than the pre-lock baseline.
+      # v3: re-baseline after the audit fsync (file + directory) before the
+      # state.json rename made file persist permanently slower than v2.
+      # v2: re-baseline after 9eee0bf (inter-process persist lock).
       - name: Restore benchmark baseline
         uses: actions/cache/restore@v6
         with:
           path: packages/benchmarks/benchmark-baseline.json
-          key: benchmark-baseline-v2-${{ runner.os }}-${{ github.sha }}
-          restore-keys: benchmark-baseline-v2-${{ runner.os }}-
+          key: benchmark-baseline-v3-${{ runner.os }}-${{ github.sha }}
+          restore-keys: benchmark-baseline-v3-${{ runner.os }}-
 
       - name: Run benchmarks
         run: bun run bench:ci
@@ -181,7 +185,7 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: packages/benchmarks/benchmark-baseline.json
-          key: benchmark-baseline-v2-${{ runner.os }}-${{ github.sha }}
+          key: benchmark-baseline-v3-${{ runner.os }}-${{ github.sha }}
 
       - name: Upload benchmark results
         uses: actions/upload-artifact@v7

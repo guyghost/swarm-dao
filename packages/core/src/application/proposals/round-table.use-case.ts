@@ -5,6 +5,7 @@ import type { ClockPort } from "../../ports/clock.js";
 import type { AgentWorkerPort } from "../../ports/host.js";
 import type { DaoStateRepositoryPort } from "../../ports/repository.js";
 import type { DAOAgent } from "../../types/index.js";
+import { commitMutation } from "../commit-mutation.js";
 import { CreateProposalUseCase } from "./create-proposal.use-case.js";
 
 export type RoundTableResult =
@@ -53,39 +54,43 @@ export class RoundTableUseCase {
       this.dependencies.clock,
       { projectBrief: brief.length > 0 ? brief : undefined },
     );
-    const proposalIds = new Map<string, number>();
-    const stagedRepository: DaoStateRepositoryPort = {
-      get: () => state,
-      persist: async () => undefined,
-      markArchivedDirty: () => undefined,
-    };
-    const createProposal = new CreateProposalUseCase({
-      repository: stagedRepository,
-      clock: this.dependencies.clock,
-    });
-    for (const suggestion of suggestions) {
-      if (!suggestion.parsed) continue;
-      const created = await createProposal.execute({
-        ...suggestion.parsed,
-        proposedBy: suggestion.agentId,
+    return commitMutation<RoundTableResult>(this.dependencies.repository, async () => {
+      const current = this.dependencies.repository.get();
+      const proposalIds = new Map<string, number>();
+      const stagedRepository: DaoStateRepositoryPort = {
+        get: () => current,
+        persist: async () => undefined,
+        markArchivedDirty: () => undefined,
+      };
+      const createProposal = new CreateProposalUseCase({
+        repository: stagedRepository,
+        clock: this.dependencies.clock,
       });
-      if (!created.ok) {
-        suggestion.error = `Failed to create proposal: ${created.error}`;
-        continue;
+      for (const suggestion of suggestions) {
+        if (!suggestion.parsed) continue;
+        suggestion.error = undefined;
+        suggestion.proposalId = undefined;
+        const created = await createProposal.execute({
+          ...suggestion.parsed,
+          proposedBy: suggestion.agentId,
+        });
+        if (!created.ok) {
+          suggestion.error = `Failed to create proposal: ${created.error}`;
+          continue;
+        }
+        suggestion.proposalId = created.proposal.id;
+        proposalIds.set(suggestion.agentId, created.proposal.id);
+        current.auditLog.push({
+          id: current.nextAuditId++,
+          timestamp: this.dependencies.clock.now(),
+          proposalId: created.proposal.id,
+          layer: "intelligence",
+          action: "roundtable_proposal_created",
+          actor: suggestion.agentId,
+          details: "Auto-created from round table",
+        });
       }
-      suggestion.proposalId = created.proposal.id;
-      proposalIds.set(suggestion.agentId, created.proposal.id);
-      state.auditLog.push({
-        id: state.nextAuditId++,
-        timestamp: this.dependencies.clock.now(),
-        proposalId: created.proposal.id,
-        layer: "intelligence",
-        action: "roundtable_proposal_created",
-        actor: suggestion.agentId,
-        details: "Auto-created from round table",
-      });
-    }
-    await this.dependencies.repository.persist();
-    return { ok: true, suggestions, proposalIds };
+      return { persist: true, value: { ok: true as const, suggestions, proposalIds } };
+    });
   }
 }

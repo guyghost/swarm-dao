@@ -38,6 +38,7 @@ import {
   handleDaoShip,
   handleDaoUpdateProposal,
   PROPOSAL_TYPES,
+  resolveContainedRoot,
   setRepository,
 } from "@guyghost/swarm-dao-core";
 import { createGraphRunner, GRAPH_AI_EVENT_TYPES, submitAiGraphSignal } from "@guyghost/swarm-dao-graph";
@@ -45,7 +46,6 @@ import { advanceSeriesOnce, OrchestratorRunner } from "@guyghost/swarm-dao-impro
 import { createProductRunner, PRODUCT_AI_EVENT_TYPES, submitAiProductSignal } from "@guyghost/swarm-dao-product";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import { resolveContainedRoot } from "./contained-root.js";
 import { createMcpHostAdapter, resolveDaoRoot } from "./host-adapter.js";
 import { createToolInputSchemas, validateToolArgs } from "./tool-schemas.js";
 

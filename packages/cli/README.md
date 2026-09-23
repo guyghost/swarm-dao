@@ -68,9 +68,11 @@ Declare the project's ground-truth gates in `.dao/improvement.json`:
 
 Exactly those four anchors are required — `counter-metric-paired` and
 `arbitration-policy` are recorded automatically by the machine and cannot be
-overridden. The `sandbox` section is optional: `mode` is `none` (default),
-`docker`, `container` (Apple), or `auto`; `image` is the OCI image gates run
-in. Evidence accumulates under `.dao/improvement-series/` and
+overridden. The `sandbox` section is optional. When `mode` is omitted,
+`improve once` selects `auto` and fails if neither Apple `container` nor
+Docker is available — it does not silently run gates on the host. Set
+`"mode": "none"` to opt into host execution. `image` is the OCI image gates
+run in. Evidence accumulates under `.dao/improvement-series/` and
 `.dao/improvement-cycles/` (override with `--evidence-root` / `--cycle-root`).
 
 ### 4. Sandboxed proposal execution (optional)
@@ -201,8 +203,9 @@ reference, or waive a gate — every run's boundary is journaled.
 inside a throwaway container: repository mounted at `/workspace`, **network
 disabled**, CPU/memory capped. `auto` prefers Apple `container` (macOS 26+),
 then Docker; a requested runtime that is missing fails loudly instead of
-falling back to the host. Defaults come from the `sandbox` section of
-`.dao/improvement.json`.
+falling back to the host. When `--sandbox` and `sandbox.mode` are both
+omitted, the mode is `auto`. `none` is host execution and must be explicit.
+Defaults come from the `sandbox` section of `.dao/improvement.json`.
 
 ### Exit codes
 

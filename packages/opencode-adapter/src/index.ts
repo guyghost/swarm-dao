@@ -47,6 +47,7 @@ import {
   migrateFromLegacy,
   PROPOSAL_TYPES,
   readFileContained,
+  resolveContainedRoot,
   setRepository,
   writeFileContained,
 } from "@guyghost/swarm-dao-core";
@@ -57,7 +58,6 @@ import type { ProductAiEventType } from "@guyghost/swarm-dao-product";
 import { createProductRunner, PRODUCT_AI_EVENT_TYPES, submitAiProductSignal } from "@guyghost/swarm-dao-product";
 import type { Plugin, PluginInput } from "@opencode-ai/plugin";
 import { tool } from "@opencode-ai/plugin";
-import { resolveContainedRoot } from "./contained-root.js";
 
 const schema = tool.schema;
 

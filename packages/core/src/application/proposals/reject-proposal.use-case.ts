@@ -3,6 +3,7 @@ import { PROPOSAL_FINAL_STATUSES } from "../../models/proposal.machine.js";
 import type { ClockPort } from "../../ports/clock.js";
 import type { DaoStateRepositoryPort } from "../../ports/repository.js";
 import type { AuditEntry } from "../../types/index.js";
+import { commitMutation } from "../commit-mutation.js";
 
 export type RejectProposalResult =
   | { ok: true; proposalId: number; status: "rejected"; via: "REJECT" | "DISCARD"; message: string }
@@ -26,44 +27,58 @@ export class RejectProposalUseCase {
   ) {}
 
   public async execute(command: { proposalId: number; actor: string; reason: string }): Promise<RejectProposalResult> {
-    const state = this.dependencies.repository.get();
-    if (!state.initialized) return { ok: false, error: "DAO not initialized. Run dao_setup first." };
-    const proposal = state.proposals.find((candidate) => candidate.id === command.proposalId);
-    if (!proposal) return { ok: false, error: `Proposal #${command.proposalId} not found.` };
-    if (!command.reason || command.reason.trim().length === 0) {
-      return { ok: false, error: "A rejection reason is required (it is recorded in the audit trail)." };
-    }
-    if (PROPOSAL_FINAL_STATUSES.has(proposal.status)) {
-      return {
-        ok: false,
-        error: `Proposal is in terminal status "${proposal.status}"; no transitions are permitted`,
+    return commitMutation<RejectProposalResult>(this.dependencies.repository, async () => {
+      const state = this.dependencies.repository.get();
+      if (!state.initialized) {
+        return { persist: false, value: { ok: false as const, error: "DAO not initialized. Run dao_setup first." } };
+      }
+      const proposal = state.proposals.find((candidate) => candidate.id === command.proposalId);
+      if (!proposal) {
+        return { persist: false, value: { ok: false as const, error: `Proposal #${command.proposalId} not found.` } };
+      }
+      if (!command.reason || command.reason.trim().length === 0) {
+        return {
+          persist: false,
+          value: { ok: false as const, error: "A rejection reason is required (it is recorded in the audit trail)." },
+        };
+      }
+      if (PROPOSAL_FINAL_STATUSES.has(proposal.status)) {
+        return {
+          persist: false,
+          value: {
+            ok: false as const,
+            error: `Proposal is in terminal status "${proposal.status}"; no transitions are permitted`,
+          },
+        };
+      }
+
+      const event =
+        proposal.status === "open" || proposal.status === "controlled"
+          ? ({ type: "DISCARD" } as const)
+          : ({ type: "REJECT" } as const);
+      const dispatched = dispatchProposalEvent(proposal, event, { clock: this.dependencies.clock });
+      if (!dispatched.ok) return { persist: false, value: dispatched };
+
+      const audit: AuditEntry = {
+        id: state.nextAuditId++,
+        timestamp: this.dependencies.clock.now(),
+        proposalId: proposal.id,
+        layer: "governance",
+        action: "proposal_rejected",
+        actor: command.actor,
+        details: `${event.type}: ${command.reason.trim()}`,
       };
-    }
-
-    const event =
-      proposal.status === "open" || proposal.status === "controlled"
-        ? ({ type: "DISCARD" } as const)
-        : ({ type: "REJECT" } as const);
-    const dispatched = dispatchProposalEvent(proposal, event, { clock: this.dependencies.clock });
-    if (!dispatched.ok) return dispatched;
-
-    const audit: AuditEntry = {
-      id: state.nextAuditId++,
-      timestamp: this.dependencies.clock.now(),
-      proposalId: proposal.id,
-      layer: "governance",
-      action: "proposal_rejected",
-      actor: command.actor,
-      details: `${event.type}: ${command.reason.trim()}`,
-    };
-    state.auditLog.push(audit);
-    await this.dependencies.repository.persist();
-    return {
-      ok: true,
-      proposalId: proposal.id,
-      status: "rejected",
-      via: event.type,
-      message: `Proposal #${proposal.id} rejected via ${event.type} by ${command.actor}.`,
-    };
+      state.auditLog.push(audit);
+      return {
+        persist: true,
+        value: {
+          ok: true as const,
+          proposalId: proposal.id,
+          status: "rejected" as const,
+          via: event.type,
+          message: `Proposal #${proposal.id} rejected via ${event.type} by ${command.actor}.`,
+        },
+      };
+    });
   }
 }

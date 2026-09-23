@@ -357,6 +357,13 @@ export const DAO_COMMANDS: readonly DaoCommand[] = [
     args: "[--dry-run]",
     hosts: ["cli"],
   },
+  {
+    id: "migrate",
+    phase: "init",
+    summary: "Move a legacy in-repo .dao into the external DAO home (idempotent)",
+    args: "--to home",
+    hosts: ["cli"],
+  },
   { id: "config", phase: "discover", summary: "Print the DAO configuration", hosts: ["cli"] },
   {
     id: "improve",

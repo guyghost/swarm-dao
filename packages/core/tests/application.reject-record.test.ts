@@ -61,4 +61,47 @@ describe("RecordDeliberationOutputsUseCase", () => {
     expect(state.proposals[0]?.status).toBe("deliberating");
     expect(state.proposals[0]?.votes).toEqual([]);
   });
+
+  it("rejects a partial council without recording", async () => {
+    const state = createInitialState("/tmp/dao-record-partial");
+    state.initialized = true;
+    state.agents = [
+      {
+        id: "architect",
+        name: "Architect",
+        role: "Architecture",
+        description: "Reviews architecture",
+        systemPrompt: "Review",
+        weight: 3,
+      },
+      {
+        id: "critic",
+        name: "Critic",
+        role: "Risk",
+        description: "Reviews risk",
+        systemPrompt: "Review",
+        weight: 3,
+      },
+    ];
+    state.proposals.push({
+      id: 1,
+      title: "Record",
+      type: "product-feature",
+      description: "d",
+      proposedBy: "user",
+      status: "deliberating",
+      votes: [],
+      agentOutputs: [],
+      createdAt: "2031-01-01T00:00:00.000Z",
+    });
+    const repository = new InMemoryDaoStateRepository(state);
+    const result = await new RecordDeliberationOutputsUseCase({ repository, clock: clock() }).execute({
+      proposalId: 1,
+      outputs: [{ agentId: "architect", content: "## Vote\nfor" }],
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain("critic");
+    expect(state.proposals[0]?.status).toBe("deliberating");
+    expect(state.proposals[0]?.votes).toEqual([]);
+  });
 });

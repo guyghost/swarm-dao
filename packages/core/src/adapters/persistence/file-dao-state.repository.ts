@@ -1,6 +1,8 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { logger } from "../../observability/logging.js";
+import { TraceLog } from "../../observability/tracing.js";
+import { PersistConflictError } from "../../ports/persist-conflict.js";
 import type { DaoStateRepositoryPort } from "../../ports/repository.js";
 import { createInitialState, type DAOState, type DecisionRecord } from "../../types/index.js";
 import { resolveDaoLayout } from "../dao-home/dao-home.js";
@@ -114,6 +116,16 @@ export class FileDaoStateRepository implements DaoStateRepositoryPort {
   /** Ids of audit entries durably present in audit.jsonl (ADR-005). Entries
    *  whose id is missing here are appended on the next persist. */
   private persistedAuditIds = new Set<number>();
+  /** Corrupt lines were skipped on open: the next persist rewrites a clean trail. */
+  private auditRewritePending = false;
+  /** Audit length at the last full rewrite. The trail is rewritten every
+   *  AUDIT_COMPACT_EVERY new entries so torn lines cannot accumulate forever. */
+  private auditCompactBaseline = 0;
+  /** Per-repository trace log. Persist spans land here, not on the process bus. */
+  readonly traces = new TraceLog();
+
+  /** Test hook: runs inside the lock, immediately before the commit-point ownership check. */
+  static commitProbe: (() => Promise<void>) | null = null;
 
   /** Name of the append-only audit trail file written next to state.json. */
   private static readonly AUDIT_FILE = AUDIT_JSONL_FILE_NAME;
@@ -166,6 +178,7 @@ export class FileDaoStateRepository implements DaoStateRepositoryPort {
     );
     repository.lastArchiveSignature = archiveSignature(state);
     if (options?.persistedAuditIds) repository.persistedAuditIds = options.persistedAuditIds;
+    repository.auditCompactBaseline = state.auditLog.length;
     return repository;
   }
 
@@ -175,6 +188,27 @@ export class FileDaoStateRepository implements DaoStateRepositoryPort {
     const layout = await resolveDaoLayout(cwd);
     const daoRoot = layout.stateRoot;
     await fs.mkdir(daoRoot, { recursive: true });
+    return FileDaoStateRepository.loadAt(daoRoot);
+  }
+
+  /** Re-read durable files into this instance, discarding unsaved memory. */
+  public async reload(): Promise<void> {
+    const fresh = await FileDaoStateRepository.loadAt(this.daoRoot);
+    Object.assign(this.state, fresh.state);
+    this.rawStateOnDisk = fresh.rawStateOnDisk;
+    this.seenRevision = fresh.seenRevision;
+    this.writeCache.clear();
+    this.decisionsPending = fresh.decisionsPending;
+    this.archivedDirty = fresh.archivedDirty;
+    this.lastArchiveSignature = fresh.lastArchiveSignature;
+    this.archiveOnDiskKnown = fresh.archiveOnDiskKnown;
+    this.persistedAuditIds = new Set(fresh.persistedAuditIds);
+    this.auditRewritePending = fresh.auditRewritePending;
+    this.auditCompactBaseline = fresh.auditCompactBaseline;
+  }
+
+  /** Load state already rooted at `daoRoot` (the directory that holds state.json). */
+  public static async loadAt(daoRoot: string): Promise<FileDaoStateRepository> {
     const statePath = path.join(daoRoot, "state.json");
     let state = createInitialState(daoRoot);
     let rawState: string | null = null;
@@ -240,6 +274,7 @@ export class FileDaoStateRepository implements DaoStateRepositoryPort {
     // Tolerant by design — torn/corrupt lines are skipped, duplicates are
     // removed by id during the merge.
     let auditIds: Set<number> | undefined;
+    let auditRewrite = false;
     const auditPath = path.join(daoRoot, FileDaoStateRepository.AUDIT_FILE);
     let rawAudit: string | undefined;
     try {
@@ -257,6 +292,7 @@ export class FileDaoStateRepository implements DaoStateRepositoryPort {
       auditIds = new Set(entries.map((entry) => entry.id));
       if (skipped > 0) {
         logger.warn(`⚠ Skipped ${skipped} corrupt audit.jsonl line(s) at ${auditPath} (torn tail or damaged entries)`);
+        auditRewrite = true;
       }
     }
     // Counters must account for archived proposal AND audit-trail ids
@@ -274,6 +310,8 @@ export class FileDaoStateRepository implements DaoStateRepositoryPort {
       (proposal) => isArchivedStatus(proposal.status) && !archivedOnDiskIds.has(proposal.id),
     );
     if (auditIds) repository.persistedAuditIds = auditIds;
+    repository.auditRewritePending = auditRewrite;
+    repository.auditCompactBaseline = repository.persistedAuditIds.size;
     return repository;
   }
 
@@ -292,55 +330,52 @@ export class FileDaoStateRepository implements DaoStateRepositoryPort {
       // inter-process lock nor the on-disk concurrency check is needed.
       if (!this.hasPendingWrites()) return;
       await fs.mkdir(this.daoRoot, { recursive: true });
-      await withFileLock(this.daoRoot, async () => {
-        const diskRevision = await this.checkNoConcurrentModification();
-        // Monotonic revision (issue #153): move past whatever is on disk so a
-        // stale copy of this instance can never be accepted again.
-        this.state.stateRevision = Math.max(diskRevision, this.seenRevision) + 1;
-        // ADR-004: only re-serialize the archive when its partition may have
-        // changed (mutation contract) or it is not known to be on disk yet
-        // (fresh/legacy). A signature-clean archive keeps archive-only-heavy
-        // flows (e.g. touching an open proposal) at O(open) cost.
-        const signature = archiveSignature(this.state);
-        const archiveChanged =
-          this.archivedDirty || !this.archiveOnDiskKnown || signature !== this.lastArchiveSignature;
-        const { live, archive } = partitionState(this.state);
-        const archivePath = path.join(this.daoRoot, FileDaoStateRepository.ARCHIVE_FILE);
-        // Crash ordering (ADR-004): the archive is written BEFORE state.json.
-        // A crash in between leaves the archive holding the newer closed copy
-        // while state.json still lists the proposal as open; the shadow rule
-        // in mergeArchive resolves that deterministically on the next open.
-        // The reverse order would lose the proposal entirely.
-        if (archiveChanged) {
-          await this.writeIfChanged(archivePath, archive);
-          this.archiveOnDiskKnown = true;
-        }
-        // ADR-005: append not-yet-durable audit entries BEFORE state.json.
-        // A crash in between leaves the trail durably ahead of the state —
-        // accepted governance semantics (a recorded action must not vanish);
-        // the loader dedupes by id, so a post-recovery re-append is harmless.
-        const auditChanged =
-          this.state.auditLog.length !== this.persistedAuditIds.size ||
-          this.state.auditLog.some((entry) => !this.persistedAuditIds.has(entry.id));
-        if (auditChanged) {
-          const pending = this.state.auditLog.filter((entry) => !this.persistedAuditIds.has(entry.id));
-          if (pending.length > 0) {
-            const auditPath = path.join(this.daoRoot, FileDaoStateRepository.AUDIT_FILE);
-            await fs.appendFile(auditPath, pending.map(auditLine).join(""), "utf8");
-            for (const entry of pending) this.persistedAuditIds.add(entry.id);
-          }
-        }
-        const statePath = path.join(this.daoRoot, "state.json");
-        await this.writeIfChanged(statePath, live);
-        this.rawStateOnDisk = this.writeCache.get(statePath) ?? null;
-        this.seenRevision = this.state.stateRevision;
-        this.lastArchiveSignature = signature;
-        this.archivedDirty = false;
+      await withFileLock(this.daoRoot, async (lease) => {
+        const span = this.traces.startSpan("dao.persist");
         try {
-          await this.persistDecisions();
-          this.decisionsPending = false;
+          const diskRevision = await this.checkNoConcurrentModification();
+          // Monotonic revision (issue #153): move past whatever is on disk so a
+          // stale copy of this instance can never be accepted again.
+          this.state.stateRevision = Math.max(diskRevision, this.seenRevision) + 1;
+          // ADR-004: only re-serialize the archive when its partition may have
+          // changed (mutation contract) or it is not known to be on disk yet
+          // (fresh/legacy). A signature-clean archive keeps archive-only-heavy
+          // flows (e.g. touching an open proposal) at O(open) cost.
+          const signature = archiveSignature(this.state);
+          const archiveChanged =
+            this.archivedDirty || !this.archiveOnDiskKnown || signature !== this.lastArchiveSignature;
+          const { live, archive } = partitionState(this.state);
+          const archivePath = path.join(this.daoRoot, FileDaoStateRepository.ARCHIVE_FILE);
+          // Crash ordering (ADR-004): the archive is written BEFORE state.json.
+          // A crash in between leaves the archive holding the newer closed copy
+          // while state.json still lists the proposal as open; the shadow rule
+          // in mergeArchive resolves that deterministically on the next open.
+          // The reverse order would lose the proposal entirely.
+          if (archiveChanged) {
+            await this.writeIfChanged(archivePath, archive, lease);
+            this.archiveOnDiskKnown = true;
+          }
+          // ADR-005: the audit trail is durable BEFORE state.json. A crash in
+          // between leaves the trail ahead of the state — accepted governance
+          // semantics. appendDurable fsyncs the file and its directory first.
+          await this.persistAudit(lease);
+          const statePath = path.join(this.daoRoot, "state.json");
+          await this.writeIfChanged(statePath, live, lease);
+          this.rawStateOnDisk = this.writeCache.get(statePath) ?? null;
+          this.seenRevision = this.state.stateRevision;
+          this.lastArchiveSignature = signature;
+          this.archivedDirty = false;
+          try {
+            await this.persistDecisions(lease);
+            this.decisionsPending = false;
+          } catch (error) {
+            this.decisionsPending = true;
+            throw error;
+          }
+          this.traces.finishSpan(span.id);
         } catch (error) {
-          this.decisionsPending = true;
+          const message = error instanceof Error ? error.message : String(error);
+          this.traces.finishSpan(span.id, message);
           throw error;
         }
       });
@@ -358,6 +393,8 @@ export class FileDaoStateRepository implements DaoStateRepositoryPort {
   private hasPendingWrites(): boolean {
     const statePath = path.join(this.daoRoot, "state.json");
     const { live } = partitionState(this.state);
+    if (this.auditRewritePending) return true;
+    if (this.state.auditLog.length - this.auditCompactBaseline >= AUDIT_COMPACT_EVERY) return true;
     if (this.writeCache.get(statePath) !== formatJson(live)) return true;
     // ADR-004: the archived partition is clean only when its structural
     // signature is unchanged, no caller flagged in-place value edits via
@@ -415,10 +452,11 @@ export class FileDaoStateRepository implements DaoStateRepositoryPort {
     const onDisk = JSON.parse(raw) as Partial<DAOState>;
     const diskRevision = readRevision(onDisk);
     if (diskRevision !== this.seenRevision) {
-      throw new Error(
+      throw new PersistConflictError(
         `Concurrent modification detected in ${path.join(this.daoRoot, "state.json")}: ` +
           `disk revision (${diskRevision}) differs from the revision this instance last saw (${this.seenRevision}). ` +
           "Reopen the repository and retry.",
+        true,
       );
     }
     if (!onDisk || !Array.isArray(onDisk.proposals)) return diskRevision;
@@ -426,17 +464,19 @@ export class FileDaoStateRepository implements DaoStateRepositoryPort {
     const memIds = new Set(this.state.proposals.map((p) => p.id));
     for (const id of diskIds) {
       if (!memIds.has(id as number)) {
-        throw new Error(
+        throw new PersistConflictError(
           `Concurrent modification detected in ${path.join(this.daoRoot, "state.json")}: ` +
             `proposal #${String(id)} exists on disk but not in memory. Reopen the repository and retry.`,
+          true,
         );
       }
     }
     const diskNext = typeof onDisk.nextProposalId === "number" ? onDisk.nextProposalId : 1;
     if (diskNext > this.state.nextProposalId) {
-      throw new Error(
+      throw new PersistConflictError(
         `Concurrent modification detected in ${path.join(this.daoRoot, "state.json")}: ` +
           `disk nextProposalId (${diskNext}) is ahead of memory (${this.state.nextProposalId}). Reopen and retry.`,
+        true,
       );
     }
     return diskRevision;
@@ -460,7 +500,26 @@ export class FileDaoStateRepository implements DaoStateRepositoryPort {
       .sort((left, right) => left.id - right.id);
   }
 
-  private async persistDecisions(): Promise<void> {
+  /** Rewrite the audit trail when it is damaged or has grown by AUDIT_COMPACT_EVERY
+   *  entries; otherwise append the new lines and fsync them before state.json. */
+  private async persistAudit(lease: LockLease): Promise<void> {
+    const auditPath = path.join(this.daoRoot, FileDaoStateRepository.AUDIT_FILE);
+    const rewrite =
+      this.auditRewritePending || this.state.auditLog.length - this.auditCompactBaseline >= AUDIT_COMPACT_EVERY;
+    if (rewrite) {
+      await writeAtomic(auditPath, this.state.auditLog.map(auditLine).join(""), lease);
+      this.persistedAuditIds = new Set(this.state.auditLog.map((entry) => entry.id));
+      this.auditRewritePending = false;
+      this.auditCompactBaseline = this.state.auditLog.length;
+      return;
+    }
+    const pending = this.state.auditLog.filter((entry) => !this.persistedAuditIds.has(entry.id));
+    if (pending.length === 0) return;
+    await appendDurable(auditPath, pending.map(auditLine).join(""), lease);
+    for (const entry of pending) this.persistedAuditIds.add(entry.id);
+  }
+
+  private async persistDecisions(lease: LockLease): Promise<void> {
     const decisionsDir = path.join(this.daoRoot, "decisions");
     await fs.mkdir(decisionsDir, { recursive: true });
     const decisions = this.closedDecisions();
@@ -471,30 +530,74 @@ export class FileDaoStateRepository implements DaoStateRepositoryPort {
     // per-decision serialize+compare sweep (O(closed proposals)) — after a
     // mid-sweep failure, decisionsPending forces the full sweep instead.
     if (!this.decisionsPending && this.writeCache.get(indexPath) === formatJson(decisions)) return;
-    await this.writeIfChanged(indexPath, decisions);
+    await this.writeIfChanged(indexPath, decisions, lease);
     await Promise.all(
       decisions.map((decision) =>
-        this.writeIfChanged(path.join(decisionsDir, `${decision.id.toString().padStart(3, "0")}.json`), decision),
+        this.writeIfChanged(
+          path.join(decisionsDir, `${decision.id.toString().padStart(3, "0")}.json`),
+          decision,
+          lease,
+        ),
       ),
     );
   }
 
-  private async writeIfChanged(filePath: string, value: unknown): Promise<void> {
+  private async writeIfChanged(filePath: string, value: unknown, lease: LockLease): Promise<void> {
     const serialized = formatJson(value);
     if (this.writeCache.get(filePath) === serialized) return;
-    await writeAtomic(filePath, serialized);
+    await writeAtomic(filePath, serialized, lease);
     this.writeCache.set(filePath, serialized);
   }
 }
 
-async function writeAtomic(filePath: string, content: string): Promise<void> {
+async function writeAtomic(filePath: string, content: string, lease: LockLease): Promise<void> {
   const tmpPath = `${filePath}.tmp-${process.pid}-${Math.random().toString(36).slice(2, 10)}`;
+  let handle: import("node:fs/promises").FileHandle | undefined;
   try {
-    await fs.writeFile(tmpPath, content, "utf8");
+    handle = await fs.open(tmpPath, "w");
+    await handle.writeFile(content, "utf8");
+    await handle.sync();
+    await handle.close();
+    handle = undefined;
+    await lease.assertOwned();
     await fs.rename(tmpPath, filePath);
+    await syncDirectory(path.dirname(filePath));
+    lease.markWritten();
   } catch (error) {
+    await handle?.close().catch(() => undefined);
     await safeUnlink(tmpPath);
     throw error;
+  }
+}
+
+/** Append `content` and fsync the file and its directory before the caller commits state.json. */
+async function appendDurable(filePath: string, content: string, lease: LockLease): Promise<void> {
+  await lease.assertOwned();
+  const handle = await fs.open(filePath, "a");
+  try {
+    await handle.appendFile(content, "utf8");
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+  await syncDirectory(path.dirname(filePath));
+  lease.markWritten();
+}
+
+async function syncDirectory(dir: string): Promise<void> {
+  let handle: import("node:fs/promises").FileHandle | undefined;
+  try {
+    handle = await fs.open(dir, "r");
+    await handle.sync();
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    // Directories cannot be fsynced on every platform. The file fsync above
+    // is the durability barrier; a directory sync failure must not fail the commit.
+    if (code !== "EINVAL" && code !== "ENOTSUP" && code !== "EPERM" && code !== "EISDIR" && code !== "EBADF") {
+      throw error;
+    }
+  } finally {
+    await handle?.close().catch(() => undefined);
   }
 }
 
@@ -510,8 +613,15 @@ const LOCK_FILE = "state.lock";
 const LOCK_TIMEOUT_MS = 5000;
 const LOCK_RETRY_MS = 25;
 const LOCK_STALE_MS = 10000;
+/** Full audit rewrite cadence. Appends stay O(new entries) between rewrites. */
+const AUDIT_COMPACT_EVERY = 2000;
 
-export async function withFileLock<T>(daoRoot: string, fn: () => Promise<T>): Promise<T> {
+interface LockLease {
+  assertOwned(): Promise<void>;
+  markWritten(): void;
+}
+
+export async function withFileLock<T>(daoRoot: string, fn: (lease: LockLease) => Promise<T>): Promise<T> {
   const lockPath = path.join(daoRoot, LOCK_FILE);
   // Callers are responsible for creating daoRoot before locking.
   const deadline = Date.now() + LOCK_TIMEOUT_MS;
@@ -531,7 +641,7 @@ export async function withFileLock<T>(daoRoot: string, fn: () => Promise<T>): Pr
         continue;
       }
       if (Date.now() >= deadline) {
-        throw new Error(`Timed out acquiring DAO lock at ${lockPath} (another writer holds it)`);
+        throw new PersistConflictError(`Timed out acquiring DAO lock at ${lockPath} (another writer holds it)`, true);
       }
       await new Promise((r) => setTimeout(r, LOCK_RETRY_MS));
     }
@@ -553,8 +663,39 @@ export async function withFileLock<T>(daoRoot: string, fn: () => Promise<T>): Pr
       }
     })();
   }, LOCK_STALE_MS / 2);
+  let probed = false;
+  let written = false;
+  const lease: LockLease = {
+    markWritten() {
+      written = true;
+    },
+    async assertOwned() {
+      if (!probed && FileDaoStateRepository.commitProbe) {
+        probed = true;
+        await FileDaoStateRepository.commitProbe();
+      }
+      let raw: string;
+      try {
+        raw = await fs.readFile(lockPath, "utf8");
+      } catch {
+        throw new PersistConflictError(`DAO lock lost at ${lockPath}. Reopen the repository and retry.`, !written);
+      }
+      let parsed: { token?: unknown };
+      try {
+        parsed = JSON.parse(raw) as { token?: unknown };
+      } catch {
+        throw new PersistConflictError(`DAO lock lost at ${lockPath}. Reopen the repository and retry.`, !written);
+      }
+      if (parsed.token !== token) {
+        throw new PersistConflictError(
+          `DAO lock lost at ${lockPath}: another writer took over. Reopen the repository and retry.`,
+          !written,
+        );
+      }
+    },
+  };
   try {
-    return await fn();
+    return await fn(lease);
   } finally {
     clearInterval(heartbeat);
     try {

@@ -4,6 +4,7 @@ import {
   createSandboxRunCommand,
   resolveSandboxMode,
   resolveSandboxRunCommand,
+  sandboxAnchorRunner,
   validateSandboxImage,
 } from "../src/sandbox.js";
 
@@ -91,12 +92,25 @@ describe("improvement-loop — bounded sandbox execution", () => {
     expect(await resolveSandboxMode("none", pick(99))).toBeNull();
   });
 
-  it("resolveSandboxRunCommand returns null for none and demands an image otherwise", async () => {
+  it("resolveSandboxRunCommand returns null for explicit none and fails closed when omitted", async () => {
     expect(await resolveSandboxRunCommand({ sandbox: "none" }, "/repo", fakeRunner([]))).toBeNull();
+    await expect(
+      resolveSandboxRunCommand({}, "/repo", async () => ({ stdout: "", stderr: "", exitCode: 1 })),
+    ).rejects.toThrow(/neither Apple container nor Docker/);
+    await expect(resolveSandboxRunCommand({}, "/repo", fakeRunner([]))).rejects.toThrow(
+      /sandbox execution requires an image/,
+    );
     await expect(resolveSandboxRunCommand({ sandbox: "docker" }, "/repo", fakeRunner([]))).rejects.toThrow(
       /sandbox execution requires an image/,
     );
     const runner = await resolveSandboxRunCommand({ sandbox: "container", image: "node:22" }, "/repo", fakeRunner([]));
     expect(runner).not.toBeNull();
+  });
+
+  it("defers the fail-closed check until an anchor command runs", async () => {
+    expect(sandboxAnchorRunner({ sandbox: "none" }, "/repo", fakeRunner([]))).toBeUndefined();
+    const deferred = sandboxAnchorRunner({}, "/repo", fakeRunner([]));
+    expect(deferred).toBeTypeOf("function");
+    await expect(deferred?.("echo hi")).rejects.toThrow(/sandbox execution requires an image/);
   });
 });

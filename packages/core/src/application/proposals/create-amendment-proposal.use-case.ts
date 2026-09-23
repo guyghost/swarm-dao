@@ -2,6 +2,7 @@ import { validateAmendmentPayload } from "../../governance/amendments.js";
 import type { ClockPort } from "../../ports/clock.js";
 import type { DaoStateRepositoryPort } from "../../ports/repository.js";
 import type { AmendmentPayload, AuditEntry, Proposal } from "../../types/index.js";
+import { commitMutation } from "../commit-mutation.js";
 import { CreateProposalUseCase } from "./create-proposal.use-case.js";
 
 export type CreateAmendmentProposalResult =
@@ -32,22 +33,33 @@ export class CreateAmendmentProposalUseCase {
       proposedBy: command.proposedBy,
     });
     if (!created.ok) return created;
-    const proposal = created.proposal;
-    proposal.amendmentPayload = command.payload;
-    proposal.amendmentOrigin = { source: "human" };
-    proposal.amendmentState = "pending-vote";
-    const state = this.dependencies.repository.get();
-    const audit: AuditEntry = {
-      id: state.nextAuditId++,
-      timestamp: this.dependencies.clock.now(),
-      proposalId: proposal.id,
-      layer: "governance",
-      action: "amendment_proposed",
-      actor: command.proposedBy,
-      details: `Amendment: ${command.payload.type}`,
-    };
-    state.auditLog.push(audit);
-    await this.dependencies.repository.persist();
-    return { ok: true, proposal, payload: command.payload };
+    const proposalId = created.proposal.id;
+    return commitMutation<CreateAmendmentProposalResult>(this.dependencies.repository, async () => {
+      const state = this.dependencies.repository.get();
+      const proposal = state.proposals.find((candidate) => candidate.id === proposalId);
+      if (!proposal) {
+        return {
+          persist: false,
+          value: {
+            ok: false as const,
+            error: `Proposal #${proposalId} disappeared before the amendment was recorded.`,
+          },
+        };
+      }
+      proposal.amendmentPayload = command.payload;
+      proposal.amendmentOrigin = { source: "human" };
+      proposal.amendmentState = "pending-vote";
+      const audit: AuditEntry = {
+        id: state.nextAuditId++,
+        timestamp: this.dependencies.clock.now(),
+        proposalId: proposal.id,
+        layer: "governance",
+        action: "amendment_proposed",
+        actor: command.proposedBy,
+        details: `Amendment: ${command.payload.type}`,
+      };
+      state.auditLog.push(audit);
+      return { persist: true, value: { ok: true as const, proposal, payload: command.payload } };
+    });
   }
 }

@@ -4,6 +4,7 @@ import type { ClockPort } from "../../ports/clock.js";
 import type { DaoStateRepositoryPort } from "../../ports/repository.js";
 import type { ExecutionWorkspacePort } from "../../ports/workspace.js";
 import type { AuditEntry, DeliveryPlan, ExecutionSnapshot, Proposal } from "../../types/index.js";
+import { commitMutation } from "../commit-mutation.js";
 
 export type ExecuteProposalResult =
   | {
@@ -46,61 +47,72 @@ export class ExecuteProposalUseCase {
     auditAction?: string;
     auditDetails?: string;
   }): Promise<ExecuteProposalResult> {
-    const state = this.dependencies.repository.get();
-    const proposal = state.proposals.find((candidate) => candidate.id === command.proposalId);
-    if (!proposal) return { ok: false, error: `Proposal #${command.proposalId} not found.` };
-    if (proposal.status !== "controlled") {
-      return {
-        ok: false,
-        error: `Must be controlled (current: ${proposal.status}). Run control gates first (dao_control / swarm-dao control).`,
-      };
-    }
-
-    const now = this.dependencies.clock.now();
-    const plan = state.deliveryPlans[proposal.id] ?? generateDeliveryPlan(proposal, { now });
-    state.deliveryPlans[proposal.id] = plan;
-    // Execute runs on archived (controlled) proposals: plan and snapshot are
-    // archived-partition values, re-assigned behind the structural signature
-    // (ADR-004 mutation contract).
-    this.dependencies.repository.markArchivedDirty();
-
-    // Provision the isolated workspace (if configured) BEFORE any state
-    // transition: a failed preparation must leave the proposal controlled.
-    let executionBranch: string | undefined;
-    let workspacePath: string | null | undefined;
-    if (this.dependencies.workspace) {
-      const prepared = await this.dependencies.workspace.prepare(proposal);
-      if (!prepared.ok) {
-        return { ok: false, error: `Execution workspace preparation failed: ${prepared.error}` };
+    return commitMutation<ExecuteProposalResult>(this.dependencies.repository, async () => {
+      const state = this.dependencies.repository.get();
+      const proposal = state.proposals.find((candidate) => candidate.id === command.proposalId);
+      if (!proposal) {
+        return { persist: false, value: { ok: false as const, error: `Proposal #${command.proposalId} not found.` } };
       }
-      executionBranch = prepared.branch;
-      workspacePath = prepared.path;
-    }
+      if (proposal.status !== "controlled") {
+        return {
+          persist: false,
+          value: {
+            ok: false as const,
+            error: `Must be controlled (current: ${proposal.status}). Run control gates first (dao_control / swarm-dao control).`,
+          },
+        };
+      }
 
-    const snapshot: ExecutionSnapshot = {
-      proposalId: proposal.id,
-      timestamp: now,
-      branch: executionBranch ?? plan.branchStrategy,
-      commitSha: "unknown",
-      filesChanged: [],
-      stateSnapshot: JSON.stringify({ agents: state.agents.length, proposals: state.proposals.length }),
-    };
-    state.snapshots[proposal.id] = snapshot;
+      let executionBranch: string | undefined;
+      let workspacePath: string | null | undefined;
+      if (this.dependencies.workspace) {
+        const prepared = await this.dependencies.workspace.prepare(proposal);
+        if (!prepared.ok) {
+          return {
+            persist: false,
+            value: { ok: false as const, error: `Execution workspace preparation failed: ${prepared.error}` },
+          };
+        }
+        executionBranch = prepared.branch;
+        workspacePath = prepared.path;
+      }
 
-    const transition = dispatchProposalEvent(proposal, { type: "EXECUTE_SUCCESS" }, { clock: this.dependencies.clock });
-    if (!transition.ok) return transition;
-    proposal.executionResult = `Executed with delivery plan: ${executionBranch ?? plan.branchStrategy}`;
-    const audit: AuditEntry = {
-      id: state.nextAuditId++,
-      timestamp: this.dependencies.clock.now(),
-      proposalId: proposal.id,
-      layer: "delivery",
-      action: command.auditAction ?? "proposal_executed",
-      actor: command.actor,
-      details: auditDetails(command, proposal.id, executionBranch, workspacePath),
-    };
-    state.auditLog.push(audit);
-    await this.dependencies.repository.persist();
-    return { ok: true, proposal, plan, snapshot, workspacePath: workspacePath ?? null };
+      const now = this.dependencies.clock.now();
+      const plan = state.deliveryPlans[proposal.id] ?? generateDeliveryPlan(proposal, { now });
+      state.deliveryPlans[proposal.id] = plan;
+      this.dependencies.repository.markArchivedDirty();
+
+      const snapshot: ExecutionSnapshot = {
+        proposalId: proposal.id,
+        timestamp: now,
+        branch: executionBranch ?? plan.branchStrategy,
+        commitSha: "unknown",
+        filesChanged: [],
+        stateSnapshot: JSON.stringify({ agents: state.agents.length, proposals: state.proposals.length }),
+      };
+      state.snapshots[proposal.id] = snapshot;
+
+      const transition = dispatchProposalEvent(
+        proposal,
+        { type: "EXECUTE_SUCCESS" },
+        { clock: this.dependencies.clock },
+      );
+      if (!transition.ok) return { persist: false, value: transition };
+      proposal.executionResult = `Executed with delivery plan: ${executionBranch ?? plan.branchStrategy}`;
+      const audit: AuditEntry = {
+        id: state.nextAuditId++,
+        timestamp: this.dependencies.clock.now(),
+        proposalId: proposal.id,
+        layer: "delivery",
+        action: command.auditAction ?? "proposal_executed",
+        actor: command.actor,
+        details: auditDetails(command, proposal.id, executionBranch, workspacePath),
+      };
+      state.auditLog.push(audit);
+      return {
+        persist: true,
+        value: { ok: true as const, proposal, plan, snapshot, workspacePath: workspacePath ?? null },
+      };
+    });
   }
 }

@@ -52,6 +52,7 @@ import {
   listProposals,
   loadAgentDefinitions,
   loadConfig,
+  migrateDaoToHome,
   PROPOSAL_TYPES,
   presentDryRun,
   RateProposalUseCase,
@@ -77,9 +78,10 @@ import {
   OrchestratorRunner,
   type ProjectImprovementConfig,
   resolveAnchorCommands,
-  resolveSandboxRunCommand,
+  type resolveSandboxRunCommand,
   SAFE_HERDR_KIND,
   type SandboxMode,
+  sandboxAnchorRunner,
   type WorkerExecutionOptions,
   workerOptionsFromConfig,
 } from "@guyghost/swarm-dao-improvement";
@@ -345,6 +347,7 @@ function announceChildren(header: string, child: ChildSessionOptions, names: str
 const CLI_IMPLEMENTED = [
   "init",
   "gc",
+  "migrate",
   "setup",
   "propose",
   "deliberate",
@@ -408,6 +411,8 @@ const CLI_USAGE_DETAILS: Record<string, string> = {
   next: "  next              what needs you now (human gates + live workflows)",
   watch: "  watch [--interval <s>] [--once]   live pane of gates + workflows (Ctrl-C exits)",
   doctor: "  doctor            environment & configuration diagnostic (runtime, agents, gates)",
+  migrate:
+    "  migrate --to home\n        copy a legacy in-repo .dao into ~/.swarm-dao and rename the old directory\n        (idempotent; refuses when the destination already differs)",
   approve:
     "  approve --run-id <id> [--evidence-root <path>] [--yes]\n        approve the exact model hash of a graph run awaiting approval",
   reject: "  reject --run-id <id> --reason <text> [--yes]\n        send an awaiting model back to draft",
@@ -499,6 +504,21 @@ async function cmdSetup(cwd: string): Promise<void> {
 }
 
 /** swarm-dao gc — remove DAO state of deleted branches/worktrees (ADR-007 §5). */
+async function cmdMigrate(cwd: string, flags: Record<string, string | true>): Promise<void> {
+  if (flags.to !== "home") err("migrate requires --to home");
+  const result = await migrateDaoToHome(cwd);
+  if (result.status === "nothing-to-migrate") {
+    info("Nothing to migrate (no legacy .dao with DAO state).");
+    return;
+  }
+  if (result.status === "already-home") {
+    info(`DAO storage is already in the external home${result.stateRoot ? `: ${result.stateRoot}` : ""}.`);
+    return;
+  }
+  info(`Migrated legacy .dao to ${result.stateRoot}`);
+  if (result.legacyBackup) info(`Legacy directory renamed to ${result.legacyBackup}`);
+}
+
 async function cmdGc(cwd: string, flags: Record<string, string | true>): Promise<void> {
   const dryRun = flags["dry-run"] === true;
   const result = await gcDaoHome(cwd, { dryRun });
@@ -1769,7 +1789,7 @@ async function cmdImprove(cwd: string, positional: string[], flags: Record<strin
   if (execMode === "container" && sandboxRequest.sandbox === undefined) {
     sandboxRequest.sandbox = "auto";
   }
-  const runCommand = await resolveSandboxRunCommand(sandboxRequest, workDir);
+  const runCommand = sandboxAnchorRunner(sandboxRequest, workDir);
   const deps: OrchestratorOnceDeps = {
     workDir,
     cycleEvidenceRoot: cycleRoot,
@@ -1882,6 +1902,9 @@ export async function main(argv: string[], cwd: string = process.cwd()): Promise
         return 0;
       case "gc":
         await cmdGc(cwd, flags);
+        return 0;
+      case "migrate":
+        await cmdMigrate(cwd, flags);
         return 0;
       case "setup":
         await cmdSetup(cwd);

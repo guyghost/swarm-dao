@@ -13,9 +13,10 @@ Accepted (2026-09-20) — implemented in the same change set:
 - **tests**: `packages/core/tests/dao-home.test.ts` (naming, precedence,
   passive GC + guards, explicit gc, repository/config wiring).
 
-Deferred follow-ups: the one-shot `dao migrate --to home` command (legacy
-projects keep working via precedence rule 2 in the meantime) and evidence
-root relocation (see Open questions). Note: proposing on a fresh branch
+`swarm-dao migrate --to home` copies a legacy `.dao` into the home branch
+directory, checks the read-back, and renames the old tree. It is idempotent
+and refuses a destination that already differs. Evidence root relocation
+stays open (see Open questions). Note: proposing on a fresh branch
 requires `dao_setup` on that branch — the initialized flag is branch-scoped
 state under this layout. This ADR changes **where** DAO state
 lives and **when** it is cleaned up. It changes **no** state machine: the
@@ -161,15 +162,18 @@ and the branch dir for state.
 | Config | `packages/core/src/config.ts` | no signature change; config dir = project root |
 | Setup | `dao_setup` in each host adapter, CLI `setup` | storage-mode choice, default `home`; auto-`repo` when github sync enabled |
 | Evidence roots | `packages/core/src/observability/attention.ts` (`PROJECT_LOCAL_ROOTS`) | scan moves under the resolved branch dir |
-| Migration | CLI | `swarm-dao dao migrate --to home` (optional, one-shot) |
+| Migration | CLI | `swarm-dao migrate --to home` (idempotent, one-shot) |
 
 ## Migration & compatibility
 
 - Existing projects with an in-repo `.dao/`: **untouched** — precedence rule
   2 keeps them on legacy mode with zero action.
-- Moving an existing project to home mode: `dao migrate --to home` copies
-  `state.json` + `decisions/` + audit into `branches/<current>/`, merges
-  config at project level, and marks `storageMode: "home"`.
+- Moving an existing project to home mode: `swarm-dao migrate --to home`
+  copies `state.json`, `audit.jsonl`, `archive.json`, and `decisions/` into
+  `branches/<current>/`, copies `config.json` to the project root when it is
+  absent, verifies the bytes, then renames `.dao` to `.dao.pre-home-<timestamp>`.
+  A second run with no legacy directory reports already-home. A destination
+  that already holds different bytes is left untouched.
 - Fresh setups get `home` by default; `dao_setup` prints the resolved home
   path so the location is always discoverable (`dao_status` shows it too).
 
