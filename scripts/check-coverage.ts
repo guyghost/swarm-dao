@@ -19,13 +19,15 @@ const FUNCTIONS_THRESHOLD = 0.72; // baseline 74.55% (2026-09-20) minus ~2pt
 /** Per package, under the 2026-09-22 Ubuntu CI lcov (bun 1.4.0).
  *  A package can no longer regress inside a healthy workspace total.
  *  herdr-adapter is lower than a local mac run: several adapter branches
- *  stay uncovered on the Linux runner. opencode-adapter is absent: its
- *  tests never load `src/`, so bun records no lines for it. */
+ *  stay uncovered on the Linux runner.
+ *  pi/opencode floors measure `src/` (tests import `../src/index.ts`);
+ *  raised from the previous dist-blind 8% / missing floors once src was visible. */
 const PACKAGE_FLOORS: Record<string, { lines: number; functions: number }> = {
   "packages/core": { lines: 0.64, functions: 0.66 },
   "packages/cli": { lines: 0.54, functions: 0.66 },
   "packages/mcp-server": { lines: 0.38, functions: 0.57 },
-  "packages/pi-adapter": { lines: 0.08, functions: 0.4 },
+  "packages/pi-adapter": { lines: 0.7, functions: 0.7 },
+  "packages/opencode-adapter": { lines: 0.55, functions: 0.4 },
   "packages/improvement-loop": { lines: 0.86, functions: 0.88 },
   "packages/graph-engineering": { lines: 0.88, functions: 0.94 },
   "packages/product-loop": { lines: 0.84, functions: 0.9 },

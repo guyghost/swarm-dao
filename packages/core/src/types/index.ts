@@ -260,7 +260,7 @@ export interface CouncilMembership {
 //
 // Delegated Facet Investigation. An agent may declare the facets it can
 // delegate to a dedicated sub-agent. The lifecycle of each delegation is
-// owned by the delegation state machines (`governance/delegation.machine.ts`)
+// owned by the delegation state machines (`models/delegation.machine.ts`)
 // — these types are the persisted shape, NOT the transition logic. The model
 // decides; an LLM only emits a `FACET_REQUESTED` signal.
 

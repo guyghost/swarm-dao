@@ -12,7 +12,6 @@ import {
   FileDaoStateRepository,
   FsAttentionStore,
   formatAttention,
-  getState,
   handleDaoAgents,
   handleDaoArtefacts,
   handleDaoAudit,
@@ -314,8 +313,8 @@ export function createSwarmDaoMcpServer(workDir = resolveDaoRoot(), repository?:
       const args = (rawArgs ?? {}) as Record<string, unknown>;
       switch (name) {
         case "dao_help": {
-          const state = getState();
-          if (!state.initialized) return textResult(DAO_ONBOARDING_MESSAGE);
+          const state = repository?.get();
+          if (!state?.initialized) return textResult(DAO_ONBOARDING_MESSAGE);
           return textResult(buildDaoHelpMessage({ host: "mcp", manualDeliberation: true, controlTool }));
         }
         case "dao_setup":
@@ -359,13 +358,13 @@ export function createSwarmDaoMcpServer(workDir = resolveDaoRoot(), repository?:
             }),
           );
         case "dao_list":
-          return textResult(await handleDaoList());
+          return textResult(await handleDaoList(repository));
         case "dao_agents":
-          return textResult(await handleDaoAgents());
+          return textResult(await handleDaoAgents(repository));
         case "dao_plan":
-          return textResult(await handleDaoPlan(Number(args.proposalId), controlTool));
+          return textResult(await handleDaoPlan(Number(args.proposalId), controlTool, repository));
         case "dao_artefacts":
-          return textResult(await handleDaoArtefacts(Number(args.proposalId)));
+          return textResult(await handleDaoArtefacts(Number(args.proposalId), repository));
         case "dao_dry_run":
           return textResult(await handleDaoDryRun(Number(args.proposalId), repository));
         case "dao_rollback":
@@ -373,7 +372,7 @@ export function createSwarmDaoMcpServer(workDir = resolveDaoRoot(), repository?:
         case "dao_reject":
           return textResult(await handleDaoReject(ctx, Number(args.proposalId), String(args.reason)));
         case "dao_dashboard":
-          return textResult(await handleDaoDashboard());
+          return textResult(await handleDaoDashboard(repository));
         case "dao_roundtable":
           return textResult(await handleDaoRoundtable(ctx));
         case "dao_audit":

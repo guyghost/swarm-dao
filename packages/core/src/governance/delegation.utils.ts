@@ -17,7 +17,6 @@
 // ============================================================
 
 import { createActor } from "xstate";
-import type { DAOAgent, DAOConfig, DelegationProfileEntry } from "../types/index.js";
 import {
   createDelegationCoordinatorMachine,
   createDelegationRequestMachine,
@@ -31,7 +30,10 @@ import {
   type DelegationRequestStatus,
   isCoordinatorFinal,
   isDelegationRequestFinal,
-} from "./delegation.machine.js";
+} from "../models/delegation.machine.js";
+import type { ClockPort } from "../ports/clock.js";
+import { systemClock } from "../ports/clock.js";
+import type { DAOAgent, DAOConfig, DelegationProfileEntry } from "../types/index.js";
 
 // ── Persisted state shapes ───────────────────────────────────
 //
@@ -69,7 +71,7 @@ export interface DelegationRequestState {
 export function createCoordinatorState(
   parent: DAOAgent,
   config: DAOConfig,
-  now: string = new Date().toISOString(),
+  now: string = systemClock.now(),
 ): DelegationCoordinatorState {
   const delegation = config.delegation;
   return {
@@ -89,7 +91,7 @@ export function createRequestState(
   coordinator: DelegationCoordinatorState,
   facet: string,
   archetype: string,
-  now: string = new Date().toISOString(),
+  now: string = systemClock.now(),
 ): DelegationRequestState {
   return {
     requestId,
@@ -124,11 +126,13 @@ function coordinatorReason(state: DelegationCoordinatorState): string {
 export function dispatchCoordinatorEvent(
   state: DelegationCoordinatorState,
   event: DelegationCoordinatorEvent,
+  options: { clock?: ClockPort } = {},
 ): CoordinatorDispatchResult {
   if (isCoordinatorFinal(state.status)) {
     return { ok: false, error: `Coordinator is in terminal status "${state.status}"; no transitions are permitted.` };
   }
 
+  const transitionTime = (options.clock ?? systemClock).now();
   const machine = createDelegationCoordinatorMachine(state.status);
   const actor = createActor(machine, {
     input: {
@@ -138,6 +142,7 @@ export function dispatchCoordinatorEvent(
       maxChildren: state.maxChildren,
       maxDepth: state.maxDepth,
       activeRequests: state.activeRequests,
+      transitionTime,
       lastTransitionTime: state.lastTransitionTime,
       errorMessage: state.errorMessage,
     } satisfies DelegationCoordinatorInput,
@@ -177,11 +182,13 @@ export type RequestDispatchResult = { ok: true; status: DelegationRequestStatus 
 export function dispatchDelegationEvent(
   state: DelegationRequestState,
   event: DelegationRequestEvent,
+  options: { clock?: ClockPort } = {},
 ): RequestDispatchResult {
   if (isDelegationRequestFinal(state.status)) {
     return { ok: false, error: `Request is in terminal status "${state.status}"; no transitions are permitted.` };
   }
 
+  const transitionTime = (options.clock ?? systemClock).now();
   const machine = createDelegationRequestMachine(state.status);
   const actor = createActor(machine, {
     input: {
@@ -193,6 +200,7 @@ export function dispatchDelegationEvent(
       mergedAgentOutputHash: state.mergedAgentOutputHash,
       errorMessage: state.errorMessage,
       gateReasons: state.gateReasons,
+      transitionTime,
       lastTransitionTime: state.lastTransitionTime,
     } satisfies DelegationRequestInput,
   });

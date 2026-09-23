@@ -4,35 +4,30 @@
 
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import type { AttentionSource, DAOAgent, DaoStateRepositoryPort, HostAdapter } from "@guyghost/swarm-dao-core";
+import type { AttentionSource, DaoStateRepositoryPort, HostAdapter } from "@guyghost/swarm-dao-core";
 import {
   ATTENTION_SOURCES,
   // Commands registry (source of truth for the /dao surface)
   buildDaoHelpMessage,
   collectAttention,
-  computeHealthScore,
   execCommand,
   FileDaoStateRepository,
   FsAttentionStore,
-  formatAllArtefacts,
   formatAttention,
-  formatAuditTrail,
-  formatHealthScore,
-  formatPlan,
-  generateAllArtefacts,
-  generateDashboard,
-  getAllAuditLog,
-  getPlan,
-  getProposal,
-  getState,
+  handleDaoAgents,
+  handleDaoArtefacts,
+  handleDaoAudit,
   handleDaoCheckEdit,
   handleDaoConfigGithub,
   handleDaoControl,
+  handleDaoDashboard,
   handleDaoDeliberate,
   handleDaoDryRun,
   handleDaoExecute,
   handleDaoGithubCreateBranch,
   handleDaoGithubOpenPr,
+  handleDaoList,
+  handleDaoPlan,
   handleDaoPropose,
   handleDaoProposeAmendment,
   handleDaoRate,
@@ -175,14 +170,6 @@ function detectParentModel(context: { sessionID?: string } | undefined, director
   return hostDefaultModels.get(directory) ?? process.env.OPENCODE_MODEL;
 }
 
-function formatAgentsTable(agents: DAOAgent[]): string {
-  let table = "| Agent | Weight | Role |\n|-------|--------|------|\n";
-  for (const agent of agents) {
-    table += `| ${agent.name} | ${agent.weight} | ${agent.role} |\n`;
-  }
-  return table;
-}
-
 function createOpenCodeHostAdapter(
   ctx: PluginInput,
   options?: { getSessionModel?: () => string | undefined },
@@ -263,7 +250,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
         args: {},
         // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
         async execute(_args: any, _context: any) {
-          const state = getState();
+          const state = repository.get();
           if (!state.initialized) return OPENCODE_ONBOARDING_MESSAGE;
           return OPENCODE_HELP_MESSAGE;
         },
@@ -484,15 +471,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
         args: {},
         // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
         async execute(_args: any, _context: any) {
-          const state = getState();
-          if (!state.initialized) return OPENCODE_ONBOARDING_MESSAGE;
-          if (state.proposals.length === 0) return "No proposals yet.";
-
-          let output = "# DAO Proposals\n\n";
-          for (const p of state.proposals) {
-            output += `## #${p.id}: ${p.title}\n${p.status} · ${p.type}\n\n`;
-          }
-          return output;
+          return handleDaoList(repository);
         },
       }),
 
@@ -502,9 +481,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
         args: {},
         // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
         async execute(_args: any, _context: any) {
-          const state = getState();
-          if (!state.initialized) return OPENCODE_ONBOARDING_MESSAGE;
-          return `# DAO Agents\n\n${formatAgentsTable(state.agents)}`;
+          return handleDaoAgents(repository);
         },
       }),
 
@@ -514,28 +491,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
         args: { proposalId: schema.number() },
         // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
         async execute(args: any, _context: any) {
-          const proposal = getProposal(args.proposalId);
-          if (!proposal) return `Proposal #${args.proposalId} not found.`;
-          const plan = getPlan(args.proposalId);
-          if (!plan) {
-            if (proposal.status === "open") {
-              return "Plan not available yet. Run `dao_record_outputs` (after starting deliberation with `dao_propose` and running deliberation), then `dao_control`, to generate the plan.";
-            }
-            if (proposal.status === "deliberating") {
-              return "Plan not available yet. Deliberation is still running. Run `dao_record_outputs` to completion first.";
-            }
-            if (proposal.status === "approved") {
-              return "Plan not available yet. Proposal must pass gates first. Run `dao_control` to proceed.";
-            }
-            if (proposal.status === "controlled") {
-              return "Plan should be available. If missing, run `dao_execute` to generate it.";
-            }
-            if (proposal.status === "rejected") {
-              return "Proposal was rejected and cannot be executed.";
-            }
-            return "Plan not available for this proposal.";
-          }
-          return formatPlan(plan);
+          return handleDaoPlan(args.proposalId, "dao_control", repository);
         },
       }),
 
@@ -545,10 +501,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
         args: { proposalId: schema.number() },
         // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
         async execute(args: any, _context: any) {
-          const proposal = getProposal(args.proposalId);
-          if (!proposal) return `Proposal #${args.proposalId} not found.`;
-          const artefacts = generateAllArtefacts(proposal);
-          return formatAllArtefacts(artefacts);
+          return handleDaoArtefacts(args.proposalId, repository);
         },
       }),
 
@@ -602,17 +555,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
         args: {},
         // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
         async execute(_args: any, _context: any) {
-          const state = getState();
-          if (!state.initialized) return OPENCODE_ONBOARDING_MESSAGE;
-          const dashboard = generateDashboard(
-            state.proposals,
-            state.outcomes,
-            state.agents,
-            state.healthSnapshots,
-            state.config.healthWeights,
-          );
-          const health = computeHealthScore(state.proposals, state.outcomes, state.config.healthWeights);
-          return `${dashboard}\n\n${formatHealthScore(health)}`;
+          return handleDaoDashboard(repository);
         },
       }),
 
@@ -644,10 +587,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
         args: { proposalId: schema.number({ description: "Optional proposal ID" }) },
         // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
         async execute(args: any, _context: any) {
-          const entries = args.proposalId
-            ? getAllAuditLog().filter((e) => e.proposalId === args.proposalId)
-            : getAllAuditLog();
-          return formatAuditTrail(entries, args.proposalId);
+          return handleDaoAudit(args.proposalId !== undefined ? Number(args.proposalId) : undefined);
         },
       }),
 

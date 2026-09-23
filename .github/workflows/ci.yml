@@ -5,6 +5,9 @@ on:
     branches: [main, master]
   pull_request:
     branches: [main, master]
+  schedule:
+    # Weekly Sunday 06:15 UTC — real-runtime job (tmux + EVOLUTION_IT).
+    - cron: "15 6 * * 0"
 
 # One run per ref at a time: superseded pushes cancel their in-flight run.
 concurrency:
@@ -115,6 +118,16 @@ jobs:
           name: coverage-lcov
           path: coverage/lcov.info
 
+      - name: Dependency audit
+        # Bun has no `pm audit`. Install the OSV-Scanner binary and fail on
+        # known vulns in bun.lock (Dependabot remains the weekly refresh path).
+        run: |
+          set -euo pipefail
+          version=v2.2.1
+          curl -sSfL "https://github.com/google/osv-scanner/releases/download/${version}/osv-scanner_linux_amd64" -o /tmp/osv-scanner
+          chmod +x /tmp/osv-scanner
+          /tmp/osv-scanner scan source -L bun.lock
+
       - name: Type check tools
         # tools/ holds the frozen-model contract validators and their tests;
         # they are not workspace packages, so they need their own gates
@@ -124,11 +137,45 @@ jobs:
       - name: Test tools
         run: bun run test:tools
 
+      - name: Validate Pi extension npm package
+        run: bun run pack:pi
+
+  real-runtime:
+    name: Real-runtime integration (opt-in)
+    runs-on: ubuntu-latest
+    # Nightly + label: keeps the default PR bar fast while still exercising
+    # container sandbox / tmux paths that skip without binaries.
+    if: >
+      github.event_name == 'schedule' ||
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'real-runtime'))
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.0"
+
+      - name: Install tmux
+        run: sudo apt-get update && sudo apt-get install -y tmux
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Set up workspace links and optional peer stubs
+        run: bun run setup-workspace
+
       - name: Build
         run: bun run build
 
-      - name: Validate Pi extension npm package
-        run: bun run pack:pi
+      - name: tmux host integration
+        run: bun test packages/tmux-adapter/tests/integration.tmux.test.ts
+
+      - name: Sandboxed evolution (EVOLUTION_IT)
+        env:
+          EVOLUTION_IT: "1"
+        run: bun test packages/integration-tests/tests/sandbox-evolution.it.test.ts
 
   benchmarks:
     name: Performance benchmarks

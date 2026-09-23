@@ -63,7 +63,7 @@ async function setupPlugin(tmpDir: string) {
   // Reset module-level state so tests are isolated
   setState(null);
   const ctx = createMockCtx(tmpDir);
-  const { OpenCodeDAO } = await import("@guyghost/swarm-dao-opencode-adapter");
+  const { OpenCodeDAO } = await import("../src/index.js");
   const plugin = await OpenCodeDAO(ctx);
   // The plugin always defines `tool`; the SDK type only marks it optional.
   type Plugin = typeof plugin & { tool: NonNullable<typeof plugin.tool> };
@@ -74,12 +74,12 @@ describe("opencode-adapter", () => {
   // ── Original module-level tests ───────────────────────────────
 
   it("exports OpenCodeDAO plugin", async () => {
-    const mod = await import("@guyghost/swarm-dao-opencode-adapter");
+    const mod = await import("../src/index.js");
     expect(mod.OpenCodeDAO).toBeDefined();
   });
 
   it("exports default", async () => {
-    const mod = await import("@guyghost/swarm-dao-opencode-adapter");
+    const mod = await import("../src/index.js");
     expect(mod.default).toBeDefined();
   });
 
