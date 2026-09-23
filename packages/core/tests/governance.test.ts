@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import type { Proposal } from "@guyghost/swarm-dao-core";
 import {
   calculateCompositeScore,
@@ -9,11 +9,9 @@ import {
   dispatchProposalEvent,
   executeAmendment,
   formatAgentsTable,
-  getState,
   initializeAgents,
   mergeVotes,
   parseVoteFromOutput,
-  setState,
   statusLabel,
   tallyVotes,
   validateAmendmentPayload,
@@ -173,11 +171,6 @@ Child reasoning.`;
   });
 
   it("tallies votes correctly", () => {
-    const state = createInitialState("/tmp/dao-test");
-    state.initialized = true;
-    state.agents = initializeAgents();
-    setState(state);
-
     const proposal = {
       id: 1,
       title: "Test",
@@ -540,13 +533,6 @@ describe("governance/lifecycle", () => {
 // ── Amendments ──────────────────────────────────────────────
 
 describe("governance/amendments", () => {
-  beforeEach(() => {
-    const state = createInitialState("/tmp/dao-test");
-    state.initialized = true;
-    state.agents = initializeAgents();
-    setState(state);
-  });
-
   it("validates amendment payload", () => {
     const payload = { type: "agent-update" as const, agentId: "strategist", changes: { weight: 5 } };
     const result = validateAmendmentPayload(payload);
@@ -560,12 +546,15 @@ describe("governance/amendments", () => {
   });
 
   it("executes agent-update amendment", () => {
+    const state = createInitialState("/tmp/dao-test");
+    state.initialized = true;
+    state.agents = initializeAgents();
     const payload = { type: "agent-update" as const, agentId: "strategist", changes: { weight: 5 } };
-    const result = executeAmendment(payload);
+    const result = executeAmendment(payload, state);
     expect(result.success).toBe(true);
 
     // Verify weight is updated in state
-    const agent = getState().agents.find((a) => a.id === "strategist");
+    const agent = state.agents.find((a) => a.id === "strategist");
     expect(agent).toBeDefined();
     expect(agent?.weight).toBe(5);
   });

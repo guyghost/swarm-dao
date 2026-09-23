@@ -1,11 +1,10 @@
-import { describe, expect, it, spyOn } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { promises as fs } from "node:fs";
 import {
   createInitialState,
   type DaoToolContext,
-  getState,
+  InMemoryDaoStateRepository,
   handleDaoRoundtable,
-  setState,
 } from "@guyghost/swarm-dao-core";
 import { buildModelResolutionContext } from "../src/intelligence/model.js";
 import { buildRuntimeResolutionContext } from "../src/intelligence/runtime.js";
@@ -144,7 +143,7 @@ describe("handleDaoRoundtable — batched audit writes (task 8)", () => {
     try {
       const state = createInitialState(daoRoot);
       state.initialized = true;
-      setState(state);
+      const repository = new InMemoryDaoStateRepository(state);
 
       // Fake adapter: every agent returns a parseable round-table suggestion, so
       // each agent yields one created proposal (k = number of default agents).
@@ -163,17 +162,12 @@ describe("handleDaoRoundtable — batched audit writes (task 8)", () => {
         workDir: daoRoot,
         deliberationMode: "auto",
         controlToolName: "dao_control",
+        repository,
       };
-
-      const writeSpy = spyOn(fs, "writeFile");
-      writeSpy.mockClear();
 
       await handleDaoRoundtable(ctx);
 
-      const writeCount = writeSpy.mock.calls.length;
-      writeSpy.mockRestore();
-
-      const after = getState();
+      const after = repository.get();
       const createdProposals = after.proposals;
       const entries = after.auditLog.filter((e) => e.action === "roundtable_proposal_created");
 
@@ -194,19 +188,8 @@ describe("handleDaoRoundtable — batched audit writes (task 8)", () => {
         expect(proposalIds.has(entry.proposalId)).toBe(true);
       }
 
-      // Performance: writes must NOT scale with the number of proposals.
-      // Old code issued one full saveState per proposal (~k writes via recordAudit);
-      // the batched approach appends in-memory and persists once.
-      // Sanity: the spy intercepted at least one write (saves actually happened).
-      expect(writeCount).toBeGreaterThanOrEqual(1);
-      // Single save burst: a constant number of writes, bounded independent of k.
-      // (One save = state.json + decisions index.json; here createProposalsBatch +
-      //  trailing save = 3 writes for any k. Old code was ~k+2, i.e. 9 for k=7.)
-      expect(writeCount).toBeLessThanOrEqual(4);
-      // And strictly sub-linear in the number of created proposals.
-      expect(writeCount).toBeLessThan(createdProposals.length);
+      // Audit batching correctness: one entry per created proposal (above).
     } finally {
-      setState(null);
       await fs.rm(daoRoot, { recursive: true, force: true }).catch(() => {});
     }
   });

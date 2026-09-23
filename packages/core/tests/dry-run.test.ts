@@ -1,22 +1,22 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import {
   canRollback,
-  captureSnapshot,
   createExecutionSnapshot,
   createInitialState,
   formatDryRun,
   formatRollback,
-  getSnapshot,
+  InMemoryDaoStateRepository,
   performDryRun,
   performRollback,
-  setState,
 } from "@guyghost/swarm-dao-core";
 
 describe("delivery/dry-run", () => {
+  let repository: InMemoryDaoStateRepository;
+
   beforeEach(() => {
     const state = createInitialState("/tmp/dao-test");
     state.initialized = true;
-    setState(state);
+    repository = new InMemoryDaoStateRepository(state);
   });
 
   it("performs dry-run on proposal", async () => {
@@ -77,35 +77,35 @@ describe("delivery/dry-run", () => {
   });
 
   it("checks rollback availability", async () => {
-    expect(canRollback(1)).toBe(false);
-    await captureSnapshot(1, {
+    expect(canRollback(1, repository)).toBe(false);
+    repository.get().snapshots[1] = {
       proposalId: 1,
       timestamp: "",
       branch: "main",
       commitSha: "abc123",
       filesChanged: [],
       stateSnapshot: "",
-    });
-    expect(canRollback(1)).toBe(true);
+    };
+    expect(canRollback(1, repository)).toBe(true);
   });
 
   it("performs rollback", async () => {
-    await captureSnapshot(1, {
+    repository.get().snapshots[1] = {
       proposalId: 1,
       timestamp: "",
       branch: "main",
       commitSha: "abc123def456",
       filesChanged: [],
       stateSnapshot: "",
-    });
+    };
 
-    const result = await performRollback(1);
+    const result = await performRollback(1, repository);
     expect(result.success).toBe(true);
     expect(result.message).toContain("abc123de");
   });
 
   it("fails rollback without snapshot", async () => {
-    const result = await performRollback(999);
+    const result = await performRollback(999, repository);
     expect(result.success).toBe(false);
   });
 
@@ -128,7 +128,7 @@ describe("delivery/dry-run", () => {
       createdAt: "",
     };
 
-    const snapshot = await createExecutionSnapshot(proposal, process.cwd());
+    const snapshot = await createExecutionSnapshot(proposal, process.cwd(), repository);
     expect(snapshot.proposalId).toBe(2);
     expect(snapshot.filesChanged).toContain("file1.txt");
     // Since we are in a git repo during tests, these should ideally not be "unknown"
@@ -136,7 +136,7 @@ describe("delivery/dry-run", () => {
     expect(snapshot.branch).toBeDefined();
     expect(snapshot.commitSha).toBeDefined();
 
-    const storedSnapshot = getSnapshot(2);
+    const storedSnapshot = repository.get().snapshots[2];
     expect(storedSnapshot).toBeDefined();
     expect(storedSnapshot?.proposalId).toBe(2);
   });

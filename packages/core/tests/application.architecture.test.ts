@@ -11,7 +11,6 @@ import {
   DryRunProposalUseCase,
   ExecuteProposalUseCase,
   FileDaoStateRepository,
-  getState,
   InitializeDaoUseCase,
   InMemoryDaoStateRepository,
   presentProposalCreated,
@@ -22,7 +21,6 @@ import {
   RoundTableUseCase,
   ShipProposalUseCase,
   StartDeliberationUseCase,
-  setRepository,
   TransitionProposalUseCase,
   UpdateProposalUseCase,
 } from "@guyghost/swarm-dao-core";
@@ -39,17 +37,12 @@ describe("application architecture", () => {
     expect(second.get().initialized).toBe(false);
   });
 
-  it("routes compatibility persistence APIs through an explicit repository instance", () => {
-    const first = new InMemoryDaoStateRepository(createInitialState("/first/.dao"));
-    const second = new InMemoryDaoStateRepository(createInitialState("/second/.dao"));
-    try {
-      setRepository(first);
-      expect(getState().daoRoot).toBe("/first/.dao");
-      setRepository(second);
-      expect(getState().daoRoot).toBe("/second/.dao");
-    } finally {
-      setRepository(null);
-    }
+  it("does not expose process-global getState/setRepository (ADR-002 rule 3)", async () => {
+    const persistence = await import("../src/persistence.js");
+    expect("getState" in persistence).toBe(false);
+    expect("setState" in persistence).toBe(false);
+    expect("setRepository" in persistence).toBe(false);
+    expect("getOrCreateState" in persistence).toBe(false);
   });
 
   it("persists and reloads isolated file repository instances", async () => {

@@ -1,10 +1,9 @@
-import { beforeEach, describe, expect, it } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { previewAmendment, validateAmendmentPayload } from "../src/governance/amendments.js";
-import { setState } from "../src/persistence.js";
 import { createInitialState } from "../src/types/index.js";
 
 describe("governance/amendments.ts", () => {
-  beforeEach(() => {
+  it("validates and previews amendment payload", () => {
     const state = createInitialState(process.cwd());
     state.agents = [
       {
@@ -16,10 +15,6 @@ describe("governance/amendments.ts", () => {
         weight: 3,
       },
     ];
-    setState(state);
-  });
-
-  it("validates and previews amendment payload", () => {
     const payload = {
       type: "agent-update" as const,
       agentId: "architect",
@@ -27,7 +22,7 @@ describe("governance/amendments.ts", () => {
     };
     const validation = validateAmendmentPayload(payload);
     expect(validation.valid).toBe(true);
-    const preview = previewAmendment(payload);
+    const preview = previewAmendment(payload, state);
     expect(preview.length).toBeGreaterThan(0);
   });
 });

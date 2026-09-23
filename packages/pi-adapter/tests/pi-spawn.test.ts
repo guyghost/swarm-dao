@@ -121,6 +121,7 @@ let savedEnv: Record<string, string | undefined> = {};
 let testRoot: string;
 let DAO_ROOT: string;
 let cwdBefore: string;
+let savedDaoHome: string;
 
 // ── Test Suite ──────────────────────────────────────────────
 
@@ -129,12 +130,23 @@ describe("pi adapter spawnAgent default-on", () => {
     cwdBefore = process.cwd();
     testRoot = await fs.mkdtemp(path.join(tmpdir(), "swarm-pi-spawn-tests-"));
     await Bun.$`git init -q`.cwd(testRoot);
+    // ADR-007: the throwaway checkout is a git repo, so state resolves to the
+    // external DAO home. Pin it inside the test root — never the real
+    // ~/.swarm-dao — and derive DAO_ROOT from the resolved branch state dir,
+    // otherwise the per-test cleanup below wipes a path nothing writes to and
+    // proposals leak from one test into the next.
+    savedDaoHome = process.env.SWARM_DAO_HOME ?? "";
+    process.env.SWARM_DAO_HOME = path.join(testRoot, "dao-home");
+    const { resolveDaoLayout } = await import("@guyghost/swarm-dao-core");
+    const layout = await resolveDaoLayout(testRoot);
     process.chdir(testRoot);
-    DAO_ROOT = path.join(testRoot, ".dao");
+    DAO_ROOT = layout.stateRoot;
   });
 
   afterAll(async () => {
     process.chdir(cwdBefore);
+    if (savedDaoHome === "") delete process.env.SWARM_DAO_HOME;
+    else process.env.SWARM_DAO_HOME = savedDaoHome;
     await fs.rm(testRoot, { recursive: true, force: true });
     mock.restore();
   });
@@ -147,8 +159,6 @@ describe("pi adapter spawnAgent default-on", () => {
     spawnExit = { code: 0, stderr: "" };
     stdoutFactory = undefined;
 
-    const { setState } = await import("@guyghost/swarm-dao-core");
-    setState(null);
     try {
       await fs.rm(DAO_ROOT, { recursive: true, force: true });
     } catch {
@@ -172,14 +182,14 @@ describe("pi adapter spawnAgent default-on", () => {
   /** Initialized DAO + registered extension; returns the dao_roundtable runner. */
   async function setupRoundtable(): Promise<{
     run: () => Promise<string>;
-    getState: () => ReturnType<typeof import("@guyghost/swarm-dao-core")["getState"]>;
+    readState: () => Promise<import("@guyghost/swarm-dao-core").DAOState>;
   }> {
     const core = await import("@guyghost/swarm-dao-core");
-    await core.initStorage(process.cwd());
-    const state = core.getOrCreateState(process.cwd());
+    const repo = await core.FileDaoStateRepository.open(process.cwd());
+    const state = repo.get();
     state.initialized = true;
     state.agents = core.initializeAgents();
-    core.setState(state);
+    await repo.persist();
 
     const mod = await import("../src/index.js");
     const { pi, tools } = createMockPi();
@@ -196,13 +206,16 @@ describe("pi adapter spawnAgent default-on", () => {
         .join("\n")
         .trim();
     };
-    return { run, getState: core.getState };
+    return {
+      run,
+      readState: async () => (await core.FileDaoStateRepository.open(process.cwd())).get(),
+    };
   }
 
   it("spawns a real pi subprocess by default (no env vars needed)", async () => {
     let call = 0;
     stdoutFactory = () => SPAWNED_OUTPUT_TEMPLATE(++call);
-    const { run, getState } = await setupRoundtable();
+    const { run, readState } = await setupRoundtable();
 
     const output = await run();
 
@@ -214,13 +227,13 @@ describe("pi adapter spawnAgent default-on", () => {
     expect(output).not.toContain("Improve developer workflow");
     expect(output).not.toContain("Simulated fallback output");
     // Suggestions from real spawns were turned into proposals.
-    const grounded = getState().proposals.filter((p) => p.title.startsWith("Grounded fix from live spawn"));
+    const grounded = (await readState()).proposals.filter((p) => p.title.startsWith("Grounded fix from live spawn"));
     expect(grounded.length).toBe(8);
   });
 
   it("SWARM_DAO_DISABLE_PI_SPAWN=1 skips spawning and fails closed", async () => {
     process.env.SWARM_DAO_DISABLE_PI_SPAWN = "1";
-    const { run, getState } = await setupRoundtable();
+    const { run, readState } = await setupRoundtable();
 
     const output = await run();
 
@@ -228,7 +241,7 @@ describe("pi adapter spawnAgent default-on", () => {
     expect(output).not.toContain("## Vote");
     expect(output).not.toContain("Simulated fallback output");
     expect(output).not.toMatch(/^##[ \t]*vote[ \t]*$/im);
-    const canned = getState().proposals.filter((p) => p.description.includes("Simulated fallback output"));
+    const canned = (await readState()).proposals.filter((p) => p.description.includes("Simulated fallback output"));
     expect(canned.length).toBe(0);
   });
 
@@ -245,7 +258,7 @@ describe("pi adapter spawnAgent default-on", () => {
 
   it("fails closed when the subprocess fails and does not produce a vote-parseable body", async () => {
     spawnExit = { code: 1, stderr: "pi: model unavailable" };
-    const { run, getState } = await setupRoundtable();
+    const { run, readState } = await setupRoundtable();
 
     const output = await run();
 
@@ -253,7 +266,7 @@ describe("pi adapter spawnAgent default-on", () => {
     expect(output).not.toContain("## Vote");
     expect(output).not.toContain("Simulated fallback output");
     expect(output).not.toMatch(/^##[ \t]*vote[ \t]*$/im);
-    const grounded = getState().proposals.filter((p) => p.title.startsWith("Grounded fix from live spawn"));
+    const grounded = (await readState()).proposals.filter((p) => p.title.startsWith("Grounded fix from live spawn"));
     expect(grounded.length).toBe(0);
   });
 

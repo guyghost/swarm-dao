@@ -5,9 +5,8 @@ import {
   executeProposal,
   formatPlan,
   generateDeliveryPlan,
-  getSnapshot,
+  InMemoryDaoStateRepository,
   initializeAgents,
-  setState,
   validateProposalQuality,
   verifyExecution,
 } from "@guyghost/swarm-dao-core";
@@ -53,11 +52,13 @@ describe("delivery/plans", () => {
 });
 
 describe("delivery/execution", () => {
+  let repository: InMemoryDaoStateRepository;
+
   beforeEach(() => {
     const state = createInitialState("/tmp/dao-test");
     state.initialized = true;
     state.agents = initializeAgents();
-    setState(state);
+    repository = new InMemoryDaoStateRepository(state);
   });
 
   it("validates proposal quality", () => {
@@ -105,7 +106,7 @@ describe("delivery/execution", () => {
       testsFailed: 0,
       compilationOk: true,
       gitClean: true,
-    });
+    }, repository);
 
     expect(verification.status).toBe("partial"); // missing expected file
     expect(verification.missingFiles).toContain("tests/feature.test.ts");
@@ -124,9 +125,9 @@ describe("delivery/execution", () => {
       createdAt: new Date().toISOString(),
     };
 
-    const result = await executeProposal(proposal);
+    const result = await executeProposal(proposal, repository);
     expect(result.success).toBe(false);
     expect(result.result).toContain('Cannot execute proposal from status "approved"');
-    expect(getSnapshot(proposal.id)).toBeUndefined();
+    expect(repository.get().snapshots[proposal.id]).toBeUndefined();
   });
 });

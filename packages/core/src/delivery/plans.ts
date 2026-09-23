@@ -2,10 +2,7 @@
 // Swarm DAO Core — Delivery Plans
 // ============================================================
 
-import { getDeliveryPlan as persistGetDeliveryPlan, storeDeliveryPlan } from "../persistence.js";
 import type { DeliveryPhase, DeliveryPlan, DeliveryTask, Proposal } from "../types/index.js";
-
-export { persistGetDeliveryPlan as getPlan, storeDeliveryPlan as storePlan };
 
 /**
  * Generates the default set of delivery phases for a new plan.

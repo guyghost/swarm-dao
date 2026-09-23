@@ -134,4 +134,21 @@ describe("hexagonal architecture contracts", () => {
       expect(source).toContain("handleDaoRoundtable");
     }
   });
+
+  it("keeps hosts and handlers free of process-global repository APIs", async () => {
+    const roots = [
+      "packages/core/src/host-tools/handlers.ts",
+      "packages/pi-adapter/src/index.ts",
+      "packages/opencode-adapter/src/index.ts",
+      "packages/mcp-server/src/server.ts",
+      "packages/cli/src/cli.ts",
+    ];
+    for (const relative of roots) {
+      const source = await Bun.file(`${import.meta.dir}/../../../${relative}`).text();
+      expect(source).not.toContain("setRepository");
+      expect(source).not.toMatch(/\bgetState\s*\(/);
+      expect(source).not.toContain("LegacyDaoStateRepository");
+    }
+  });
+
 });

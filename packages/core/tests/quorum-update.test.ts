@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, it } from "bun:test";
-import { createInitialState, executeAmendment, getState, previewAmendment, setState } from "@guyghost/swarm-dao-core";
-import type { DAOAgent, ProposalType } from "../src/types/index.js";
+import { createInitialState, executeAmendment, previewAmendment } from "@guyghost/swarm-dao-core";
+import type { DAOAgent, DAOState, ProposalType } from "../src/types/index.js";
 
 describe("governance/amendments code health", () => {
+  let state: DAOState;
+
   beforeEach(() => {
-    const state = createInitialState("/tmp/dao-test-health");
+    state = createInitialState("/tmp/dao-test-health");
     state.initialized = true;
     state.agents = [
       {
@@ -17,7 +19,6 @@ describe("governance/amendments code health", () => {
         enabled: true,
       } as DAOAgent,
     ];
-    setState(state);
   });
 
   describe("quorum-update", () => {
@@ -32,25 +33,23 @@ describe("governance/amendments code health", () => {
         },
       };
 
-      const before = getState().config.typeQuorum[type];
+      const before = state.config.typeQuorum[type];
       expect(before).toBeDefined();
       const originalDescription = before?.description;
       const originalApprovalPercent = before?.approvalPercent;
 
-      const result = executeAmendment(payload);
+      const result = executeAmendment(payload, state);
       expect(result.success).toBe(true);
 
-      const after = getState().config.typeQuorum[type];
+      const after = state.config.typeQuorum[type];
       expect(after?.quorumPercent).toBe(88);
       expect(after?.approvalPercent).toBe(originalApprovalPercent);
       expect(after?.description).toBe(originalDescription);
     });
 
     it("handles new quorum type by falling back to defaults if possible", () => {
-      const state = getState();
       const type: ProposalType = "security-change";
       delete state.config.typeQuorum[type];
-      setState(state);
 
       const changes = { quorumPercent: 99 };
       const payload = {
@@ -60,10 +59,10 @@ describe("governance/amendments code health", () => {
         },
       };
 
-      const result = executeAmendment(payload);
+      const result = executeAmendment(payload, state);
       expect(result.success).toBe(true);
 
-      const after = getState().config.typeQuorum[type];
+      const after = state.config.typeQuorum[type];
       expect(after).toBeDefined();
       expect(after?.quorumPercent).toBe(99);
     });
@@ -77,7 +76,7 @@ describe("governance/amendments code health", () => {
         changes: { weight: 5, role: "new role" },
       };
 
-      const diffs = previewAmendment(payload);
+      const diffs = previewAmendment(payload, state);
       expect(diffs).toContainEqual({ field: "strategist.weight", before: "3", after: "5" });
       expect(diffs).toContainEqual({ field: "strategist.role", before: "vision", after: "new role" });
     });
@@ -88,7 +87,7 @@ describe("governance/amendments code health", () => {
         changes: { quorumPercent: 75 },
       };
 
-      const diffs = previewAmendment(payload);
+      const diffs = previewAmendment(payload, state);
       expect(diffs).toContainEqual({ field: "config.quorumPercent", before: "60", after: "75" });
     });
   });

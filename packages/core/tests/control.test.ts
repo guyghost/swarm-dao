@@ -1,20 +1,11 @@
-import { beforeEach, describe, expect, it } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import {
-  createInitialState,
   DEFAULT_CONFIG,
   formatControlResult,
-  initializeAgents,
   runGates,
-  setState,
 } from "@guyghost/swarm-dao-core";
 
 describe("control/gates", () => {
-  beforeEach(() => {
-    const state = createInitialState("/tmp/dao-test");
-    state.initialized = true;
-    state.agents = initializeAgents();
-    setState(state);
-  });
 
   it("runs all gates on approved proposal", () => {
     const proposal = {

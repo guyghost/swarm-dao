@@ -29,7 +29,6 @@ import {
   formatHealthScore,
   generateDashboard,
   getDaoCommands,
-  getState,
   handleDaoAgents,
   handleDaoArtefacts,
   handleDaoAudit,
@@ -57,7 +56,6 @@ import {
   readFileContained,
   resolveContainedRoot,
   resolveDaoCommand,
-  setRepository,
   suggestDaoCommand,
   writeFileContained,
 } from "@guyghost/swarm-dao-core";
@@ -844,39 +842,45 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
       ctx?: ExtensionCommandContext,
     ) => Promise<DaoToolResult>;
   }): void => {
-    daoToolExecutors.set(tool.name, tool.execute as unknown as DaoToolExecute);
-    pi.registerTool(tool);
+    const execute: typeof tool.execute = async (toolCallId, params, signal, onUpdate, ctx) => {
+      await ensureSessionRepository();
+      return tool.execute(toolCallId, params, signal, onUpdate, ctx);
+    };
+    daoToolExecutors.set(tool.name, execute as unknown as DaoToolExecute);
+    pi.registerTool({ ...tool, execute });
   };
+  /** Open the session-owned repository on demand (no process-global install). */
+  const ensureSessionRepository = async (): Promise<DaoStateRepositoryPort | undefined> => {
+    if (repository) return repository;
+    try {
+      repository = await FileDaoStateRepository.open(process.cwd());
+      return repository;
+    } catch (error) {
+      repository = undefined;
+      const message = error instanceof Error ? error.message : String(error);
+      logger.warn(`[pi-adapter] Failed to open DAO storage at ${process.cwd()}: ${message}`);
+      return undefined;
+    }
+  };
+
   // Restore state on session start
   pi.on("session_start", async (_event, _ctx) => {
     const cwd = process.cwd();
     try {
       repository = await FileDaoStateRepository.open(cwd);
-      setRepository(repository);
     } catch (error) {
       // A corrupt state file must not brick the session: tools and the /dao
       // command surface the onboarding message until storage is readable.
       // Deselect any previously opened repository so a failed reopen can
       // never serve (or overwrite) a prior session's state.
       repository = undefined;
-      setRepository(null);
       const message = error instanceof Error ? error.message : String(error);
       logger.warn(`[pi-adapter] Failed to open DAO storage at ${cwd}: ${message}`);
     }
     return undefined;
   });
 
-  /** Prefer the session-owned repository; fall back to the compat singleton
-   *  (setRepository from session_start / handleDaoSetup) for headless tests
-   *  and slash commands that run before session_start. */
-  const readDaoState = (): DAOState | undefined => {
-    if (repository) return repository.get();
-    try {
-      return getState();
-    } catch {
-      return undefined;
-    }
-  };
+  const readDaoState = (): DAOState | undefined => repository?.get();
 
   // System prompt injection
   pi.on("before_agent_start", async (event, _ctx) => {
@@ -884,6 +888,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
       currentSessionModel = event.model;
     }
 
+    await ensureSessionRepository();
     const state = readDaoState();
     // Storage unavailable (e.g. session_start failed on a corrupt state
     // file). Fall back to the minimal prompt instead of throwing every turn.
@@ -1564,12 +1569,13 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
   };
 
   const runDaoSetup = async (): Promise<string> => {
+    const repo = await ensureSessionRepository();
     return handleDaoSetup({
       adapter: createPiHostAdapter(pi),
       workDir: process.cwd(),
       deliberationMode: "auto",
       controlToolName: "dao_check",
-      repository,
+      repository: repo,
     });
   };
 
@@ -1705,7 +1711,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
       return await runDaoSetup();
     }
 
-    // Prefer session repository; compat getState covers setup-before-session_start.
+    await ensureSessionRepository();
     const state = readDaoState();
     if (!state?.initialized) return PI_ONBOARDING_MESSAGE;
 

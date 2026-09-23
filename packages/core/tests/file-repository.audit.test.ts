@@ -142,13 +142,12 @@ describe("file repository audit JSONL (ADR-005)", () => {
     expect(await fs.readFile(jsonlPath, "utf8")).toBe(jsonlBefore);
   });
 
-  it("keeps the loadState compat path on the merged trail", async () => {
+  it("reopening a FileDao keeps the merged audit trail", async () => {
     const repository = await FileDaoStateRepository.open(workDir);
     repository.get().auditLog.push(audit(1));
     await repository.persist();
 
-    const { loadState } = await import("@guyghost/swarm-dao-core");
-    const loaded = await loadState(workDir);
-    expect(loaded?.auditLog.map((e) => e.id)).toEqual([1]);
+    const reopened = await FileDaoStateRepository.open(workDir);
+    expect(reopened.get().auditLog.map((e) => e.id)).toEqual([1]);
   });
 });
