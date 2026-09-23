@@ -1497,7 +1497,9 @@ Execution environments (--exec, default branch):
   worktree  idempotent git worktree per series (branch dao/loop/<series-id>,
             path .dao/worktrees/<series-id>); evidence stays in this repo
   container anchor commands run in a throwaway bounded container (workers are
-            herdr agents on the host; --sandbox overrides the runtime choice)
+            herdr agents on the host; --sandbox overrides the runtime choice).
+            Omitted --sandbox / sandbox.mode defaults to auto (fail-closed if
+            no container runtime); set none for explicit host anchors.
 
 Worker agents run in herdr: --agent selects the kind (pi, codex, claude, …;
   default pi or .dao/improvement.json "worker"). --agent-args overrides the

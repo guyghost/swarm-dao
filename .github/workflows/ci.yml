@@ -21,6 +21,8 @@ jobs:
   quality:
     name: Quality gates
     runs-on: ubuntu-latest
+    # Skip on the weekly schedule — that trigger exists for real-runtime only.
+    if: github.event_name != 'schedule'
     # Permanent safety net, not a workaround: a hung Test step must produce a
     # log instead of burning the 6h GitHub timeout. The historical test hang
     # was root-caused (mock.module passthrough self-recursion, fixed in
@@ -143,8 +145,9 @@ jobs:
   real-runtime:
     name: Real-runtime integration (opt-in)
     runs-on: ubuntu-latest
-    # Nightly + label: keeps the default PR bar fast while still exercising
-    # container sandbox / tmux paths that skip without binaries.
+    # Weekly + label: keeps the default PR bar fast while still exercising
+    # container sandbox / tmux paths that skip without binaries. On schedule,
+    # quality/benchmarks are skipped so only this job runs.
     if: >
       github.event_name == 'schedule' ||
       (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'real-runtime'))
@@ -180,6 +183,7 @@ jobs:
   benchmarks:
     name: Performance benchmarks
     runs-on: ubuntu-latest
+    if: github.event_name != 'schedule'
     # Calibrated comparison: the run starts with a fixed pure-CPU kernel
     # (benchmarks/calibration.benchmark.ts) that measures how fast THIS runner
     # is today, and the comparison script scales its relative threshold and

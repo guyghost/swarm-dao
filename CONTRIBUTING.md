@@ -39,6 +39,11 @@ bun run --filter '*' typecheck
 # Run full CI locally (same gates as GitHub Actions)
 bun run ci
 
+# Optional: exercise real container/tmux paths (matches the CI job that
+# runs on schedule and on PRs labeled `real-runtime`)
+# EVOLUTION_IT=1 bun test packages/integration-tests/tests/sandbox-evolution.it.test.ts
+# bun test packages/tmux-adapter/tests/integration.tmux.test.ts
+
 # Fix lint/format issues
 bun run lint:fix
 ```

@@ -376,7 +376,9 @@ export function createSwarmDaoMcpServer(workDir = resolveDaoRoot(), repository?:
         case "dao_roundtable":
           return textResult(await handleDaoRoundtable(ctx));
         case "dao_audit":
-          return textResult(await handleDaoAudit(args.proposalId !== undefined ? Number(args.proposalId) : undefined));
+          return textResult(
+            await handleDaoAudit(args.proposalId !== undefined ? Number(args.proposalId) : undefined, repository),
+          );
         case "dao_rate":
           return textResult(
             await handleDaoRate(

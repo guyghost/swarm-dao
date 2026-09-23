@@ -24,10 +24,10 @@ const FUNCTIONS_THRESHOLD = 0.72; // baseline 74.55% (2026-09-20) minus ~2pt
  *  raised from the previous dist-blind 8% / missing floors once src was visible. */
 const PACKAGE_FLOORS: Record<string, { lines: number; functions: number }> = {
   "packages/core": { lines: 0.64, functions: 0.66 },
-  "packages/cli": { lines: 0.54, functions: 0.66 },
-  "packages/mcp-server": { lines: 0.38, functions: 0.57 },
+  "packages/cli": { lines: 0.56, functions: 0.66 },
+  "packages/mcp-server": { lines: 0.39, functions: 0.58 },
   "packages/pi-adapter": { lines: 0.7, functions: 0.7 },
-  "packages/opencode-adapter": { lines: 0.55, functions: 0.4 },
+  "packages/opencode-adapter": { lines: 0.56, functions: 0.4 },
   "packages/improvement-loop": { lines: 0.86, functions: 0.88 },
   "packages/graph-engineering": { lines: 0.88, functions: 0.94 },
   "packages/product-loop": { lines: 0.84, functions: 0.9 },

@@ -94,8 +94,7 @@ sanctioned mutation path. It:
 5. Returns `{ ok: true, status }` or `{ ok: false, error }`.
 
 ```ts
-import { dispatchProposalEvent } from "@guyghost/swarm-dao-core/governance";
-import type { Proposal } from "@guyghost/swarm-dao-core/types";
+import { dispatchProposalEvent, type Proposal } from "@guyghost/swarm-dao-core";
 
 const result = dispatchProposalEvent(proposal, { type: "DELIBERATE" });
 if (!result.ok) {

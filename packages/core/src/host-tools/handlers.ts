@@ -45,7 +45,7 @@ function runtimeContextFrom(
 
 import { buildDispatchInstructions, createDispatchModelContext, formatDispatchPlan } from "../intelligence/swarm.js";
 import { recordProposalExecuted } from "../observability/metrics.js";
-import { getAllAuditLog, getOrCreateState, getState, initStorage, setRepository } from "../persistence.js";
+import { getOrCreateState, getState, initStorage, setRepository } from "../persistence.js";
 import { systemClock } from "../ports/clock.js";
 import type { DaoStateRepositoryPort } from "../ports/repository.js";
 import {
@@ -481,8 +481,9 @@ export async function handleDaoRoundtable(ctx: DaoToolContext): Promise<string> 
   return result.ok ? formatRoundTableResults(result.suggestions, result.proposalIds) : result.error;
 }
 
-export async function handleDaoAudit(proposalId?: number): Promise<string> {
-  const entries = proposalId ? getAllAuditLog().filter((e) => e.proposalId === proposalId) : getAllAuditLog();
+export async function handleDaoAudit(proposalId?: number, repository?: DaoStateRepositoryPort): Promise<string> {
+  const state = repositoryOrLegacy(repository).get();
+  const entries = proposalId ? state.auditLog.filter((e) => e.proposalId === proposalId) : state.auditLog;
   return formatAuditTrail(entries, proposalId);
 }
 
