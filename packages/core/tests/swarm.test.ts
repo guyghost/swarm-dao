@@ -1,9 +1,12 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, spyOn } from "bun:test";
+import { promises as fs } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import {
-  createInitialState,
   type DaoToolContext,
+  FileDaoStateRepository,
   handleDaoRoundtable,
-  InMemoryDaoStateRepository,
+  initStorage,
 } from "@guyghost/swarm-dao-core";
 import { buildModelResolutionContext } from "../src/intelligence/model.js";
 import { buildRuntimeResolutionContext } from "../src/intelligence/runtime.js";
@@ -138,55 +141,75 @@ describe("intelligence/swarm.ts", () => {
 
 describe("handleDaoRoundtable — batched audit writes (task 8)", () => {
   it("records all audit entries in a single save burst, not one-per-proposal", async () => {
-    const daoRoot = `/tmp/dao-roundtable-perf-${Date.now()}`;
-    const state = createInitialState(daoRoot);
-    state.initialized = true;
-    const repository = new InMemoryDaoStateRepository(state);
+    const workDir = await fs.mkdtemp(path.join(tmpdir(), "dao-roundtable-perf-"));
+    try {
+      await initStorage(workDir);
+      const repository = await FileDaoStateRepository.open(workDir);
+      repository.get().initialized = true;
+      await repository.persist();
 
-    // Fake adapter: every agent returns a parseable round-table suggestion, so
-    // each agent yields one created proposal (k = number of default agents).
-    const adapter = {
-      hostId: "test-host",
-      spawnAgent: async ({ agent }: { agent: DAOAgent }): Promise<AgentOutput> => ({
-        agentId: agent.id,
-        agentName: agent.name,
-        role: agent.role,
-        content: `## Suggested Proposal\n**Title:** Suggestion from ${agent.id}\n**Type:** product-feature\n**Description:** A feature proposed by ${agent.name}.`,
-        durationMs: 1,
-      }),
-    } as unknown as HostAdapter;
-    const ctx: DaoToolContext = {
-      adapter,
-      workDir: daoRoot,
-      deliberationMode: "auto",
-      controlToolName: "dao_control",
-      repository,
-    };
+      // Fake adapter: every agent returns a parseable round-table suggestion, so
+      // each agent yields one created proposal (k = number of default agents).
+      const adapter = {
+        hostId: "test-host",
+        spawnAgent: async ({ agent }: { agent: DAOAgent }): Promise<AgentOutput> => ({
+          agentId: agent.id,
+          agentName: agent.name,
+          role: agent.role,
+          content: `## Suggested Proposal\n**Title:** Suggestion from ${agent.id}\n**Type:** product-feature\n**Description:** A feature proposed by ${agent.name}.`,
+          durationMs: 1,
+        }),
+      } as unknown as HostAdapter;
+      const ctx: DaoToolContext = {
+        adapter,
+        workDir,
+        deliberationMode: "auto",
+        controlToolName: "dao_control",
+        repository,
+      };
 
-    await handleDaoRoundtable(ctx);
+      const writeSpy = spyOn(fs, "writeFile");
+      writeSpy.mockClear();
 
-    const after = repository.get();
-    const createdProposals = after.proposals;
-    const entries = after.auditLog.filter((e) => e.action === "roundtable_proposal_created");
+      await handleDaoRoundtable(ctx);
 
-    // Correctness: one audit entry per created proposal, with the exact recordAudit shape.
-    expect(createdProposals.length).toBeGreaterThan(3);
-    expect(entries.length).toBe(createdProposals.length);
-    for (const entry of entries) {
-      expect(entry.layer).toBe("intelligence");
-      expect(entry.details).toBe("Auto-created from round table");
-      expect(typeof entry.id).toBe("number");
-      expect(typeof entry.timestamp).toBe("string");
-      expect(typeof entry.proposalId).toBe("number");
-      expect(typeof entry.actor).toBe("string");
+      const writeCount = writeSpy.mock.calls.length;
+      writeSpy.mockRestore();
+
+      const after = repository.get();
+      const createdProposals = after.proposals;
+      const entries = after.auditLog.filter((e) => e.action === "roundtable_proposal_created");
+
+      // Correctness: one audit entry per created proposal, with the exact recordAudit shape.
+      expect(createdProposals.length).toBeGreaterThan(3);
+      expect(entries.length).toBe(createdProposals.length);
+      for (const entry of entries) {
+        expect(entry.layer).toBe("intelligence");
+        expect(entry.details).toBe("Auto-created from round table");
+        expect(typeof entry.id).toBe("number");
+        expect(typeof entry.timestamp).toBe("string");
+        expect(typeof entry.proposalId).toBe("number");
+        expect(typeof entry.actor).toBe("string");
+      }
+      // Each audit entry references a real created proposal id.
+      const proposalIds = new Set(createdProposals.map((p) => p.id));
+      for (const entry of entries) {
+        expect(proposalIds.has(entry.proposalId)).toBe(true);
+      }
+
+      // Performance: writes must NOT scale with the number of proposals.
+      // Old code issued one full saveState per proposal (~k writes via recordAudit);
+      // the batched approach appends in-memory and persists once.
+      // Sanity: the spy intercepted at least one write (saves actually happened).
+      expect(writeCount).toBeGreaterThanOrEqual(1);
+      // Single save burst: a constant number of writes, bounded independent of k.
+      // (One save = lock + state.tmp; old code was ~k+2, i.e. 9 for k=7.)
+      expect(writeCount).toBeLessThanOrEqual(4);
+      // And strictly sub-linear in the number of created proposals.
+      expect(writeCount).toBeLessThan(createdProposals.length);
+    } finally {
+      await fs.rm(workDir, { recursive: true, force: true }).catch(() => {});
     }
-    // Each audit entry references a real created proposal id.
-    const proposalIds = new Set(createdProposals.map((p) => p.id));
-    for (const entry of entries) {
-      expect(proposalIds.has(entry.proposalId)).toBe(true);
-    }
-
-    // Audit batching correctness: one entry per created proposal (above).
   });
 });
 
