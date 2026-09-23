@@ -172,13 +172,8 @@ describe("CLI E2E", () => {
 
   /** Helper: fast-track a proposal to 'controlled' status by mutating state directly */
   async function setupControlledProposal(title: string, dependsOn?: number[]): Promise<number> {
-    const {
-      FileDaoStateRepository,
-      CreateProposalUseCase,
-      dispatchProposalEvent,
-      DEFAULT_CONFIG,
-      systemClock,
-    } = await import("@guyghost/swarm-dao-core");
+    const { FileDaoStateRepository, CreateProposalUseCase, dispatchProposalEvent, DEFAULT_CONFIG, systemClock } =
+      await import("@guyghost/swarm-dao-core");
 
     const repository = await FileDaoStateRepository.open(testDir);
     const created = await new CreateProposalUseCase({ repository, clock: systemClock }).execute({

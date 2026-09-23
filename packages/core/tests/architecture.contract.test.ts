@@ -150,5 +150,4 @@ describe("hexagonal architecture contracts", () => {
       expect(source).not.toContain("LegacyDaoStateRepository");
     }
   });
-
 });

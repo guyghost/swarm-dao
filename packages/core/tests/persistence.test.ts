@@ -85,6 +85,6 @@ describe("persistence (instance-owned)", () => {
   });
 
   it("sanitizeErrorMessage redacts secrets", () => {
-    expect(sanitizeErrorMessage('token=secret-value')).toContain("[REDACTED]");
+    expect(sanitizeErrorMessage("token=secret-value")).toContain("[REDACTED]");
   });
 });

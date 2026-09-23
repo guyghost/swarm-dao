@@ -10,13 +10,7 @@ import { commitMutation } from "./application/commit-mutation.js";
 import { logger } from "./observability/logging.js";
 import { recordVoteCast } from "./observability/metrics.js";
 import type { DaoStateRepositoryPort } from "./ports/repository.js";
-import type {
-  AuditEntry,
-  Proposal,
-  ProposalOutcome,
-  StorageSettings,
-  Vote,
-} from "./types/index.js";
+import type { AuditEntry, Proposal, ProposalOutcome, StorageSettings, Vote } from "./types/index.js";
 import { redactSensitiveFields, SENSITIVE_KEYS } from "./utils/security.js";
 
 const STATE_FILE = "state.json";

@@ -200,7 +200,6 @@ export function previewAmendment(payload: AmendmentPayload, state: DAOState): Am
 }
 
 export function executeAmendment(payload: AmendmentPayload, state: DAOState): AmendmentExecutionResult {
-
   // Capture snapshot before changes
   const snapshot: AmendmentSnapshot = {
     agents: state.agents.map((a) => ({ ...a })),

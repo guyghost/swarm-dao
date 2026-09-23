@@ -175,7 +175,6 @@ describe("health-score", () => {
     });
 
     afterEach(async () => {
-      
       await fs.rm(testDir, { recursive: true, force: true });
     });
 
@@ -366,7 +365,6 @@ describe("health-score", () => {
           createdAt: "2026-01-08T00:00:00Z",
         },
       ];
-      const repository = new InMemoryDaoStateRepository(state);
 
       const proposals = [
         {

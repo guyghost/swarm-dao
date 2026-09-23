@@ -1,12 +1,7 @@
 import { describe, expect, it } from "bun:test";
-import {
-  DEFAULT_CONFIG,
-  formatControlResult,
-  runGates,
-} from "@guyghost/swarm-dao-core";
+import { DEFAULT_CONFIG, formatControlResult, runGates } from "@guyghost/swarm-dao-core";
 
 describe("control/gates", () => {
-
   it("runs all gates on approved proposal", () => {
     const proposal = {
       id: 1,

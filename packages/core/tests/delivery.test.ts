@@ -99,14 +99,18 @@ describe("delivery/execution", () => {
       createdAt: new Date().toISOString(),
     };
 
-    const verification = await verifyExecution(proposal, {
-      filesChanged: ["src/feature.ts"],
-      expectedFiles: ["src/feature.ts", "tests/feature.test.ts"],
-      testsPassed: 5,
-      testsFailed: 0,
-      compilationOk: true,
-      gitClean: true,
-    }, repository);
+    const verification = await verifyExecution(
+      proposal,
+      {
+        filesChanged: ["src/feature.ts"],
+        expectedFiles: ["src/feature.ts", "tests/feature.test.ts"],
+        testsPassed: 5,
+        testsFailed: 0,
+        compilationOk: true,
+        gitClean: true,
+      },
+      repository,
+    );
 
     expect(verification.status).toBe("partial"); // missing expected file
     expect(verification.missingFiles).toContain("tests/feature.test.ts");
