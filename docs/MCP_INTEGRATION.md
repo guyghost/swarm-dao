@@ -7,12 +7,16 @@
 
 ## The contract (non-negotiable)
 
-- DAO state lives in **`.dao/`**:
-  - `state.json`, `decisions/` → runtime state. **Never hand-edit** — always go through
-    `dao_*` tools; hand-edits break invariants the model enforces.
+- DAO **runtime state** lives in the resolved state root (ADR-007):
+  - Default: `~/.swarm-dao/<project-id>/branches/<branch-id>/` (override home with
+    `SWARM_DAO_HOME`). An existing in-repo `.dao/` with real state still wins (legacy).
+  - `state.json`, `decisions/`, `audit.jsonl` → runtime state. **Never hand-edit** —
+    always go through `dao_*` tools; hand-edits break invariants the model enforces.
   - `config.json` → user-authored project input (`mode`, `criticalPaths`,
     `agentOverrides`). Safe to edit by hand; no `dao_*` tool writes it. See the README
     "Configuration" section for the schema.
+  - Evidence roots (graph / product / improvement) still default under the workspace
+    (e.g. `.dao/graph-runs`). Do **not** read state files directly — use `dao_*` tools.
 - The canonical command list lives in
   [`packages/core/src/commands/registry.ts`](../packages/core/src/commands/registry.ts),
   rendered in [`DAO_COMMAND_REGISTRY.md`](./DAO_COMMAND_REGISTRY.md). If anything drifts,
@@ -31,7 +35,7 @@ If you are not sure whether the DAO is initialized, call `dao_dashboard` (a.k.a.
 - Otherwise it returns the governance dashboard → skip straight to the workflow.
 
 If a user asks "what's the state of the DAO?" without a specific proposal, call
-`dao_dashboard` — do **not** read `.dao/` files directly.
+`dao_dashboard` — do **not** read state-root files directly.
 
 ## Workflow
 

@@ -45,7 +45,7 @@ function runtimeContextFrom(
 
 import { buildDispatchInstructions, createDispatchModelContext, formatDispatchPlan } from "../intelligence/swarm.js";
 import { recordProposalExecuted } from "../observability/metrics.js";
-import { getAllAuditLog, getOrCreateState, getProposal, getState, initStorage, setRepository } from "../persistence.js";
+import { getAllAuditLog, getOrCreateState, getState, initStorage, setRepository } from "../persistence.js";
 import { systemClock } from "../ports/clock.js";
 import type { DaoStateRepositoryPort } from "../ports/repository.js";
 import {
@@ -124,8 +124,10 @@ async function resolveRepository(
   let pending = fileRepos.get(key);
   if (!pending) {
     pending = FileDaoStateRepository.open(key).then((repo) => {
-      // Promote only when nothing is installed yet. Never overwrite another
-      // workspace's process-global repository (MCP/OpenCode/Pi are long-lived).
+      // Compat bridge: when no process-global repo is installed yet, promote
+      // so slash-command / getState() paths see the same instance as tools.
+      // Prefer passing ctx.repository explicitly — new call sites must not
+      // rely on this promotion (ADR-002 rule 3).
       if (!globalRepoOwnsWorkDir(key)) {
         try {
           getState();
@@ -360,10 +362,11 @@ export async function handleDaoCheckEdit(ctx: DaoToolContext, paths: readonly st
   return formatEditGate(decision);
 }
 
-export async function handleDaoList(): Promise<string> {
-  const notReady = requireInitialized();
+export async function handleDaoList(repository?: DaoStateRepositoryPort): Promise<string> {
+  const repo = repositoryOrLegacy(repository);
+  const notReady = requireInitialized(repo);
   if (notReady) return notReady;
-  const state = getState();
+  const state = repo.get();
   if (state.proposals.length === 0) return "No proposals yet.";
   let output = "# DAO Proposals\n\n";
   for (const p of state.proposals) {
@@ -372,14 +375,20 @@ export async function handleDaoList(): Promise<string> {
   return output;
 }
 
-export async function handleDaoAgents(): Promise<string> {
-  const notReady = requireInitialized();
+export async function handleDaoAgents(repository?: DaoStateRepositoryPort): Promise<string> {
+  const repo = repositoryOrLegacy(repository);
+  const notReady = requireInitialized(repo);
   if (notReady) return notReady;
-  return `# DAO Agents\n\n${formatAgentsTable(getState().agents)}`;
+  return `# DAO Agents\n\n${formatAgentsTable(repo.get().agents)}`;
 }
 
-export async function handleDaoPlan(proposalId: number, controlToolName: ControlToolName): Promise<string> {
-  const proposal = getProposal(proposalId);
+export async function handleDaoPlan(
+  proposalId: number,
+  controlToolName: ControlToolName,
+  repository?: DaoStateRepositoryPort,
+): Promise<string> {
+  const state = repositoryOrLegacy(repository).get();
+  const proposal = state.proposals.find((p) => p.id === proposalId);
   if (!proposal) return `Proposal #${proposalId} not found.`;
   const plan = getPlan(proposalId);
   if (!plan) {
@@ -403,8 +412,9 @@ export async function handleDaoPlan(proposalId: number, controlToolName: Control
   return formatPlan(plan);
 }
 
-export async function handleDaoArtefacts(proposalId: number): Promise<string> {
-  const proposal = getProposal(proposalId);
+export async function handleDaoArtefacts(proposalId: number, repository?: DaoStateRepositoryPort): Promise<string> {
+  const state = repositoryOrLegacy(repository).get();
+  const proposal = state.proposals.find((p) => p.id === proposalId);
   if (!proposal) return `Proposal #${proposalId} not found.`;
   return formatAllArtefacts(generateAllArtefacts(proposal));
 }

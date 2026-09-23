@@ -362,7 +362,10 @@ opencode
 
 Each agent can run with its own LLM **model** and **harness** (the CLI runtime that spawns it: `pi`, `claude`, `codex`, `copilot`, `opencode`). Resolution is deterministic — see [`models/agent-runtime.md`](../models/agent-runtime.md) for the full contract.
 
-### Project defaults — `.dao/config.json`
+### Project defaults — `config.json` (in the resolved state root)
+
+Path: legacy in-repo `.dao/config.json`, or under `~/.swarm-dao/.../branches/<branch>/`
+after ADR-007. See [ADR-007](ADR-007-external-dao-home.md).
 
 ```json
 {
@@ -502,7 +505,11 @@ cd packages/opencode-adapter && npx tsc --noEmit
 ### Full Reset
 
 ```bash
+# Legacy in-repo layout:
 rm -rf .dao/
+
+# Home layout (ADR-007) — remove the branch (or project) under ~/.swarm-dao,
+# or: swarm-dao gc --dry-run  then swarm-dao gc
 # Then re-initialize
 dao_setup
 ```

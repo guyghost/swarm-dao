@@ -181,7 +181,7 @@ describe("pi adapter spawnAgent default-on", () => {
     state.agents = core.initializeAgents();
     core.setState(state);
 
-    const mod = await import("@guyghost/swarm-dao-pi-adapter");
+    const mod = await import("../src/index.js");
     const { pi, tools } = createMockPi();
     mod.default(pi);
 
@@ -259,7 +259,7 @@ describe("pi adapter spawnAgent default-on", () => {
 
   it("spawn failure on deliberation does not produce a vote-parseable body", async () => {
     spawnExit = { code: 1, stderr: "pi: model unavailable" };
-    const { createPiHostAdapter } = await import("@guyghost/swarm-dao-pi-adapter");
+    const { createPiHostAdapter } = await import("../src/index.js");
     const { parseVoteFromOutput } = await import("@guyghost/swarm-dao-core");
     const adapter = createPiHostAdapter(createMockPi().pi);
     const output = await adapter.spawnAgent({

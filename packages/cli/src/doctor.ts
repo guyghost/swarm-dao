@@ -58,12 +58,13 @@ export async function cmdDoctor(cwd: string): Promise<number> {
 
   // External tool probes run in parallel: each can wait for its own timeout
   // when the binary hangs, so sequential awaits would stack the worst cases.
-  const [herdrVersion, dockerVersion] = await Promise.all([
+  const [herdrVersion, dockerVersion, tmuxVersion] = await Promise.all([
     ran("herdr --version"),
     ran("docker version --format {{.Server.Version}}"),
+    ran("tmux -V"),
   ]);
 
-  // Git repository (worktrees, branches, evidence history).
+  // Git repository (worktrees, branches, evidence history, ADR-007 home id).
   const gitDir = await fs.stat(path.join(cwd, ".git")).then(
     () => true,
     () => false,
@@ -75,11 +76,11 @@ export async function cmdDoctor(cwd: string): Promise<number> {
           name: "git repository",
           level: "warn" as Level,
           detail: "not found",
-          hint: "git init — worktree isolation and evidence history need a repository",
+          hint: "git init — home layout and worktree isolation need a repository",
         },
   );
 
-  // herdr — the worker agent runtime for improvement loops.
+  // herdr — the worker agent runtime for improvement loops / CLI deliberate.
   checks.push(
     herdrVersion
       ? { name: "herdr (worker agents)", level: "ok" as Level, detail: herdrVersion.split("\n")[0] ?? herdrVersion }
@@ -87,7 +88,7 @@ export async function cmdDoctor(cwd: string): Promise<number> {
           name: "herdr (worker agents)",
           level: "warn" as Level,
           detail: "not on PATH",
-          hint: "improve once needs herdr to run sensor/counter-sensor/drift-auditor workers",
+          hint: "improve once / CLI deliberate need herdr to run worker agents",
         },
   );
 
@@ -99,14 +100,39 @@ export async function cmdDoctor(cwd: string): Promise<number> {
           name: "docker (container sandbox)",
           level: "warn" as Level,
           detail: "unavailable",
-          hint: "optional — needed only for --exec container / --sandbox docker",
+          hint: "optional — needed when sandbox mode is docker|container|auto",
         },
   );
+
+  checks.push(
+    tmuxVersion
+      ? { name: "tmux (pane host)", level: "ok" as Level, detail: tmuxVersion }
+      : {
+          name: "tmux (pane host)",
+          level: "warn" as Level,
+          detail: "not on PATH",
+          hint: "optional — only for the tmux host adapter",
+        },
+  );
+
+  // Layout resolution (ADR-007) — before config/storage so hints point at the
+  // real state root, not a guessed `.dao/` path.
+  const layout = await resolveDaoLayout(cwd, { ensure: false });
+  const homeEnv = process.env.SWARM_DAO_HOME;
+  checks.push({
+    name: "DAO layout",
+    level: "ok",
+    detail:
+      layout.mode === "home"
+        ? `home · ${layout.stateRoot}${homeEnv ? ` (SWARM_DAO_HOME=${homeEnv})` : ""}`
+        : `legacy · ${layout.stateRoot}`,
+    hint: layout.mode === "legacy" && gitDir ? "optional: swarm-dao migrate --to home (ADR-007)" : undefined,
+  });
 
   // Project config — strict validation surfaces typos instead of fail-open.
   let projectConfig: ProjectConfig | null = null;
   try {
-    const config = await loadConfig((await resolveDaoLayout(cwd, { ensure: false })).stateRoot);
+    const config = await loadConfig(layout.stateRoot);
     projectConfig = config;
     const enforceEmpty = config.mode === "enforce" && (!config.criticalPaths || config.criticalPaths.length === 0);
     checks.push(
@@ -115,7 +141,7 @@ export async function cmdDoctor(cwd: string): Promise<number> {
             name: "project config",
             level: "warn" as Level,
             detail: 'mode "enforce" with no criticalPaths allows everything',
-            hint: 'set criticalPaths in .dao/config.json or use mode "suggest"',
+            hint: `set criticalPaths in ${path.join(layout.stateRoot, "config.json")} or use mode "suggest"`,
           }
         : {
             name: "project config",
@@ -128,7 +154,7 @@ export async function cmdDoctor(cwd: string): Promise<number> {
       name: "project config",
       level: "fail" as Level,
       detail: (error as Error).message,
-      hint: "fix .dao/config.json (see models/CHOICE.md and README Configuration)",
+      hint: `fix ${path.join(layout.stateRoot, "config.json")} (see models/CHOICE.md and README Configuration)`,
     });
   }
 
@@ -154,14 +180,14 @@ export async function cmdDoctor(cwd: string): Promise<number> {
     );
   }
 
-  // DAO storage + agents.
+  // DAO storage + agents — resolved state root, not cwd/.dao only.
   try {
-    const state = await fs.readFile(path.join(cwd, ".dao", "state.json"), "utf8");
+    const state = await fs.readFile(path.join(layout.stateRoot, "state.json"), "utf8");
     const agents = (JSON.parse(state) as { agents?: unknown[] }).agents?.length ?? 0;
     checks.push({
       name: "DAO storage",
       level: agents > 0 ? "ok" : "warn",
-      detail: agents > 0 ? `${agents} agents configured` : "no agents",
+      detail: agents > 0 ? `${agents} agents · ${layout.stateRoot}` : `no agents · ${layout.stateRoot}`,
       hint: agents > 0 ? undefined : "swarm-dao setup",
     });
   } catch {
@@ -173,10 +199,16 @@ export async function cmdDoctor(cwd: string): Promise<number> {
     });
   }
 
-  // Improvement loop config (anchor commands, worker defaults).
+  // Improvement loop config (anchor commands, worker defaults, sandbox).
   const improvementConfig = await loadProjectImprovementConfig(cwd);
-  const hasAnchorCommands =
-    improvementConfig !== null && typeof (improvementConfig.raw as Record<string, unknown>).anchorCommands === "object";
+  const rawImprovement = improvementConfig !== null ? (improvementConfig.raw as Record<string, unknown>) : null;
+  const hasAnchorCommands = rawImprovement !== null && typeof rawImprovement.anchorCommands === "object";
+  const sandboxSection =
+    rawImprovement !== null && typeof rawImprovement.sandbox === "object" && rawImprovement.sandbox !== null
+      ? (rawImprovement.sandbox as Record<string, unknown>)
+      : null;
+  const sandboxMode = typeof sandboxSection?.mode === "string" ? sandboxSection.mode : "none";
+
   checks.push(
     improvementConfig === null
       ? {
@@ -195,7 +227,22 @@ export async function cmdDoctor(cwd: string): Promise<number> {
           },
   );
 
-  // Evidence roots — where workflow state lives.
+  if (sandboxMode !== "none" && !dockerVersion) {
+    checks.push({
+      name: "sandbox runtime",
+      level: "fail",
+      detail: `improvement sandbox mode "${sandboxMode}" but docker is unavailable`,
+      hint: "install docker, or set sandbox.mode to none in .dao/improvement.json",
+    });
+  } else {
+    checks.push({
+      name: "sandbox runtime",
+      level: "ok",
+      detail: sandboxMode === "none" ? "mode none (host anchors)" : `mode ${sandboxMode}`,
+    });
+  }
+
+  // Evidence roots — where workflow state lives (still workspace-relative).
   const roots = [".dao/improvement-series", ".dao/graph-runs", ".dao/product-loops", "evidence"];
   const present = (
     await Promise.all(

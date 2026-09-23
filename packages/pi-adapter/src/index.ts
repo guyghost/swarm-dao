@@ -18,32 +18,33 @@ import {
   ATTENTION_SOURCES,
   // Commands registry (source of truth for the /dao surface)
   buildDaoCommandHelp,
+  buildDaoHelpMessage,
   collectAttention,
   computeHealthScore,
-  // Delivery
   execCommand,
   FileDaoStateRepository,
   FsAttentionStore,
-  formatAllArtefacts,
   formatAttention,
   formatAuditTrail,
   formatHealthScore,
-  formatPlan,
-  generateAllArtefacts,
   generateDashboard,
   getAllAuditLog,
   getDaoCommands,
-  getPlan,
-  getProposal,
   getState,
+  handleDaoAgents,
+  handleDaoArtefacts,
+  handleDaoAudit,
   handleDaoCheckEdit,
   handleDaoConfigGithub,
   handleDaoControl,
+  handleDaoDashboard,
   handleDaoDeliberate,
   handleDaoDryRun,
   handleDaoExecute,
   handleDaoGithubCreateBranch,
   handleDaoGithubOpenPr,
+  handleDaoList,
+  handleDaoPlan,
   handleDaoPropose,
   handleDaoRate,
   handleDaoReject,
@@ -53,7 +54,6 @@ import {
   handleDaoShip,
   handleDaoUpdateProposal,
   logger,
-  // Types
   PROPOSAL_TYPES,
   readFileContained,
   resolveContainedRoot,
@@ -902,9 +902,23 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
       }
     }
     daoContext += `\n- Config: quorum=${state.config.quorumPercent}%, approval=${state.config.approvalThreshold}%, risk=${state.config.riskThreshold}/10`;
-    daoContext += `\n\nAvailable tools: dao_setup, dao_propose, dao_deliberate, dao_check, dao_plan, dao_execute, dao_ship, dao_audit, dao_artefacts, dao_rate, dao_dashboard, dao_dry_run, dao_rollback, dao_reject, dao_roundtable, dao_update_proposal, dao_check_edit, dao_config_github, dao_github_create_branch, dao_github_open_pr, dao_attention, dao_graph_status, dao_graph_submit, dao_product_status, dao_product_submit, dao_improve_status, dao_improve_once`;
+    daoContext += `\n\nAvailable tools: dao_help, dao_setup, dao_propose, dao_deliberate, dao_check, dao_control, dao_list, dao_agents, dao_plan, dao_execute, dao_ship, dao_audit, dao_artefacts, dao_rate, dao_dashboard, dao_dry_run, dao_rollback, dao_reject, dao_roundtable, dao_update_proposal, dao_check_edit, dao_config_github, dao_github_create_branch, dao_github_open_pr, dao_attention, dao_graph_status, dao_graph_submit, dao_product_status, dao_product_submit, dao_improve_status, dao_improve_once`;
 
     return { systemPrompt: event.systemPrompt + daoContext };
+  });
+
+  // ── Tool: dao_help ───────────────────────────────────────
+  registerDaoTool({
+    name: "dao_help",
+    label: "DAO Help",
+    description: "Show onboarding and available DAO tools",
+    parameters: Type.Object({}),
+    async execute() {
+      if (!repository) return toolResult(PI_ONBOARDING_MESSAGE);
+      const state = repository.get();
+      if (!state.initialized) return toolResult(PI_ONBOARDING_MESSAGE);
+      return toolResult(buildDaoHelpMessage({ host: "pi", manualDeliberation: false, controlTool: "dao_check" }));
+    },
   });
 
   // ── Tool: dao_setup ──────────────────────────────────────
@@ -993,26 +1007,57 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
     },
   });
 
-  // ── Tool: dao_check ──────────────────────────────────────
+  // ── Tool: dao_check / dao_control ─────────────────────────
+  const runControl = async (proposalId: number) =>
+    handleDaoControl(
+      {
+        adapter: createPiHostAdapter(pi),
+        workDir: process.cwd(),
+        deliberationMode: "auto",
+        controlToolName: "dao_check",
+        failOnGateFailure: true,
+        repository,
+      },
+      proposalId,
+    );
+
   registerDaoTool({
     name: "dao_check",
     label: "DAO Check",
     description: "Run quality control gates",
     parameters: Type.Object({ proposalId: Type.Number() }),
     async execute(_id, params: DaoCheckParams) {
-      return toolResult(
-        await handleDaoControl(
-          {
-            adapter: createPiHostAdapter(pi),
-            workDir: process.cwd(),
-            deliberationMode: "auto",
-            controlToolName: "dao_check",
-            failOnGateFailure: true,
-            repository,
-          },
-          params.proposalId,
-        ),
-      );
+      return toolResult(await runControl(params.proposalId));
+    },
+  });
+
+  registerDaoTool({
+    name: "dao_control",
+    label: "DAO Control",
+    description: "Run quality control gates (alias of dao_check)",
+    parameters: Type.Object({ proposalId: Type.Number() }),
+    async execute(_id, params: DaoCheckParams) {
+      return toolResult(await runControl(params.proposalId));
+    },
+  });
+
+  registerDaoTool({
+    name: "dao_list",
+    label: "DAO List",
+    description: "List all DAO proposals",
+    parameters: Type.Object({}),
+    async execute() {
+      return toolResult(await handleDaoList(repository));
+    },
+  });
+
+  registerDaoTool({
+    name: "dao_agents",
+    label: "DAO Agents",
+    description: "List all DAO agents",
+    parameters: Type.Object({}),
+    async execute() {
+      return toolResult(await handleDaoAgents(repository));
     },
   });
 
@@ -1023,32 +1068,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
     description: "Get delivery plan",
     parameters: Type.Object({ proposalId: Type.Number() }),
     async execute(_id, params: DaoPlanParams) {
-      const proposal = getProposal(params.proposalId);
-      if (!proposal) return toolResult(`Proposal #${params.proposalId} not found.`);
-      const plan = getPlan(params.proposalId);
-      if (!plan) {
-        if (proposal.status === "open") {
-          return toolResult(
-            "Plan not available yet. Proposal must complete deliberation and gates first. Run `dao_deliberate` and `dao_check`.",
-          );
-        }
-        if (proposal.status === "deliberating") {
-          return toolResult(
-            "Plan not available yet. Deliberation is still running. Run `dao_deliberate` to completion first.",
-          );
-        }
-        if (proposal.status === "approved") {
-          return toolResult("Plan not available yet. Proposal must pass gates first. Run `dao_check` to proceed.");
-        }
-        if (proposal.status === "controlled") {
-          return toolResult("Plan should be available. If missing, run `dao_execute` to generate it.");
-        }
-        if (proposal.status === "rejected") {
-          return toolResult("Proposal was rejected and cannot be executed.");
-        }
-        return toolResult("Plan not available for this proposal.");
-      }
-      return toolResult(formatPlan(plan));
+      return toolResult(await handleDaoPlan(params.proposalId, "dao_check", repository));
     },
   });
 
@@ -1108,11 +1128,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
     description: "View audit trail",
     parameters: Type.Object({ proposalId: Type.Optional(Type.Number()) }),
     async execute(_id, params: DaoAuditParams) {
-      const entries =
-        params.proposalId !== undefined
-          ? getAllAuditLog().filter((e) => e.proposalId === params.proposalId)
-          : getAllAuditLog();
-      return toolResult(formatAuditTrail(entries, params.proposalId));
+      return toolResult(await handleDaoAudit(params.proposalId));
     },
   });
 
@@ -1123,10 +1139,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
     description: "View auto-generated artefacts for a proposal",
     parameters: Type.Object({ proposalId: Type.Number() }),
     async execute(_id, params: DaoArtefactsParams) {
-      const proposal = getProposal(Number(params.proposalId));
-      if (!proposal) return toolResult(`Proposal #${params.proposalId} not found.`);
-      const artefacts = generateAllArtefacts(proposal);
-      return toolResult(formatAllArtefacts(artefacts));
+      return toolResult(await handleDaoArtefacts(Number(params.proposalId), repository));
     },
   });
 
@@ -1159,17 +1172,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
     description: "View outcome tracking dashboard",
     parameters: Type.Object({}),
     async execute(_id, _params: DaoDashboardParams) {
-      const state = getState();
-      if (!state.initialized) return toolResult(PI_ONBOARDING_MESSAGE);
-      const dashboard = generateDashboard(
-        state.proposals,
-        state.outcomes,
-        state.agents,
-        state.healthSnapshots,
-        state.config.healthWeights,
-      );
-      const health = computeHealthScore(state.proposals, state.outcomes, state.config.healthWeights);
-      return toolResult(`${dashboard}\n\n${formatHealthScore(health)}`);
+      return toolResult(await handleDaoDashboard(repository));
     },
   });
 

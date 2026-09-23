@@ -233,6 +233,7 @@ function coordinatorInput(overrides: Partial<DelegationCoordinatorInput> = {}): 
     maxDepth: 1,
     activeRequests: 0,
     ...overrides,
+    transitionTime: overrides.transitionTime ?? "2026-01-01T00:00:00.000Z",
   };
 }
 
@@ -357,6 +358,7 @@ function requestInput(overrides: Partial<DelegationRequestInput> = {}): Delegati
     archetype: "auditor",
     gateReasons: [],
     ...overrides,
+    transitionTime: overrides.transitionTime ?? "2026-01-01T00:00:00.000Z",
   };
 }
 
