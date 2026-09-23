@@ -64,8 +64,11 @@ philosophy as the anchor sandbox:
 4. **Bounded means bounded.** No implicit host fallback: if a sandbox mode
    is requested and the runtime is missing, execution fails with guidance.
    The host-execution path remains available only through explicit
-   `sandbox: none` (default for existing users), recorded in the execution
-   journal so every historical run's boundary is auditable.
+   `sandbox: none` / `execution.isolation: "none"` (default for **proposal**
+   execution on existing projects). Improvement-loop anchor sandboxes are a
+   separate knob: omitted `sandbox.mode` defaults to **`auto`** (fail-closed),
+   not host — see `packages/improvement-loop/README.md`. Every historical
+   run's boundary is recorded in the execution journal so audits stay honest.
 
 ## Alternatives considered
 

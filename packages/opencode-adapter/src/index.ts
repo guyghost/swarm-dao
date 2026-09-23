@@ -587,7 +587,7 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
         args: { proposalId: schema.number({ description: "Optional proposal ID" }) },
         // biome-ignore lint/suspicious/noExplicitAny: SDK callback signature
         async execute(args: any, _context: any) {
-          return handleDaoAudit(args.proposalId !== undefined ? Number(args.proposalId) : undefined);
+          return handleDaoAudit(args.proposalId !== undefined ? Number(args.proposalId) : undefined, repository);
         },
       }),
 

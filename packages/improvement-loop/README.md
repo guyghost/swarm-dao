@@ -66,6 +66,10 @@ command inside a throwaway container: repository mounted at `/workspace`,
 on `auto`; a missing runtime fails loudly instead of degrading to the host. A
 flagged gate failure never runs on the host implicitly — bounded means bounded.
 
+**Defaults:** when `--sandbox` / `sandbox.mode` is omitted, the executor uses
+**`auto`** (fail-closed if no container runtime). Host anchors require an
+explicit `none` (CLI flag or `.dao/improvement.json`).
+
 ## Execution environments
 
 `improve once --exec branch|worktree|container` selects where the series runs

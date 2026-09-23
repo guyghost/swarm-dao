@@ -10,6 +10,7 @@ import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-c
 import type {
   AgentOutput,
   AttentionSource,
+  DAOState,
   DaoStateRepositoryPort,
   HostAdapter,
   ProposalType,
@@ -25,10 +26,8 @@ import {
   FileDaoStateRepository,
   FsAttentionStore,
   formatAttention,
-  formatAuditTrail,
   formatHealthScore,
   generateDashboard,
-  getAllAuditLog,
   getDaoCommands,
   getState,
   handleDaoAgents,
@@ -867,19 +866,27 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
     return undefined;
   });
 
+  /** Prefer the session-owned repository; fall back to the compat singleton
+   *  (setRepository from session_start / handleDaoSetup) for headless tests
+   *  and slash commands that run before session_start. */
+  const readDaoState = (): DAOState | undefined => {
+    if (repository) return repository.get();
+    try {
+      return getState();
+    } catch {
+      return undefined;
+    }
+  };
+
   // System prompt injection
   pi.on("before_agent_start", async (event, _ctx) => {
     if (typeof event.model === "string" && event.model.length > 0) {
       currentSessionModel = event.model;
     }
 
-    let state: ReturnType<typeof getState> | undefined;
-    try {
-      state = getState();
-    } catch {
-      // Storage unavailable (e.g. session_start failed on a corrupt state
-      // file). Fall back to the minimal prompt instead of throwing every turn.
-    }
+    const state = readDaoState();
+    // Storage unavailable (e.g. session_start failed on a corrupt state
+    // file). Fall back to the minimal prompt instead of throwing every turn.
     if (!state?.initialized) {
       return {
         systemPrompt:
@@ -1128,7 +1135,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
     description: "View audit trail",
     parameters: Type.Object({ proposalId: Type.Optional(Type.Number()) }),
     async execute(_id, params: DaoAuditParams) {
-      return toolResult(await handleDaoAudit(params.proposalId));
+      return toolResult(await handleDaoAudit(params.proposalId, repository));
     },
   });
 
@@ -1543,7 +1550,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
   // known subcommand resolves through DaoCommandRegistry. Pi slash commands
   // cannot invoke Pi tools directly, so mutating commands route the user to
   // the matching `dao_*` tool; read-only commands render inline.
-  const renderDashboard = (state: ReturnType<typeof getState>): string => {
+  const renderDashboard = (state: DAOState): string => {
     // Mirror the `dao_dashboard` tool exactly (pipeline + health metrics + score).
     const dashboard = generateDashboard(
       state.proposals,
@@ -1566,10 +1573,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
     });
   };
 
-  const renderProposalList = (
-    state: ReturnType<typeof getState>,
-    filters: { status?: string; type?: string } = {},
-  ): string => {
+  const renderProposalList = (state: DAOState, filters: { status?: string; type?: string } = {}): string => {
     let proposals = state.proposals;
     if (filters.status) proposals = proposals.filter((p) => p.status === filters.status);
     if (filters.type) proposals = proposals.filter((p) => p.type === filters.type);
@@ -1583,7 +1587,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
     return `# Proposals (${proposals.length})\n\n${rows}`;
   };
 
-  const renderAgentList = (state: ReturnType<typeof getState>): string => {
+  const renderAgentList = (state: DAOState): string => {
     if (state.agents.length === 0) return "No agents configured. Run `/dao setup` to initialize.";
     const rows = state.agents.map((a) => `- ${a.name} [${a.role}] weight ${a.weight}`).join("\n");
     return `# DAO Agents (${state.agents.length})\n\n${rows}`;
@@ -1701,14 +1705,9 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
       return await runDaoSetup();
     }
 
-    // Everything else needs initialized state.
-    let state: ReturnType<typeof getState>;
-    try {
-      state = getState();
-    } catch {
-      return PI_ONBOARDING_MESSAGE;
-    }
-    if (!state.initialized) return PI_ONBOARDING_MESSAGE;
+    // Prefer session repository; compat getState covers setup-before-session_start.
+    const state = readDaoState();
+    if (!state?.initialized) return PI_ONBOARDING_MESSAGE;
 
     // `/dao` or `/dao status` → dashboard
     if (subcommand === "" || subcommand === "status" || subcommand === "dashboard") {
@@ -1723,9 +1722,7 @@ export default function swarmDaoExtension(pi: ExtensionAPI) {
       if (rest[0] !== undefined && proposalId === undefined) {
         return `Invalid proposal ID: \`${rest[0]}\`.\n\nUsage: \`/dao audit [proposalId]\``;
       }
-      const entries =
-        proposalId !== undefined ? getAllAuditLog().filter((e) => e.proposalId === proposalId) : getAllAuditLog();
-      return formatAuditTrail(entries, proposalId);
+      return handleDaoAudit(proposalId, repository);
     }
 
     // Registry resolution for the rest.

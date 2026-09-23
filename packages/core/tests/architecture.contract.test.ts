@@ -51,6 +51,53 @@ describe("hexagonal architecture contracts", () => {
     }
   });
 
+  it("keeps ports free of adapters, host-tools, and persistence", async () => {
+    const files = await sourceFiles(path.join(SOURCE_ROOT, "ports"));
+    expect(files.length).toBeGreaterThan(0);
+    for (const file of files) {
+      const source = await fs.readFile(file, "utf8");
+      expect(source).not.toMatch(/from ["'][^"']*(adapters|host-tools|persistence)/);
+    }
+  });
+
+  it("keeps presenters free of adapters, persistence, and host-tools", async () => {
+    const files = await sourceFiles(path.join(SOURCE_ROOT, "presenters"));
+    expect(files.length).toBeGreaterThan(0);
+    for (const file of files) {
+      const source = await fs.readFile(file, "utf8");
+      expect(source).not.toMatch(/from ["'][^"']*(adapters|persistence|host-tools)/);
+    }
+  });
+
+  it("keeps models free of application, adapters, host-tools, and persistence", async () => {
+    const files = await sourceFiles(path.join(SOURCE_ROOT, "models"));
+    expect(files.length).toBeGreaterThan(0);
+    for (const file of files) {
+      const source = await fs.readFile(file, "utf8");
+      expect(source).not.toMatch(/from ["'][^"']*(application|adapters|host-tools|persistence)/);
+    }
+  });
+
+  it("keeps governance free of adapters", async () => {
+    const files = await sourceFiles(path.join(SOURCE_ROOT, "governance"));
+    expect(files.length).toBeGreaterThan(0);
+    for (const file of files) {
+      const source = await fs.readFile(file, "utf8");
+      expect(source).not.toMatch(/from ["'][^"']*adapters/);
+    }
+  });
+
+  it("keeps L1–L4 layers free of host-tools", async () => {
+    for (const layer of ["governance", "intelligence", "delivery", "control"] as const) {
+      const files = await sourceFiles(path.join(SOURCE_ROOT, layer));
+      expect(files.length).toBeGreaterThan(0);
+      for (const file of files) {
+        const source = await fs.readFile(file, "utf8");
+        expect(source).not.toMatch(/from ["'][^"']*host-tools/);
+      }
+    }
+  });
+
   it("routes host lifecycle commands through shared application handlers", async () => {
     // Discover full lifecycle adapters by their state-repository import so a
     // new adapter cannot silently escape this gate the way a hardcoded list

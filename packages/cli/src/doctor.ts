@@ -207,7 +207,10 @@ export async function cmdDoctor(cwd: string): Promise<number> {
     rawImprovement !== null && typeof rawImprovement.sandbox === "object" && rawImprovement.sandbox !== null
       ? (rawImprovement.sandbox as Record<string, unknown>)
       : null;
-  const sandboxMode = typeof sandboxSection?.mode === "string" ? sandboxSection.mode : "none";
+  // Runtime default is auto when improvement.json exists but omits sandbox.mode.
+  // With no improvement config at all, sandbox is N/A (do not fail fresh projects).
+  const sandboxMode =
+    typeof sandboxSection?.mode === "string" ? sandboxSection.mode : improvementConfig !== null ? "auto" : "none";
 
   checks.push(
     improvementConfig === null
@@ -227,18 +230,28 @@ export async function cmdDoctor(cwd: string): Promise<number> {
           },
   );
 
-  if (sandboxMode !== "none" && !dockerVersion) {
+  if (improvementConfig !== null && sandboxMode !== "none" && !dockerVersion) {
     checks.push({
       name: "sandbox runtime",
       level: "fail",
-      detail: `improvement sandbox mode "${sandboxMode}" but docker is unavailable`,
+      detail:
+        sandboxSection?.mode === undefined
+          ? 'improvement sandbox defaults to "auto" (sandbox.mode omitted) but docker is unavailable'
+          : `improvement sandbox mode "${sandboxMode}" but docker is unavailable`,
       hint: "install docker, or set sandbox.mode to none in .dao/improvement.json",
     });
   } else {
     checks.push({
       name: "sandbox runtime",
       level: "ok",
-      detail: sandboxMode === "none" ? "mode none (host anchors)" : `mode ${sandboxMode}`,
+      detail:
+        improvementConfig === null
+          ? "n/a (no improvement config)"
+          : sandboxMode === "none"
+            ? "mode none (host anchors)"
+            : sandboxSection?.mode === undefined
+              ? "mode auto (default when sandbox.mode omitted)"
+              : `mode ${sandboxMode}`,
     });
   }
 
