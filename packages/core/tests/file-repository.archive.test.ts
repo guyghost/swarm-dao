@@ -183,24 +183,22 @@ describe("file repository proposal archive (ADR-004)", () => {
     await expect(second.persist()).rejects.toThrow(/Concurrent modification/);
   });
 
-  it("loadState (compat path) also merges the archive instead of clobbering it", async () => {
+  it("reopening a FileDao merges the archive instead of clobbering it", async () => {
     const repository = await FileDaoStateRepository.open(workDir);
     repository.get().proposals.push(proposal(1, "open"), proposal(2, "executed"));
     repository.get().outcomes[2] = { proposalId: 2, overall: 4 } as never;
     await repository.persist();
 
-    // The compat seam used by tests/hosts that bypass the repository port:
-    // loadState must hand back the merged state, and the next save must not
-    // destroy archived proposals (regression: archive was rewritten from
+    // A fresh open must hand back the merged state; the next persist must not
+    // destroy archived proposals (regression: archive rewritten from
     // archive-blind memory, dropping #2).
-    const { loadState, saveState } = await import("@guyghost/swarm-dao-core");
-    const loaded = await loadState(workDir);
-    expect(loaded?.proposals.map((p) => p.id)).toEqual([1, 2]);
-    await saveState();
-
     const reopened = await FileDaoStateRepository.open(workDir);
     expect(reopened.get().proposals.map((p) => p.id)).toEqual([1, 2]);
-    expect(reopened.get().proposals.find((p) => p.id === 2)?.status).toBe("executed");
+    await reopened.persist();
+
+    const again = await FileDaoStateRepository.open(workDir);
+    expect(again.get().proposals.map((p) => p.id)).toEqual([1, 2]);
+    expect(again.get().proposals.find((p) => p.id === 2)?.status).toBe("executed");
   });
 
   it("keeps decisions/ summaries correct with archived proposals", async () => {

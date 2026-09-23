@@ -36,11 +36,8 @@ describe("CLI E2E", () => {
   let testDir: string;
 
   beforeEach(async () => {
-    // Reset the core module-level state singleton so each test starts from a
-    // fresh DAO. Without this, proposal IDs leak across test files that share
-    // the same Bun process (the singleton is keyed globally, not per-cwd).
-    const { setState } = await import("@guyghost/swarm-dao-core");
-    setState(null);
+    // Each test owns a fresh workspace; DAO state is scoped to that directory's
+    // repository instance, so nothing leaks between tests in the same process.
     testDir = path.join(tmpdir(), `swarm-dao-test-${Date.now()}`);
     await fs.mkdir(testDir, { recursive: true });
   });
@@ -175,19 +172,18 @@ describe("CLI E2E", () => {
 
   /** Helper: fast-track a proposal to 'controlled' status by mutating state directly */
   async function setupControlledProposal(title: string, dependsOn?: number[]): Promise<number> {
-    const { loadState, saveState, getOrCreateState, setState } = await import("@guyghost/swarm-dao-core");
+    const { FileDaoStateRepository, CreateProposalUseCase, dispatchProposalEvent, DEFAULT_CONFIG, systemClock } =
+      await import("@guyghost/swarm-dao-core");
 
-    const loaded = await loadState(testDir);
-    if (!loaded) {
-      const { initializeAgents } = await import("@guyghost/swarm-dao-core");
-      const s = getOrCreateState(testDir);
-      s.initialized = true;
-      s.agents = initializeAgents();
-      setState(s);
-    }
-
-    const { createProposal, dispatchProposalEvent, DEFAULT_CONFIG } = await import("@guyghost/swarm-dao-core");
-    const p = await createProposal(title, "product-feature", "desc", "test");
+    const repository = await FileDaoStateRepository.open(testDir);
+    const created = await new CreateProposalUseCase({ repository, clock: systemClock }).execute({
+      title,
+      type: "product-feature",
+      description: "desc",
+      proposedBy: "test",
+    });
+    if (!created.ok) throw new Error(created.error);
+    const p = created.proposal;
     if (dependsOn) p.dependsOn = dependsOn;
     // Guarded events recompute the decision (issue #158): real votes + config.
     p.votes = [
@@ -231,7 +227,7 @@ describe("CLI E2E", () => {
       },
       { config: DEFAULT_CONFIG },
     );
-    await saveState();
+    await repository.persist();
     return p.id;
   }
 
@@ -290,19 +286,16 @@ describe("CLI E2E", () => {
       await runCLI(["setup"], testDir);
 
       // Create dep in 'open' state (not controlled)
-      const { loadState, getOrCreateState, setState, saveState, initializeAgents, createProposal } = await import(
-        "@guyghost/swarm-dao-core"
-      );
-      const loaded = await loadState(testDir);
-      if (!loaded) {
-        const s = getOrCreateState(testDir);
-        s.initialized = true;
-        s.agents = initializeAgents();
-        setState(s);
-      }
-      const dep = await createProposal("Open Dep", "product-feature", "desc", "test");
-      const targetId = await setupControlledProposal("Feature B", [dep.id]);
-      await saveState();
+      const { FileDaoStateRepository, CreateProposalUseCase, systemClock } = await import("@guyghost/swarm-dao-core");
+      const repository = await FileDaoStateRepository.open(testDir);
+      const dep = await new CreateProposalUseCase({ repository, clock: systemClock }).execute({
+        title: "Open Dep",
+        type: "product-feature",
+        description: "desc",
+        proposedBy: "test",
+      });
+      if (!dep.ok) throw new Error(dep.error);
+      const targetId = await setupControlledProposal("Feature B", [dep.proposal.id]);
 
       const result = await runCLI(["ship", String(targetId), "--cascade"], testDir);
       expect(result.code).toBe(1);
@@ -347,13 +340,13 @@ describe("CLI E2E", () => {
       expect(result.stdout).toContain("4/5");
       expect(result.stdout).toContain("Guy");
 
-      const { loadState } = await import("@guyghost/swarm-dao-core");
-      const state = await loadState(testDir);
-      const ratings = state?.outcomes[id]?.ratings ?? [];
+      const { FileDaoStateRepository } = await import("@guyghost/swarm-dao-core");
+      const state = (await FileDaoStateRepository.open(testDir)).get();
+      const ratings = state.outcomes[id]?.ratings ?? [];
       expect(ratings).toHaveLength(1);
       expect(ratings[0]?.score).toBe(4);
       expect(ratings[0]?.rater).toBe("Guy");
-      expect(state?.auditLog.some((e) => e.action === "outcome-rated")).toBe(true);
+      expect(state.auditLog.some((e) => e.action === "outcome-rated")).toBe(true);
     });
 
     it("refuses to rate a proposal that is not executed", async () => {

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { getState, setState } from "@guyghost/swarm-dao-core";
+import { FileDaoStateRepository } from "@guyghost/swarm-dao-core";
 
 function createSchemaNode() {
   return {
@@ -55,13 +55,16 @@ function createMockCtx(directory: string) {
 }
 
 /**
- * Initialize the OpenCode plugin, set up storage, and return the plugin tools.
- * The OpenCodeDAO constructor itself calls initStorage, loadState, and getOrCreateState,
- * so state is already available via getState().
+ * Read what the plugin persisted. OpenCodeDAO owns its own repository
+ * instance, so tests observe state through the same file store rather than a
+ * shared in-memory singleton.
  */
+async function readPluginState(tmpDir: string) {
+  return (await FileDaoStateRepository.open(tmpDir)).get();
+}
+
+/** Initialize the OpenCode plugin, set up storage, and return the plugin tools. */
 async function setupPlugin(tmpDir: string) {
-  // Reset module-level state so tests are isolated
-  setState(null);
   const ctx = createMockCtx(tmpDir);
   const { OpenCodeDAO } = await import("../src/index.js");
   const plugin = await OpenCodeDAO(ctx);
@@ -94,7 +97,6 @@ describe("opencode-adapter", () => {
     });
 
     afterEach(async () => {
-      setState(null);
       await fs.rm(testDir, { recursive: true, force: true });
     });
 
@@ -153,7 +155,6 @@ describe("opencode-adapter", () => {
     });
 
     afterEach(async () => {
-      setState(null);
       await fs.rm(testDir, { recursive: true, force: true });
     });
 
@@ -189,7 +190,6 @@ describe("opencode-adapter", () => {
     });
 
     afterEach(async () => {
-      setState(null);
       await fs.rm(testDir, { recursive: true, force: true });
     });
 
@@ -203,7 +203,7 @@ describe("opencode-adapter", () => {
       expect(result).toContain("Agent");
 
       // Verify state was updated
-      const state = getState();
+      const state = await readPluginState(testDir);
       expect(state.initialized).toBe(true);
       expect(state.agents.length).toBe(8);
     });
@@ -240,7 +240,6 @@ describe("opencode-adapter", () => {
     });
 
     afterEach(async () => {
-      setState(null);
       await fs.rm(testDir, { recursive: true, force: true });
     });
 
@@ -311,12 +310,9 @@ describe("opencode-adapter", () => {
     });
 
     it("returns error when DAO not initialized", async () => {
+      // No dao_setup: the plugin opens a repository whose state is readable
+      // but uninitialized, which is the precondition under test.
       const { plugin } = await setupPlugin(testDir);
-      // Do NOT call dao_setup — but OpenCodeDAO constructor calls getOrCreateState
-      // which sets initialized=false. We need to explicitly mark initialized=false
-      // and NOT call dao_setup.
-      const state = getState();
-      state.initialized = false;
 
       const result = await plugin.tool.dao_propose.execute(
         { title: "Should fail", type: "product-feature", description: "test" },
@@ -353,7 +349,6 @@ describe("opencode-adapter", () => {
     });
 
     afterEach(async () => {
-      setState(null);
       await fs.rm(testDir, { recursive: true, force: true });
     });
 
@@ -380,7 +375,7 @@ describe("opencode-adapter", () => {
       // — the host decides, no flag is emitted (D3 row 3).
       expect(result).toContain('model="default"');
 
-      const state = getState();
+      const state = await readPluginState(testDir);
       expect(state.proposals[0]?.status).toBe("deliberating");
     });
   });
@@ -394,7 +389,6 @@ describe("opencode-adapter", () => {
     });
 
     afterEach(async () => {
-      setState(null);
       await fs.rm(testDir, { recursive: true, force: true });
     });
 
@@ -420,9 +414,8 @@ describe("opencode-adapter", () => {
     });
 
     it("returns error when DAO not initialized", async () => {
+      // No dao_setup: the plugin opens a readable but uninitialized DAO.
       const { plugin } = await setupPlugin(testDir);
-      const state = getState();
-      state.initialized = false;
 
       const result = await plugin.tool.dao_list.execute({}, {});
       expect(result).toContain("not initialized");
@@ -438,7 +431,6 @@ describe("opencode-adapter", () => {
     });
 
     afterEach(async () => {
-      setState(null);
       await fs.rm(testDir, { recursive: true, force: true });
     });
 
@@ -454,9 +446,8 @@ describe("opencode-adapter", () => {
     });
 
     it("returns error when DAO not initialized", async () => {
+      // No dao_setup: the plugin opens a readable but uninitialized DAO.
       const { plugin } = await setupPlugin(testDir);
-      const state = getState();
-      state.initialized = false;
 
       const result = await plugin.tool.dao_agents.execute({}, {});
       expect(result).toContain("not initialized");
@@ -472,7 +463,6 @@ describe("opencode-adapter", () => {
     });
 
     afterEach(async () => {
-      setState(null);
       await fs.rm(testDir, { recursive: true, force: true });
     });
 
@@ -486,9 +476,8 @@ describe("opencode-adapter", () => {
     });
 
     it("returns error when DAO not initialized", async () => {
+      // No dao_setup: the plugin opens a readable but uninitialized DAO.
       const { plugin } = await setupPlugin(testDir);
-      const state = getState();
-      state.initialized = false;
 
       const result = await plugin.tool.dao_dashboard.execute({}, {});
       expect(result).toContain("not initialized");
@@ -504,7 +493,6 @@ describe("opencode-adapter", () => {
     });
 
     afterEach(async () => {
-      setState(null);
       await fs.rm(testDir, { recursive: true, force: true });
     });
 

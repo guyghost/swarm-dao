@@ -3,12 +3,12 @@
 // ============================================================
 
 import { GATE_IDS } from "../control/gates.js";
-import { getState } from "../persistence.js";
 import {
   type AmendmentPayload,
   type AmendmentSnapshot,
   type DAOAgent,
   type DAOConfig,
+  type DAOState,
   type ProposalType,
   TYPE_QUORUM,
 } from "../types/index.js";
@@ -115,8 +115,7 @@ export function validateAmendmentPayload(payload: AmendmentPayload): AmendmentVa
   return { valid: errors.length === 0, errors };
 }
 
-export function previewAmendment(payload: AmendmentPayload): AmendmentPreviewDiff[] {
-  const state = getState();
+export function previewAmendment(payload: AmendmentPayload, state: DAOState): AmendmentPreviewDiff[] {
   const diffs: AmendmentPreviewDiff[] = [];
 
   switch (payload.type) {
@@ -200,9 +199,7 @@ export function previewAmendment(payload: AmendmentPayload): AmendmentPreviewDif
   return diffs;
 }
 
-export function executeAmendment(payload: AmendmentPayload): AmendmentExecutionResult {
-  const state = getState();
-
+export function executeAmendment(payload: AmendmentPayload, state: DAOState): AmendmentExecutionResult {
   // Capture snapshot before changes
   const snapshot: AmendmentSnapshot = {
     agents: state.agents.map((a) => ({ ...a })),
@@ -267,8 +264,7 @@ export function executeAmendment(payload: AmendmentPayload): AmendmentExecutionR
   }
 }
 
-export function rollbackAmendment(snapshot: AmendmentSnapshot): void {
-  const state = getState();
+export function rollbackAmendment(snapshot: AmendmentSnapshot, state: DAOState): void {
   state.agents = snapshot.agents;
   state.config = snapshot.config;
 }

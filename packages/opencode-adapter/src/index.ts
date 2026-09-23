@@ -43,7 +43,6 @@ import {
   PROPOSAL_TYPES,
   readFileContained,
   resolveContainedRoot,
-  setRepository,
   writeFileContained,
 } from "@guyghost/swarm-dao-core";
 import type { GraphAiEventType } from "@guyghost/swarm-dao-graph";
@@ -231,7 +230,6 @@ export const OpenCodeDAO: Plugin = async (ctx: PluginInput) => {
 
   await migrateFromLegacy(directory, [".opencode-dao"]);
   const repository: DaoStateRepositoryPort = await FileDaoStateRepository.open(directory);
-  setRepository(repository);
   await loadOpenCodeHostDefaultModel(directory);
 
   return {

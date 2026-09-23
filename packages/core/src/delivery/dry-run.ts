@@ -1,5 +1,5 @@
 import { analyzeProposalDryRun } from "../domain/dry-run.js";
-import { captureSnapshot, getSnapshot, getState } from "../persistence.js";
+import type { DaoStateRepositoryPort } from "../ports/repository.js";
 import type { DryRunResult, ExecutionSnapshot, Proposal } from "../types/index.js";
 import { execCommand } from "../utils/host.js";
 
@@ -23,7 +23,11 @@ export function formatDryRun(result: DryRunResult): string {
 
 // ── Snapshot Management ─────────────────────────────────────
 
-export async function createExecutionSnapshot(proposal: Proposal, cwd: string): Promise<ExecutionSnapshot> {
+export async function createExecutionSnapshot(
+  proposal: Proposal,
+  cwd: string,
+  repository: DaoStateRepositoryPort,
+): Promise<ExecutionSnapshot> {
   const branchResult = await execCommand("git branch --show-current", { cwd });
   const shaResult = await execCommand("git rev-parse HEAD", { cwd });
 
@@ -39,21 +43,25 @@ export async function createExecutionSnapshot(proposal: Proposal, cwd: string): 
     commitSha: gitInfo.sha,
     filesChanged: proposal.affectedPaths || [],
     stateSnapshot: JSON.stringify({
-      agents: getState().agents?.length ?? 0,
-      proposals: getState().proposals?.length ?? 0,
+      agents: repository.get().agents?.length ?? 0,
+      proposals: repository.get().proposals?.length ?? 0,
     }),
   };
 
-  await captureSnapshot(proposal.id, snapshot);
+  repository.get().snapshots[proposal.id] = snapshot;
+  await repository.persist();
   return snapshot;
 }
 
-export function canRollback(proposalId: number): boolean {
-  return getSnapshot(proposalId) !== undefined;
+export function canRollback(proposalId: number, repository: DaoStateRepositoryPort): boolean {
+  return repository.get().snapshots[proposalId] !== undefined;
 }
 
-export async function performRollback(proposalId: number): Promise<{ success: boolean; message: string }> {
-  const snapshot = getSnapshot(proposalId);
+export async function performRollback(
+  proposalId: number,
+  repository: DaoStateRepositoryPort,
+): Promise<{ success: boolean; message: string }> {
+  const snapshot = repository.get().snapshots[proposalId];
   if (!snapshot) {
     return { success: false, message: `No snapshot found for proposal #${proposalId}` };
   }

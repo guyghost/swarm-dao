@@ -21,7 +21,7 @@ import type {
 import {
   ATTENTION_SOURCES,
   type AttentionSource,
-  addVote,
+  addVoteOn,
   ControlProposalUseCase,
   CreateProposalUseCase,
   collectAttention,
@@ -36,12 +36,11 @@ import {
   formatAttention,
   formatControlResult,
   gcDaoHome,
-  getAllAuditLog,
-  getAuditLog,
+  getAllAuditLogFrom,
+  getAuditLogFrom,
   getDaoCommandsByPhase,
-  getOutcome,
-  getProposal,
-  getState,
+  getOutcomeFrom,
+  getProposalFrom,
   ghBranchNameFor,
   ghCreateBranch,
   ghCreatePullRequest,
@@ -49,7 +48,7 @@ import {
   handleDaoRoundtable,
   initializeAgents,
   isGitHubEnabled,
-  listProposals,
+  listProposalsFrom,
   loadAgentDefinitions,
   loadConfig,
   migrateDaoToHome,
@@ -57,12 +56,10 @@ import {
   presentDryRun,
   RateProposalUseCase,
   RejectProposalUseCase,
-  recordAudit,
+  recordAuditOn,
   resolveConfigFilePath,
   resolveDaoLayout,
   ShipProposalUseCase,
-  saveState,
-  setRepository,
   systemClock,
   upgradeConfig,
 } from "@guyghost/swarm-dao-core";
@@ -183,9 +180,7 @@ function parseFlags(args: string[]): {
 }
 
 async function ensureLoaded(cwd: string): Promise<FileDaoStateRepository> {
-  const repository = await FileDaoStateRepository.open(cwd);
-  setRepository(repository);
-  return repository;
+  return FileDaoStateRepository.open(cwd);
 }
 
 // ── Child sessions (parent = this CLI, children = one workspace/session per agent) ──
@@ -473,8 +468,8 @@ const HELP = buildCliHelp();
 
 async function cmdInit(cwd: string): Promise<void> {
   const layout = await resolveDaoLayout(cwd);
-  setRepository(await FileDaoStateRepository.open(cwd));
-  await saveState();
+  const repository = await FileDaoStateRepository.open(cwd);
+  await repository.persist();
   info(`✓ DAO storage initialized at ${layout.stateRoot}`);
   if (layout.mode === "home") {
     info(`   External DAO home (ADR-007) — project root: ${layout.projectRoot}`);
@@ -487,8 +482,8 @@ async function daoStateRoot(cwd: string): Promise<string> {
 }
 
 async function cmdSetup(cwd: string): Promise<void> {
-  await ensureLoaded(cwd);
-  const state = getState();
+  const repository = await ensureLoaded(cwd);
+  const state = repository.get();
   if (state.initialized) {
     info(`DAO already initialized with ${state.agents.length} agents.`);
     return;
@@ -496,7 +491,7 @@ async function cmdSetup(cwd: string): Promise<void> {
   const agents = initializeAgents();
   state.agents = agents;
   state.initialized = true;
-  await saveState();
+  await repository.persist();
   info(`✓ DAO initialized with ${agents.length} agents`);
   for (const a of agents) {
     info(`  - ${a.name} (w=${a.weight}) — ${a.role}`);
@@ -620,7 +615,7 @@ async function cmdDeliberate(cwd: string, positional: string[], flags: Record<st
   const projectConfig = await loadConfig(await daoStateRoot(cwd));
   const child = childSessionOptionsFrom(flags, projectConfig);
   const repository = await ensureLoaded(cwd);
-  if (!getProposal(id)) err(`proposal #${id} not found`);
+  if (!getProposalFrom(repository, id)) err(`proposal #${id} not found`);
 
   const agents = await loadAgentDefinitions(await daoStateRoot(cwd), projectConfig);
   announceChildren(
@@ -651,7 +646,7 @@ async function cmdRoundtable(cwd: string, flags: Record<string, string | true>):
   const projectConfig = await loadConfig(await daoStateRoot(cwd));
   const child = childSessionOptionsFrom(flags, projectConfig);
   const repository = await ensureLoaded(cwd);
-  if (!getState().initialized) err("DAO not initialized. Run: swarm-dao setup");
+  if (!repository.get().initialized) err("DAO not initialized. Run: swarm-dao setup");
 
   const agents = await loadAgentDefinitions(await daoStateRoot(cwd), projectConfig);
   announceChildren(
@@ -671,13 +666,13 @@ async function cmdRoundtable(cwd: string, flags: Record<string, string | true>):
 }
 
 async function cmdList(cwd: string, flags: Record<string, string | true>): Promise<void> {
-  await ensureLoaded(cwd);
-  let items = listProposals();
+  const repository = await ensureLoaded(cwd);
+  let items = listProposalsFrom(repository);
   if (typeof flags.status === "string") {
     items = items.filter((p) => p.status === flags.status);
   }
   if (flags.unrated === true) {
-    const outcomes = getState().outcomes;
+    const outcomes = repository.get().outcomes;
     items = items.filter((p) => p.status === "executed" && (outcomes[p.id]?.ratings.length ?? 0) === 0);
   }
   if (typeof flags.type === "string") {
@@ -702,8 +697,8 @@ async function cmdShow(cwd: string, positional: string[]): Promise<void> {
   const id = Number(idStr);
   if (!Number.isInteger(id)) err(`invalid id '${idStr}'`);
 
-  await ensureLoaded(cwd);
-  const p = getProposal(id);
+  const repository = await ensureLoaded(cwd);
+  const p = getProposalFrom(repository, id);
   if (!p) err(`proposal #${id} not found`);
 
   info(`Proposal #${p.id}: ${p.title}`);
@@ -752,14 +747,17 @@ async function cmdConfig(cwd: string, positional: string[]): Promise<number> {
   if (sub !== undefined) {
     err(`unknown config subcommand: ${sub} (expected: upgrade)`);
   }
-  await ensureLoaded(cwd);
-  info(JSON.stringify(getState().config, null, 2));
+  const repository = await ensureLoaded(cwd);
+  info(JSON.stringify(repository.get().config, null, 2));
   return 0;
 }
 
 async function cmdAudit(cwd: string, flags: Record<string, string | true>): Promise<void> {
-  await ensureLoaded(cwd);
-  const entries = typeof flags.proposal === "string" ? getAuditLog(Number(flags.proposal)) : getAllAuditLog();
+  const repository = await ensureLoaded(cwd);
+  const entries =
+    typeof flags.proposal === "string"
+      ? getAuditLogFrom(repository, Number(flags.proposal))
+      : getAllAuditLogFrom(repository);
   if (entries.length === 0) {
     info("(no audit entries)");
     return;
@@ -790,8 +788,8 @@ async function cmdAttention(cwd: string, flags: Record<string, string | true>): 
 }
 
 async function cmdStatus(cwd: string): Promise<void> {
-  await ensureLoaded(cwd);
-  const s = getState();
+  const repository = await ensureLoaded(cwd);
+  const s = repository.get();
   const byStatus: Record<string, number> = {};
   for (const p of s.proposals) {
     byStatus[p.status] = (byStatus[p.status] ?? 0) + 1;
@@ -833,11 +831,11 @@ async function cmdVote(cwd: string, positional: string[], flags: Record<string, 
   const HUMAN_VOTER = "cli-user";
   const agent = typeof flags.agent === "string" ? flags.agent : HUMAN_VOTER;
 
-  await ensureLoaded(cwd);
-  const p = getProposal(id);
+  const repository = await ensureLoaded(cwd);
+  const p = getProposalFrom(repository, id);
   if (!p) err(`proposal #${id} not found`);
 
-  const roster = getState().agents ?? [];
+  const roster = repository.get().agents ?? [];
   const member = roster.find((candidate) => candidate.id === agent);
   if (agent !== HUMAN_VOTER && !member) {
     const known = roster.map((candidate) => candidate.id).join(", ") || "(none — run swarm-dao setup)";
@@ -849,7 +847,7 @@ async function cmdVote(cwd: string, positional: string[], flags: Record<string, 
     err("--weight must be a positive number");
   }
 
-  const result = await addVote(id, {
+  const result = await addVoteOn(repository, id, {
     agentId: agent,
     agentName: member?.name ?? agent,
     position,
@@ -857,8 +855,7 @@ async function cmdVote(cwd: string, positional: string[], flags: Record<string, 
     weight,
   });
   if (!result.ok) err(result.error);
-  await recordAudit(id, "governance", "vote-cast", agent, `${position} (w=${weight}): ${reasoning}`);
-  await saveState();
+  await recordAuditOn(repository, id, "governance", "vote-cast", agent, `${position} (w=${weight}): ${reasoning}`);
   info(`✓ Vote ${result.replaced ? "updated" : "recorded"} for #${id}: ${positionRaw} by ${agent}`);
   info(c.dim(`  → next: swarm-dao show ${id} · after approval: swarm-dao control ${id}`));
 }
@@ -909,8 +906,8 @@ async function cmdRate(cwd: string, positional: string[], flags: Record<string, 
     comment,
   });
   if (!result.ok) err(result.error);
-  await recordAudit(id, "governance", "outcome-rated", by, `score ${result.rating.score}/5: ${comment}`);
-  const outcome = getOutcome(id);
+  await recordAuditOn(repository, id, "governance", "outcome-rated", by, `score ${result.rating.score}/5: ${comment}`);
+  const outcome = getOutcomeFrom(repository, id);
   info(`✓ Rating recorded for #${id}: ${result.rating.score}/5 by ${by}`);
   if (outcome) {
     info(c.dim(`  overall: ${outcome.overallScore.toFixed(1)}/5 across ${outcome.ratings.length} rating(s)`));
@@ -977,7 +974,7 @@ async function cmdShip(cwd: string, positional: string[], flags: Record<string, 
   // call proceeds (models/ship-audit.md).
   let auditConsume: (() => Promise<void>) | undefined;
   if (projectConfig.ship?.auditChallenge === true) {
-    const proposal = getProposal(id);
+    const proposal = getProposalFrom(repository, id);
     if (!proposal) err(`proposal #${id} not found`);
     const gate = await evaluateShipAuditChallenge({
       proposal,
@@ -1013,7 +1010,7 @@ async function cmdShip(cwd: string, positional: string[], flags: Record<string, 
     err(result.error.replace("Cannot cascade ship:", "Cannot cascade:"));
   }
   for (const shippedId of result.shipped) {
-    const proposal = getProposal(shippedId);
+    const proposal = getProposalFrom(repository, shippedId);
     info(`✓ Shipped #${shippedId}: ${proposal?.title ?? "proposal"}`);
   }
 }
@@ -1070,10 +1067,10 @@ async function cmdImplement(cwd: string, positional: string[], flags: Record<str
 
   const projectConfig = await loadConfig(await daoStateRoot(cwd));
   const child = childSessionOptionsFrom(flags, projectConfig);
-  await ensureLoaded(cwd);
+  const repository = await ensureLoaded(cwd);
   const proposals: Proposal[] = [];
   for (const id of ids) {
-    const p = getProposal(id);
+    const p = getProposalFrom(repository, id);
     if (!p) err(`proposal #${id} not found`);
     proposals.push(p);
   }
@@ -1116,7 +1113,8 @@ async function cmdImplement(cwd: string, positional: string[], flags: Record<str
   // Audit after the fan-out: sequential writes to the shared DAO state.
   for (const r of results) {
     if (!r.error && r.name && r.workDir) {
-      await recordAudit(
+      await recordAuditOn(
+        repository,
         r.id,
         "delivery",
         "implementation-dispatched",
@@ -1125,7 +1123,6 @@ async function cmdImplement(cwd: string, positional: string[], flags: Record<str
       );
     }
   }
-  await saveState();
 
   let failures = 0;
   for (const r of results) {
@@ -1210,8 +1207,8 @@ async function cmdGithubBranch(cwd: string, positional: string[]): Promise<void>
   const id = Number(idStr);
   if (!Number.isInteger(id)) err(`invalid proposal id '${idStr}'`);
 
-  await ensureLoaded(cwd);
-  const p = getProposal(id);
+  const repository = await ensureLoaded(cwd);
+  const p = getProposalFrom(repository, id);
   if (!p) err(`proposal #${id} not found`);
 
   const configured = await loadGitHubConfigFromStorage(cwd);
@@ -1235,8 +1232,8 @@ async function cmdGithubPr(cwd: string, positional: string[], flags: Record<stri
   const headBranch = typeof flags["head-branch"] === "string" ? flags["head-branch"] : "";
   if (!headBranch) err("--head-branch is required");
 
-  await ensureLoaded(cwd);
-  const p = getProposal(id);
+  const repository = await ensureLoaded(cwd);
+  const p = getProposalFrom(repository, id);
   if (!p) err(`proposal #${id} not found`);
 
   const configured = await loadGitHubConfigFromStorage(cwd);

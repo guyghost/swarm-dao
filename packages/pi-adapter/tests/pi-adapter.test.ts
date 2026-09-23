@@ -9,6 +9,7 @@ import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { DAOState } from "@guyghost/swarm-dao-core";
 
 mock.module("@earendil-works/pi-ai", () => ({
   StringEnum: (values: string[]) => ({
@@ -16,6 +17,40 @@ mock.module("@earendil-works/pi-ai", () => ({
     enum: values,
   }),
 }));
+
+// ── Durable test state ──────────────────────────────────────
+// The adapter owns its repository instance and opens it from disk, so tests
+// seed and read state through the same file store instead of a shared
+// in-memory singleton.
+
+async function openTestRepo() {
+  const { FileDaoStateRepository } = await import("@guyghost/swarm-dao-core");
+  return FileDaoStateRepository.open(process.cwd());
+}
+
+async function readTestState(): Promise<DAOState> {
+  return (await openTestRepo()).get();
+}
+
+async function readTestProposal(proposalId: number) {
+  return (await readTestState()).proposals.find((proposal) => proposal.id === proposalId);
+}
+
+async function seedTestState(mutate: (state: DAOState) => void | Promise<void>): Promise<void> {
+  const repo = await openTestRepo();
+  await mutate(repo.get());
+  await repo.persist();
+}
+
+/** Seed an initialized DAO with the default council, plus any extra state. */
+async function seedInitializedDao(mutate?: (state: DAOState) => void | Promise<void>): Promise<void> {
+  const { initializeAgents } = await import("@guyghost/swarm-dao-core");
+  await seedTestState(async (state) => {
+    state.initialized = true;
+    state.agents = initializeAgents();
+    await mutate?.(state);
+  });
+}
 
 // ── Mock ExtensionAPI ───────────────────────────────────────
 
@@ -193,10 +228,9 @@ describe("swarmDaoExtension", () => {
   });
 
   beforeEach(async () => {
+    const { clearHostToolFileRepos } = await import("@guyghost/swarm-dao-core");
+    clearHostToolFileRepos();
     _mockPi = createMockPi();
-    // Clear any in-memory state from core (module-level `state` variable)
-    const { setState } = await import("@guyghost/swarm-dao-core");
-    setState(null);
     // Clean both storage roots: the external home branch dir and the
     // cwd-relative `.dao` (evidence + legacy sync-path spill, ADR-007).
     for (const root of [DAO_ROOT, EVIDENCE_ROOT]) {
@@ -232,8 +266,6 @@ describe("swarmDaoExtension", () => {
 
   describe("tool registration", () => {
     beforeAll(async () => {
-      const { setState } = await import("@guyghost/swarm-dao-core");
-      setState(null);
       try {
         await fs.rm(DAO_ROOT, { recursive: true, force: true });
       } catch {
@@ -551,12 +583,8 @@ describe("swarmDaoExtension", () => {
     });
 
     it("/dao command returns dashboard when DAO is initialized", async () => {
-      const { initStorage, setState, getOrCreateState, initializeAgents } = await import("@guyghost/swarm-dao-core");
-      await initStorage(process.cwd());
-      const state = getOrCreateState(process.cwd());
-      state.initialized = true;
-      state.agents = initializeAgents();
-      setState(state);
+      await seedInitializedDao();
+      const { agents } = await readTestState();
 
       const mod = await import("../src/index.js");
       const pi = createMockPi();
@@ -568,60 +596,41 @@ describe("swarmDaoExtension", () => {
       const result = commandCtx.rendered();
       // Same rendering as the `dao_dashboard` tool (pipeline + health score).
       expect(result).toContain("# 🏛️ DAO Dashboard");
-      expect(result).toContain(`**Agents:** ${state.agents.length} active`);
+      expect(result).toContain(`**Agents:** ${agents.length} active`);
       expect(result).toContain("# 🏥 DAO Health Score");
     });
 
     it("/dao dashboard health scores agree with configured weights", async () => {
-      const { initStorage, setState, getOrCreateState, initializeAgents } = await import("@guyghost/swarm-dao-core");
-      await initStorage(process.cwd());
-      const state = getOrCreateState(process.cwd());
-      state.initialized = true;
-      state.agents = initializeAgents();
-      // Three executed proposals with 5★ ratings: passRate=100, avgRating=100,
-      // deliberationDepth=0, participation=100.
-      state.proposals = [1, 2, 3].map((id) => ({
-        id,
-        title: `P${id}`,
-        type: "product-feature",
-        description: "d",
-        proposedBy: "t",
-        status: "executed",
-        votes: [],
-        agentOutputs: [],
-      })) as never;
-      state.outcomes = {
-        1: {
-          proposalId: 1,
-          ratings: [{ proposalId: 1, rater: "a", score: 5, comment: "", ratedAt: "" }],
-          metrics: [],
-          overallScore: 5,
-          status: "tracked",
-          createdAt: "",
-          updatedAt: "",
-        },
-        2: {
-          proposalId: 2,
-          ratings: [{ proposalId: 2, rater: "a", score: 5, comment: "", ratedAt: "" }],
-          metrics: [],
-          overallScore: 5,
-          status: "tracked",
-          createdAt: "",
-          updatedAt: "",
-        },
-        3: {
-          proposalId: 3,
-          ratings: [{ proposalId: 3, rater: "a", score: 5, comment: "", ratedAt: "" }],
-          metrics: [],
-          overallScore: 5,
-          status: "tracked",
-          createdAt: "",
-          updatedAt: "",
-        },
-      } as never;
-      // Weights that would yield a different score than the 25/25/25/25 defaults.
-      state.config.healthWeights = { passRate: 100, avgRating: 0, deliberationDepth: 0, participation: 0 };
-      setState(state);
+      await seedInitializedDao((state) => {
+        // Three executed proposals with 5★ ratings: passRate=100, avgRating=100,
+        // deliberationDepth=0, participation=100.
+        state.proposals = [1, 2, 3].map((id) => ({
+          id,
+          title: `P${id}`,
+          type: "product-feature",
+          description: "d",
+          proposedBy: "t",
+          status: "executed",
+          votes: [],
+          agentOutputs: [],
+        })) as never;
+        state.outcomes = Object.fromEntries(
+          [1, 2, 3].map((id) => [
+            id,
+            {
+              proposalId: id,
+              ratings: [{ proposalId: id, rater: "a", score: 5, comment: "", ratedAt: "" }],
+              metrics: [],
+              overallScore: 5,
+              status: "tracked",
+              createdAt: "",
+              updatedAt: "",
+            },
+          ]),
+        ) as never;
+        // Weights that would yield a different score than the 25/25/25/25 defaults.
+        state.config.healthWeights = { passRate: 100, avgRating: 0, deliberationDepth: 0, participation: 0 };
+      });
 
       const mod = await import("../src/index.js");
       const pi = createMockPi();
@@ -656,12 +665,7 @@ describe("swarmDaoExtension", () => {
     });
 
     it("/dao <known command> executes the matching tool logic", async () => {
-      const { initStorage, setState, getOrCreateState, initializeAgents } = await import("@guyghost/swarm-dao-core");
-      await initStorage(process.cwd());
-      const state = getOrCreateState(process.cwd());
-      state.initialized = true;
-      state.agents = initializeAgents();
-      setState(state);
+      await seedInitializedDao();
 
       const mod = await import("../src/index.js");
       const pi = createMockPi();
@@ -678,12 +682,7 @@ describe("swarmDaoExtension", () => {
     });
 
     it("/dao list renders the proposal list inline", async () => {
-      const { initStorage, setState, getOrCreateState, initializeAgents } = await import("@guyghost/swarm-dao-core");
-      await initStorage(process.cwd());
-      const state = getOrCreateState(process.cwd());
-      state.initialized = true;
-      state.agents = initializeAgents();
-      setState(state);
+      await seedInitializedDao();
 
       const mod = await import("../src/index.js");
       const pi = createMockPi();
@@ -697,12 +696,7 @@ describe("swarmDaoExtension", () => {
     });
 
     it("/dao control executes the dao_check tool logic (Pi-specific override)", async () => {
-      const { initStorage, setState, getOrCreateState, initializeAgents } = await import("@guyghost/swarm-dao-core");
-      await initStorage(process.cwd());
-      const state = getOrCreateState(process.cwd());
-      state.initialized = true;
-      state.agents = initializeAgents();
-      setState(state);
+      await seedInitializedDao();
 
       const mod = await import("../src/index.js");
       const pi = createMockPi();
@@ -717,12 +711,7 @@ describe("swarmDaoExtension", () => {
     });
 
     it("/dao check alias also executes the dao_check tool logic", async () => {
-      const { initStorage, setState, getOrCreateState, initializeAgents } = await import("@guyghost/swarm-dao-core");
-      await initStorage(process.cwd());
-      const state = getOrCreateState(process.cwd());
-      state.initialized = true;
-      state.agents = initializeAgents();
-      setState(state);
+      await seedInitializedDao();
 
       const mod = await import("../src/index.js");
       const pi = createMockPi();
@@ -738,14 +727,7 @@ describe("swarmDaoExtension", () => {
     it("/dao roundtable executes the tool and fails closed without canned proposals", async () => {
       const previousSpawn = process.env.SWARM_DAO_DISABLE_PI_SPAWN;
       process.env.SWARM_DAO_DISABLE_PI_SPAWN = "1";
-      const { initStorage, setState, getOrCreateState, initializeAgents, getState } = await import(
-        "@guyghost/swarm-dao-core"
-      );
-      await initStorage(process.cwd());
-      const state = getOrCreateState(process.cwd());
-      state.initialized = true;
-      state.agents = initializeAgents();
-      setState(state);
+      await seedInitializedDao();
 
       const mod = await import("../src/index.js");
       const pi = createMockPi();
@@ -758,7 +740,7 @@ describe("swarmDaoExtension", () => {
         const result = commandCtx.rendered();
         expect(result).toContain("# 🎯 Round Table Results");
         expect(result).not.toContain("## Vote");
-        expect(getState().proposals.length).toBe(0);
+        expect((await readTestState()).proposals.length).toBe(0);
       } finally {
         if (previousSpawn === undefined) delete process.env.SWARM_DAO_DISABLE_PI_SPAWN;
         else process.env.SWARM_DAO_DISABLE_PI_SPAWN = previousSpawn;
@@ -766,14 +748,7 @@ describe("swarmDaoExtension", () => {
     });
 
     it("/dao propose executes the propose tool with quoted arguments", async () => {
-      const { initStorage, setState, getOrCreateState, initializeAgents, getState } = await import(
-        "@guyghost/swarm-dao-core"
-      );
-      await initStorage(process.cwd());
-      const state = getOrCreateState(process.cwd());
-      state.initialized = true;
-      state.agents = initializeAgents();
-      setState(state);
+      await seedInitializedDao();
 
       const mod = await import("../src/index.js");
       const pi = createMockPi();
@@ -788,16 +763,11 @@ describe("swarmDaoExtension", () => {
       const result = commandCtx.rendered();
       expect(result).toContain("# 📋 Proposal Created");
       expect(result).toContain("Fix login flow");
-      expect(getState().proposals[0]?.title).toBe("Fix login flow");
+      expect((await readTestState()).proposals[0]?.title).toBe("Fix login flow");
     });
 
     it("/dao propose rejects an invalid proposal type", async () => {
-      const { initStorage, setState, getOrCreateState, initializeAgents } = await import("@guyghost/swarm-dao-core");
-      await initStorage(process.cwd());
-      const state = getOrCreateState(process.cwd());
-      state.initialized = true;
-      state.agents = initializeAgents();
-      setState(state);
+      await seedInitializedDao();
 
       const mod = await import("../src/index.js");
       const pi = createMockPi();
@@ -812,12 +782,7 @@ describe("swarmDaoExtension", () => {
     });
 
     it("/dao ship without a proposal id shows usage", async () => {
-      const { initStorage, setState, getOrCreateState, initializeAgents } = await import("@guyghost/swarm-dao-core");
-      await initStorage(process.cwd());
-      const state = getOrCreateState(process.cwd());
-      state.initialized = true;
-      state.agents = initializeAgents();
-      setState(state);
+      await seedInitializedDao();
 
       const mod = await import("../src/index.js");
       const pi = createMockPi();
@@ -832,32 +797,28 @@ describe("swarmDaoExtension", () => {
     });
 
     it("/dao audit <proposalId> scopes the audit trail", async () => {
-      const { initStorage, setState, getOrCreateState, initializeAgents } = await import("@guyghost/swarm-dao-core");
-      await initStorage(process.cwd());
-      const state = getOrCreateState(process.cwd());
-      state.initialized = true;
-      state.agents = initializeAgents();
-      state.auditLog = [
-        {
-          id: 1,
-          timestamp: "2025-01-01T00:00:00.000Z",
-          proposalId: 1,
-          layer: "governance",
-          action: "action_one",
-          actor: "tester",
-          details: "p1",
-        },
-        {
-          id: 2,
-          timestamp: "2025-01-01T00:00:00.000Z",
-          proposalId: 2,
-          layer: "governance",
-          action: "action_two",
-          actor: "tester",
-          details: "p2",
-        },
-      ];
-      setState(state);
+      await seedInitializedDao((state) => {
+        state.auditLog = [
+          {
+            id: 1,
+            timestamp: "2025-01-01T00:00:00.000Z",
+            proposalId: 1,
+            layer: "governance",
+            action: "action_one",
+            actor: "tester",
+            details: "p1",
+          },
+          {
+            id: 2,
+            timestamp: "2025-01-01T00:00:00.000Z",
+            proposalId: 2,
+            layer: "governance",
+            action: "action_two",
+            actor: "tester",
+            details: "p2",
+          },
+        ];
+      });
 
       const mod = await import("../src/index.js");
       const pi = createMockPi();
@@ -873,23 +834,19 @@ describe("swarmDaoExtension", () => {
     });
 
     it("/dao audit without args shows the full audit log", async () => {
-      const { initStorage, setState, getOrCreateState, initializeAgents } = await import("@guyghost/swarm-dao-core");
-      await initStorage(process.cwd());
-      const state = getOrCreateState(process.cwd());
-      state.initialized = true;
-      state.agents = initializeAgents();
-      state.auditLog = [
-        {
-          id: 1,
-          timestamp: "2025-01-01T00:00:00.000Z",
-          proposalId: 1,
-          layer: "governance",
-          action: "action_one",
-          actor: "tester",
-          details: "p1",
-        },
-      ];
-      setState(state);
+      await seedInitializedDao((state) => {
+        state.auditLog = [
+          {
+            id: 1,
+            timestamp: "2025-01-01T00:00:00.000Z",
+            proposalId: 1,
+            layer: "governance",
+            action: "action_one",
+            actor: "tester",
+            details: "p1",
+          },
+        ];
+      });
 
       const mod = await import("../src/index.js");
       const pi = createMockPi();
@@ -904,12 +861,7 @@ describe("swarmDaoExtension", () => {
     });
 
     it("/dao audit rejects a non-numeric proposal id", async () => {
-      const { initStorage, setState, getOrCreateState, initializeAgents } = await import("@guyghost/swarm-dao-core");
-      await initStorage(process.cwd());
-      const state = getOrCreateState(process.cwd());
-      state.initialized = true;
-      state.agents = initializeAgents();
-      setState(state);
+      await seedInitializedDao();
 
       const mod = await import("../src/index.js");
       const pi = createMockPi();
@@ -940,12 +892,7 @@ describe("swarmDaoExtension", () => {
     });
 
     it("/dao ship parses cascade/force flags and executes", async () => {
-      const { initStorage, setState, getOrCreateState, initializeAgents } = await import("@guyghost/swarm-dao-core");
-      await initStorage(process.cwd());
-      const state = getOrCreateState(process.cwd());
-      state.initialized = true;
-      state.agents = initializeAgents();
-      setState(state);
+      await seedInitializedDao();
 
       const mod = await import("../src/index.js");
       const pi = createMockPi();
@@ -961,12 +908,7 @@ describe("swarmDaoExtension", () => {
     });
 
     it("/dao rejects unknown subcommands", async () => {
-      const { initStorage, setState, getOrCreateState, initializeAgents } = await import("@guyghost/swarm-dao-core");
-      await initStorage(process.cwd());
-      const state = getOrCreateState(process.cwd());
-      state.initialized = true;
-      state.agents = initializeAgents();
-      setState(state);
+      await seedInitializedDao();
 
       const mod = await import("../src/index.js");
       const pi = createMockPi();
@@ -1028,9 +970,7 @@ describe("swarmDaoExtension", () => {
       const stat = await fs.stat(DAO_ROOT);
       expect(stat.isDirectory()).toBe(true);
 
-      // State should be accessible
-      const { getState } = await import("@guyghost/swarm-dao-core");
-      const state = getState();
+      const state = await readTestState();
       expect(state).toBeDefined();
       expect(state.initialized).toBe(false);
     });
@@ -1055,16 +995,19 @@ describe("swarmDaoExtension", () => {
       mod.default(asExtensionAPI(pi));
 
       const handler = requireEventHandler(pi, "session_start");
-      // First open succeeds and selects the core repository.
+      // First open succeeds and selects the session repository.
       await handler({}, {});
-      const { getState } = await import("@guyghost/swarm-dao-core");
-      expect(() => getState()).not.toThrow();
+      expect((await fs.stat(DAO_ROOT)).isDirectory()).toBe(true);
 
       // Corrupt the state file: the failed reopen must deselect the stale
       // repository instead of silently serving the previous session's state.
       await fs.writeFile(path.join(DAO_ROOT, "state.json"), "{ not valid json", "utf8");
       await handler({}, {});
-      expect(() => getState()).toThrow();
+      // biome-ignore lint/style/noNonNullAssertion: tool registered above
+      const help = pi.tools.find((candidate) => candidate.name === "dao_help")!;
+      const helpResult = await help.execute("1", {});
+      const helpText = helpResult.content?.[0]?.text ?? JSON.stringify(helpResult);
+      expect(helpText.toLowerCase()).toContain("not initialized");
     });
   });
 
@@ -1076,14 +1019,8 @@ describe("swarmDaoExtension", () => {
       const pi = createMockPi();
       mod.default(asExtensionAPI(pi));
 
-      // Simulate what session_start would do: create state so getState() works
-      // but leave initialized=false to test the uninitialized path
-      const { initStorage, setState, getOrCreateState } = await import("@guyghost/swarm-dao-core");
-      await initStorage(process.cwd());
-      const state = getOrCreateState(process.cwd());
-      state.initialized = false;
-      setState(state);
-
+      // Nothing seeded: the handler opens a fresh repository whose state is
+      // readable but uninitialized, which is the path under test.
       const handler = requireEventHandler(pi, "before_agent_start");
       const result = await handler({ systemPrompt: "You are an AI assistant." }, {});
 
@@ -1094,10 +1031,10 @@ describe("swarmDaoExtension", () => {
     });
 
     it("does not throw when storage is unavailable", async () => {
-      // getState() throws when no repository was opened (e.g. session_start
-      // failed on a corrupt state file). The handler must degrade gracefully.
-      const { setState } = await import("@guyghost/swarm-dao-core");
-      setState(null);
+      // Opening the repository fails on a corrupt state file, so the handler
+      // has no state at all. It must degrade to the minimal prompt.
+      await fs.mkdir(DAO_ROOT, { recursive: true });
+      await fs.writeFile(path.join(DAO_ROOT, "state.json"), "{ not valid json", "utf8");
 
       const mod = await import("../src/index.js");
       const pi = createMockPi();
@@ -1108,12 +1045,7 @@ describe("swarmDaoExtension", () => {
     });
 
     it("injects an Available tools list that matches the registered tools", async () => {
-      const { initStorage, setState, getOrCreateState, initializeAgents } = await import("@guyghost/swarm-dao-core");
-      await initStorage(process.cwd());
-      const state = getOrCreateState(process.cwd());
-      state.initialized = true;
-      state.agents = initializeAgents();
-      setState(state);
+      await seedInitializedDao();
 
       const mod = await import("../src/index.js");
       const pi = createMockPi();
@@ -1135,14 +1067,8 @@ describe("swarmDaoExtension", () => {
     });
 
     it("appends agent info and open proposals to system prompt when DAO is initialized", async () => {
-      // Set up an initialized state
-      const { initStorage, setState, getOrCreateState, initializeAgents } = await import("@guyghost/swarm-dao-core");
-
-      const _daoRoot = await initStorage(process.cwd());
-      const state = getOrCreateState(process.cwd());
-      state.initialized = true;
-      state.agents = initializeAgents();
-      setState(state);
+      await seedInitializedDao();
+      const { agents } = await readTestState();
 
       const mod = await import("../src/index.js");
       const pi = createMockPi();
@@ -1154,11 +1080,9 @@ describe("swarmDaoExtension", () => {
       expect(result).toBeDefined();
       expect(result.systemPrompt).toContain("Swarm DAO Status");
       expect(result.systemPrompt).toContain("Active agents:");
-      expect(
-        state.agents.forEach((agent) => {
-          expect(result.systemPrompt).toContain(agent.name);
-        }),
-      );
+      for (const agent of agents) {
+        expect(result.systemPrompt).toContain(agent.name);
+      }
     });
   });
 
@@ -1166,13 +1090,6 @@ describe("swarmDaoExtension", () => {
 
   describe("dao_setup tool", () => {
     it("initializes DAO with default agents and returns agent table", async () => {
-      // Pre-initialize state so getState() doesn't throw
-      const { initStorage, setState, getOrCreateState } = await import("@guyghost/swarm-dao-core");
-      await initStorage(process.cwd());
-      const state = getOrCreateState(process.cwd());
-      state.initialized = false;
-      setState(state);
-
       const mod = await import("../src/index.js");
       const pi = createMockPi();
       mod.default(asExtensionAPI(pi));
@@ -1189,19 +1106,13 @@ describe("swarmDaoExtension", () => {
       expect(text).toContain("Product Strategist");
 
       // Verify state is now initialized
-      const { getState } = await import("@guyghost/swarm-dao-core");
-      const updatedState = getState();
+      const updatedState = await readTestState();
       expect(updatedState.initialized).toBe(true);
       expect(updatedState.agents.length).toBeGreaterThan(0);
     });
 
     it("returns already-initialized message when DAO is already set up", async () => {
-      const { initStorage, setState, getOrCreateState, initializeAgents } = await import("@guyghost/swarm-dao-core");
-      await initStorage(process.cwd());
-      const state = getOrCreateState(process.cwd());
-      state.initialized = true;
-      state.agents = initializeAgents();
-      setState(state);
+      await seedInitializedDao();
 
       const mod = await import("../src/index.js");
       const pi = createMockPi();
@@ -1221,12 +1132,7 @@ describe("swarmDaoExtension", () => {
 
   describe("github tools", () => {
     it("dao_config_github stores the configuration and confirms", async () => {
-      const { initStorage, setState, getOrCreateState, initializeAgents } = await import("@guyghost/swarm-dao-core");
-      await initStorage(process.cwd());
-      const state = getOrCreateState(process.cwd());
-      state.initialized = true;
-      state.agents = initializeAgents();
-      setState(state);
+      await seedInitializedDao();
 
       const mod = await import("../src/index.js");
       const pi = createMockPi();
@@ -1242,22 +1148,18 @@ describe("swarmDaoExtension", () => {
     });
 
     it("dao_github_create_branch reports clearly when GitHub is not configured", async () => {
-      const { initStorage, setState, getOrCreateState, initializeAgents } = await import("@guyghost/swarm-dao-core");
-      await initStorage(process.cwd());
-      const state = getOrCreateState(process.cwd());
-      state.initialized = true;
-      state.agents = initializeAgents();
-      state.proposals.push({
-        id: state.nextProposalId++,
-        title: "Branch Feature",
-        type: "product-feature",
-        description: "d",
-        proposedBy: "pi-test",
-        status: "open",
-        votes: [],
-        agentOutputs: [],
-      } as never);
-      setState(state);
+      await seedInitializedDao((state) => {
+        state.proposals.push({
+          id: state.nextProposalId++,
+          title: "Branch Feature",
+          type: "product-feature",
+          description: "d",
+          proposedBy: "pi-test",
+          status: "open",
+          votes: [],
+          agentOutputs: [],
+        } as never);
+      });
 
       const mod = await import("../src/index.js");
       const pi = createMockPi();
@@ -1274,13 +1176,7 @@ describe("swarmDaoExtension", () => {
 
   describe("dao_propose tool", () => {
     it("rejects proposal creation when DAO is not initialized", async () => {
-      // Set up state that exists but is not initialized
-      const { initStorage, setState, getOrCreateState } = await import("@guyghost/swarm-dao-core");
-      await initStorage(process.cwd());
-      const state = getOrCreateState(process.cwd());
-      state.initialized = false;
-      setState(state);
-
+      // Nothing seeded: storage opens cleanly but the DAO was never set up.
       const mod = await import("../src/index.js");
       const pi = createMockPi();
       mod.default(asExtensionAPI(pi));
@@ -1299,12 +1195,7 @@ describe("swarmDaoExtension", () => {
     });
 
     it("creates a proposal successfully when DAO is initialized", async () => {
-      const { initStorage, setState, getOrCreateState, initializeAgents } = await import("@guyghost/swarm-dao-core");
-      await initStorage(process.cwd());
-      const state = getOrCreateState(process.cwd());
-      state.initialized = true;
-      state.agents = initializeAgents();
-      setState(state);
+      await seedInitializedDao();
 
       const mod = await import("../src/index.js");
       const pi = createMockPi();
@@ -1326,14 +1217,7 @@ describe("swarmDaoExtension", () => {
     });
 
     it("stores affectedPaths on the proposal when provided", async () => {
-      const { initStorage, setState, getOrCreateState, initializeAgents, getProposal } = await import(
-        "@guyghost/swarm-dao-core"
-      );
-      await initStorage(process.cwd());
-      const state = getOrCreateState(process.cwd());
-      state.initialized = true;
-      state.agents = initializeAgents();
-      setState(state);
+      await seedInitializedDao();
 
       const mod = await import("../src/index.js");
       const pi = createMockPi();
@@ -1348,21 +1232,14 @@ describe("swarmDaoExtension", () => {
         affectedPaths: ["packages/core/src/index.ts", "packages/core/src/types.ts"],
       });
 
-      const proposal = getProposal(1);
+      const proposal = await readTestProposal(1);
       expect(proposal).toBeDefined();
       // biome-ignore lint/suspicious/noExplicitAny: accessing dynamic field on proposal
       expect((proposal as any).affectedPaths).toEqual(["packages/core/src/index.ts", "packages/core/src/types.ts"]);
     });
 
     it("assigns explicit empty array for acceptanceCriteria (not skipped by truthy check)", async () => {
-      const { initStorage, setState, getOrCreateState, initializeAgents, getProposal } = await import(
-        "@guyghost/swarm-dao-core"
-      );
-      await initStorage(process.cwd());
-      const state = getOrCreateState(process.cwd());
-      state.initialized = true;
-      state.agents = initializeAgents();
-      setState(state);
+      await seedInitializedDao();
 
       const mod = await import("../src/index.js");
       const pi = createMockPi();
@@ -1377,21 +1254,14 @@ describe("swarmDaoExtension", () => {
         acceptanceCriteria: [],
       });
 
-      const proposal = getProposal(1);
+      const proposal = await readTestProposal(1);
       expect(proposal).toBeDefined();
       // biome-ignore lint/suspicious/noExplicitAny: accessing dynamic field on proposal
       expect((proposal as any).acceptanceCriteria).toEqual([]);
     });
 
     it("does NOT assign problemStatement when parameter is omitted", async () => {
-      const { initStorage, setState, getOrCreateState, initializeAgents, getProposal } = await import(
-        "@guyghost/swarm-dao-core"
-      );
-      await initStorage(process.cwd());
-      const state = getOrCreateState(process.cwd());
-      state.initialized = true;
-      state.agents = initializeAgents();
-      setState(state);
+      await seedInitializedDao();
 
       const mod = await import("../src/index.js");
       const pi = createMockPi();
@@ -1405,7 +1275,7 @@ describe("swarmDaoExtension", () => {
         description: "Testing omitted problemStatement",
       });
 
-      const proposal = getProposal(1);
+      const proposal = await readTestProposal(1);
       expect(proposal).toBeDefined();
       // biome-ignore lint/suspicious/noExplicitAny: accessing dynamic field on proposal
       expect((proposal as any).problemStatement).toBeUndefined();
@@ -1416,13 +1286,8 @@ describe("swarmDaoExtension", () => {
 
   describe("dao_deliberate tool", () => {
     it("fails closed on spawn failure without a vote-parseable body", async () => {
-      const { initStorage, setState, getOrCreateState, initializeAgents, getProposal, parseVoteFromOutput } =
-        await import("@guyghost/swarm-dao-core");
-      await initStorage(process.cwd());
-      const state = getOrCreateState(process.cwd());
-      state.initialized = true;
-      state.agents = initializeAgents();
-      setState(state);
+      const { parseVoteFromOutput } = await import("@guyghost/swarm-dao-core");
+      await seedInitializedDao();
 
       const mod = await import("../src/index.js");
       const pi = createMockPi();
@@ -1445,7 +1310,7 @@ describe("swarmDaoExtension", () => {
       expect(text).toContain("Votes Cast:** 0 /");
       expect(text).toContain("Errors:** 8");
 
-      const proposal = getProposal(1);
+      const proposal = await readTestProposal(1);
       expect(proposal?.votes.length).toBe(0);
       for (const output of proposal?.agentOutputs ?? []) {
         expect(output.error).toBeTruthy();
@@ -1457,17 +1322,8 @@ describe("swarmDaoExtension", () => {
   // ── dao_update_proposal tool ────────────────────────────
 
   describe("dao_update_proposal tool", () => {
-    async function setupDao() {
-      const { initStorage, setState, getOrCreateState, initializeAgents } = await import("@guyghost/swarm-dao-core");
-      await initStorage(process.cwd());
-      const state = getOrCreateState(process.cwd());
-      state.initialized = true;
-      state.agents = initializeAgents();
-      setState(state);
-    }
-
     async function createOpenProposal(): Promise<MockPi> {
-      await setupDao();
+      await seedInitializedDao();
       const mod = await import("../src/index.js");
       const pi = createMockPi();
       mod.default(asExtensionAPI(pi));
@@ -1487,7 +1343,6 @@ describe("swarmDaoExtension", () => {
     }
 
     it("correctly assigns an empty string to problemStatement (not skipped by truthy check)", async () => {
-      const { getProposal } = await import("@guyghost/swarm-dao-core");
       const pi = await createOpenProposal();
 
       // biome-ignore lint/style/noNonNullAssertion: test expects tool to be registered
@@ -1497,14 +1352,13 @@ describe("swarmDaoExtension", () => {
         problemStatement: "",
       });
 
-      const proposal = getProposal(1);
+      const proposal = await readTestProposal(1);
       expect(proposal).toBeDefined();
       // biome-ignore lint/suspicious/noExplicitAny: accessing dynamic field on proposal
       expect((proposal as any).problemStatement).toBe("");
     });
 
     it("correctly assigns an empty array to acceptanceCriteria (not skipped by truthy check)", async () => {
-      const { getProposal } = await import("@guyghost/swarm-dao-core");
       const pi = await createOpenProposal();
 
       // biome-ignore lint/style/noNonNullAssertion: test expects tool to be registered
@@ -1514,14 +1368,14 @@ describe("swarmDaoExtension", () => {
         acceptanceCriteria: [],
       });
 
-      const proposal = getProposal(1);
+      const proposal = await readTestProposal(1);
       expect(proposal).toBeDefined();
       // biome-ignore lint/suspicious/noExplicitAny: accessing dynamic field on proposal
       expect((proposal as any).acceptanceCriteria).toEqual([]);
     });
 
     it("rejects when proposal does not exist", async () => {
-      await setupDao();
+      await seedInitializedDao();
       const mod = await import("../src/index.js");
       const pi = createMockPi();
       mod.default(asExtensionAPI(pi));
@@ -1539,13 +1393,16 @@ describe("swarmDaoExtension", () => {
     });
 
     it("rejects when proposal is not open", async () => {
-      const { getProposal, dispatchProposalEvent } = await import("@guyghost/swarm-dao-core");
+      const { dispatchProposalEvent } = await import("@guyghost/swarm-dao-core");
       const pi = await createOpenProposal();
 
-      // Move proposal out of open status
-      const proposal = getProposal(1);
-      // biome-ignore lint/style/noNonNullAssertion: proposal was just created
-      dispatchProposalEvent(proposal!, { type: "DELIBERATE" });
+      // Move the proposal out of "open" on disk, then reopen the session so
+      // the adapter's repository serves the new status.
+      await seedTestState((state) => {
+        // biome-ignore lint/style/noNonNullAssertion: proposal was just created
+        dispatchProposalEvent(state.proposals.find((candidate) => candidate.id === 1)!, { type: "DELIBERATE" });
+      });
+      await requireEventHandler(pi, "session_start")({}, {});
 
       // biome-ignore lint/style/noNonNullAssertion: test expects tool to be registered
       const updateTool = pi.tools.find((t) => t.name === "dao_update_proposal")!;
@@ -1564,12 +1421,7 @@ describe("swarmDaoExtension", () => {
 
   describe("dao_dashboard tool", () => {
     it("rejects when DAO is not initialized", async () => {
-      const { initStorage, setState, getOrCreateState } = await import("@guyghost/swarm-dao-core");
-      await initStorage(process.cwd());
-      const state = getOrCreateState(process.cwd());
-      state.initialized = false;
-      setState(state);
-
+      // Nothing seeded: storage opens cleanly but the DAO was never set up.
       const mod = await import("../src/index.js");
       const pi = createMockPi();
       mod.default(asExtensionAPI(pi));
@@ -1587,20 +1439,8 @@ describe("swarmDaoExtension", () => {
 
     describe("dao_ship tool", () => {
       it("ships a controlled proposal", async () => {
-        const {
-          initStorage,
-          setState,
-          getOrCreateState,
-          initializeAgents,
-          getProposal,
-          dispatchProposalEvent,
-          DEFAULT_CONFIG,
-        } = await import("@guyghost/swarm-dao-core");
-        await initStorage(process.cwd());
-        const state = getOrCreateState(process.cwd());
-        state.initialized = true;
-        state.agents = initializeAgents();
-        setState(state);
+        const { dispatchProposalEvent, DEFAULT_CONFIG } = await import("@guyghost/swarm-dao-core");
+        await seedInitializedDao();
 
         const mod = await import("../src/index.js");
         const pi = createMockPi();
@@ -1614,53 +1454,57 @@ describe("swarmDaoExtension", () => {
           description: "Validate dao_ship",
         });
 
-        const proposal = getProposal(1);
-        expect(proposal).toBeDefined();
-        // Guarded events recompute the decision (issue #158): real votes + config.
-        proposal!.votes = [
-          { agentId: "a", agentName: "A", position: "for", reasoning: "ok", weight: 1 },
-          { agentId: "b", agentName: "B", position: "for", reasoning: "ok", weight: 1 },
-        ];
-        // biome-ignore lint/style/noNonNullAssertion: created in previous step
-        dispatchProposalEvent(proposal!, { type: "DELIBERATE" });
-        // biome-ignore lint/style/noNonNullAssertion: proposal status transition
-        dispatchProposalEvent(
-          proposal!,
-          {
-            type: "APPROVE",
-            tally: {
-              proposalId: 1,
-              approved: true,
-              quorumMet: true,
-              totalAgents: 5,
-              votingAgents: 5,
-              quorumPercent: 100,
-              weightedFor: 10,
-              weightedAgainst: 0,
-              totalVotingWeight: 10,
-              approvalScore: 100,
-              votes: [],
+        // Drive the proposal to "controlled" on disk, then reopen the session
+        // so the adapter's repository serves the transitioned proposal.
+        await seedTestState((state) => {
+          const proposal = state.proposals.find((candidate) => candidate.id === 1);
+          expect(proposal).toBeDefined();
+          // biome-ignore lint/style/noNonNullAssertion: created by dao_propose above
+          const created = proposal!;
+          // Guarded events recompute the decision (issue #158): real votes + config.
+          created.votes = [
+            { agentId: "a", agentName: "A", position: "for", reasoning: "ok", weight: 1 },
+            { agentId: "b", agentName: "B", position: "for", reasoning: "ok", weight: 1 },
+          ];
+          dispatchProposalEvent(created, { type: "DELIBERATE" });
+          dispatchProposalEvent(
+            created,
+            {
+              type: "APPROVE",
+              tally: {
+                proposalId: 1,
+                approved: true,
+                quorumMet: true,
+                totalAgents: 5,
+                votingAgents: 5,
+                quorumPercent: 100,
+                weightedFor: 10,
+                weightedAgainst: 0,
+                totalVotingWeight: 10,
+                approvalScore: 100,
+                votes: [],
+              },
             },
-          },
-          { config: DEFAULT_CONFIG },
-        );
-        // biome-ignore lint/style/noNonNullAssertion: proposal status transition
-        dispatchProposalEvent(
-          proposal!,
-          {
-            type: "CONTROL_PASS",
-            result: {
-              proposalId: 1,
-              timestamp: new Date().toISOString(),
-              allGatesPassed: true,
-              blockerCount: 0,
-              warningCount: 0,
-              gates: [],
-              checklist: [],
+            { config: DEFAULT_CONFIG },
+          );
+          dispatchProposalEvent(
+            created,
+            {
+              type: "CONTROL_PASS",
+              result: {
+                proposalId: 1,
+                timestamp: new Date().toISOString(),
+                allGatesPassed: true,
+                blockerCount: 0,
+                warningCount: 0,
+                gates: [],
+                checklist: [],
+              },
             },
-          },
-          { config: DEFAULT_CONFIG },
-        );
+            { config: DEFAULT_CONFIG },
+          );
+        });
+        await requireEventHandler(pi, "session_start")({}, {});
 
         // biome-ignore lint/style/noNonNullAssertion: test expects tool to be registered
         const shipTool = pi.tools.find((t) => t.name === "dao_ship")!;
@@ -1670,7 +1514,7 @@ describe("swarmDaoExtension", () => {
         const text = result.content[0]?.text ?? "";
         expect(text).toContain("Ship Complete");
         expect(text).toContain("#1");
-        expect(getProposal(1)?.status).toBe("executed");
+        expect((await readTestProposal(1))?.status).toBe("executed");
       });
     });
   });

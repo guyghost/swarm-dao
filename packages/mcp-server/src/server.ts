@@ -38,7 +38,6 @@ import {
   handleDaoUpdateProposal,
   PROPOSAL_TYPES,
   resolveContainedRoot,
-  setRepository,
 } from "@guyghost/swarm-dao-core";
 import { createGraphRunner, GRAPH_AI_EVENT_TYPES, submitAiGraphSignal } from "@guyghost/swarm-dao-graph";
 import { advanceSeriesOnce, OrchestratorRunner } from "@guyghost/swarm-dao-improvement";
@@ -114,9 +113,7 @@ function parseRunSubmitArgs(args: Record<string, unknown>): RunSubmitArgs {
 }
 
 export async function ensureDaoStorage(workDir: string): Promise<DaoStateRepositoryPort> {
-  const repository = await FileDaoStateRepository.open(workDir);
-  setRepository(repository);
-  return repository;
+  return FileDaoStateRepository.open(workDir);
 }
 
 export function createSwarmDaoMcpServer(workDir = resolveDaoRoot(), repository?: DaoStateRepositoryPort): Server {

@@ -4,7 +4,7 @@
 
 import { dispatchProposalEvent } from "../governance/proposal.utils.js";
 import { recordProposalExecuted } from "../observability/metrics.js";
-import { captureSnapshot, getState, storeVerification } from "../persistence.js";
+import type { DaoStateRepositoryPort } from "../ports/repository.js";
 import type { ExecutionSnapshot, ExecutionVerification, Proposal, VerificationStatus } from "../types/index.js";
 import { generateDeliveryPlan } from "./plans.js";
 
@@ -35,8 +35,11 @@ export function validateProposalQuality(proposal: Proposal): ProposalQualityVali
   return { valid: missing.length === 0, missing };
 }
 
-export async function executeProposal(proposal: Proposal): Promise<ExecutionResult> {
-  const state = getState();
+export async function executeProposal(
+  proposal: Proposal,
+  repository: DaoStateRepositoryPort,
+): Promise<ExecutionResult> {
+  const state = repository.get();
 
   // Generate or retrieve delivery plan
   let plan = state.deliveryPlans[proposal.id];
@@ -61,7 +64,8 @@ export async function executeProposal(proposal: Proposal): Promise<ExecutionResu
       proposals: state.proposals?.length ?? 0,
     }),
   };
-  await captureSnapshot(proposal.id, snapshot);
+  state.snapshots[proposal.id] = snapshot;
+  await repository.persist();
 
   // Advance state machine: controlled → executed
   const transition = dispatchProposalEvent(proposal, { type: "EXECUTE_SUCCESS" });
@@ -95,7 +99,9 @@ export async function verifyExecution(
     compilationOk?: boolean;
     gitClean?: boolean;
   },
+  repository: DaoStateRepositoryPort,
 ): Promise<ExecutionVerification> {
+  const state = repository.get();
   const missingFiles = options.expectedFiles?.filter((f) => !options.filesChanged.includes(f)) ?? [];
 
   let status: VerificationStatus = "success";
@@ -117,7 +123,8 @@ export async function verifyExecution(
     summary: `Verification ${status}: ${options.filesChanged.length} files changed, ${missingFiles.length} missing, tests ${options.testsPassed ?? 0}/${(options.testsPassed ?? 0) + (options.testsFailed ?? 0)}`,
   };
 
-  await storeVerification(proposal.id, verification);
+  state.verifications[proposal.id] = verification;
+  await repository.persist();
   return verification;
 }
 

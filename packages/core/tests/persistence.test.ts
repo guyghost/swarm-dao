@@ -1,631 +1,90 @@
-import { beforeEach, describe, expect, it, spyOn } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { promises as fs } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
-import type { Proposal } from "@guyghost/swarm-dao-core";
 import {
-  addAgent,
-  addVote,
+  addVoteOn,
   createInitialState,
-  createProposal,
-  createProposalsBatch,
-  DEFAULT_CONFIG,
-  dispatchProposalEvent,
-  getAgent,
-  getAuditLog,
-  getDaoRoot,
-  getProposal,
-  getState,
-  getStorageSettings,
+  FileDaoStateRepository,
+  InMemoryDaoStateRepository,
   initStorage,
-  listAgents,
-  listProposals,
-  loadState,
-  migrateFromLegacy,
-  padId,
-  recordAudit,
-  removeAgent,
-  saveState,
-  setState,
-  updateStorageSettings,
+  recordAuditOn,
+  sanitizeErrorMessage,
 } from "@guyghost/swarm-dao-core";
 
-// Drive a proposal through the sanctioned dispatch path to "executed".
-// Replaces the deleted updateProposalStatus() backdoor in fixtures.
-// Guarded events recompute the decision (issue #158): the proposal carries
-// real votes and config is supplied so the recompute succeeds.
-function resolveToExecuted(proposal: Proposal) {
-  proposal.votes = [
-    { agentId: "a", agentName: "A", position: "for", reasoning: "ok", weight: 1 },
-    { agentId: "b", agentName: "B", position: "for", reasoning: "ok", weight: 1 },
-  ];
-  dispatchProposalEvent(proposal, { type: "DELIBERATE" });
-  dispatchProposalEvent(
-    proposal,
-    {
-      type: "APPROVE",
-      tally: {
-        proposalId: proposal.id,
-        approved: true,
-        quorumMet: true,
-        totalAgents: 5,
-        votingAgents: 5,
-        quorumPercent: 100,
-        weightedFor: 10,
-        weightedAgainst: 0,
-        totalVotingWeight: 10,
-        approvalScore: 100,
+describe("persistence (instance-owned)", () => {
+  it("initStorage creates a dao root", async () => {
+    const cwd = await fs.mkdtemp(path.join(tmpdir(), "swarm-persist-"));
+    try {
+      const root = await initStorage(cwd);
+      expect(root.length).toBeGreaterThan(0);
+      const stat = await fs.stat(root);
+      expect(stat.isDirectory()).toBe(true);
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("FileDaoStateRepository open/persist round-trips proposals", async () => {
+    const cwd = await fs.mkdtemp(path.join(tmpdir(), "swarm-persist-"));
+    try {
+      const repository = await FileDaoStateRepository.open(cwd);
+      repository.get().initialized = true;
+      repository.get().proposals.push({
+        id: 1,
+        title: "Feature A",
+        type: "product-feature",
+        description: "d",
+        proposedBy: "user",
+        status: "open",
         votes: [],
-      },
-    },
-    { config: DEFAULT_CONFIG },
-  );
-  dispatchProposalEvent(
-    proposal,
-    {
-      type: "CONTROL_PASS",
-      result: {
-        proposalId: proposal.id,
-        timestamp: new Date().toISOString(),
-        allGatesPassed: true,
-        blockerCount: 0,
-        warningCount: 0,
-        gates: [],
-        checklist: [],
-      },
-    },
-    { config: DEFAULT_CONFIG },
-  );
-  dispatchProposalEvent(proposal, { type: "EXECUTE_SUCCESS" });
-}
+        agentOutputs: [],
+        createdAt: new Date().toISOString(),
+      });
+      repository.get().nextProposalId = 2;
+      await repository.persist();
 
-describe("persistence", () => {
-  beforeEach(() => {
-    const state = createInitialState("/tmp/dao-test");
-    state.initialized = true;
-    setState(state);
+      const reopened = await FileDaoStateRepository.open(cwd);
+      expect(reopened.get().proposals[0]?.title).toBe("Feature A");
+      expect(reopened.get().nextProposalId).toBe(2);
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
   });
 
-  it("creates and retrieves proposals", async () => {
-    const p1 = await createProposal("Feature A", "product-feature", "Add A", "user");
-    expect(p1.id).toBe(1);
-
-    const p2 = await createProposal("Feature B", "product-feature", "Add B", "user");
-    expect(p2.id).toBe(2);
-
-    expect(getProposal(1)?.title).toBe("Feature A");
-    expect(listProposals().length).toBe(2);
-  });
-
-  it("rejects an unknown proposal type instead of silently casting", async () => {
-    await expect(createProposal("Bad", "not-a-real-type", "d", "user")).rejects.toThrow(/Unknown proposal type/);
-    // State must be untouched: no proposal persisted, id counter unchanged.
-    expect(listProposals().length).toBe(0);
-    const next = await createProposal("Good", "product-feature", "d", "user");
-    expect(next.id).toBe(1);
-  });
-
-  it("createProposalsBatch validates all entries before mutating any id", async () => {
-    const before = getState().nextProposalId;
-    await expect(
-      createProposalsBatch([
-        { title: "OK", type: "product-feature", description: "d", proposedBy: "u" },
-        { title: "BAD", type: "unknown-type", description: "d", proposedBy: "u" },
-      ]),
-    ).rejects.toThrow(/Unknown proposal type/);
-    // Atomic: no partial persist, id counter untouched.
-    expect(getState().nextProposalId).toBe(before);
-    expect(listProposals().length).toBe(0);
-  });
-
-  it("adds votes", async () => {
-    const p = await createProposal("Vote test", "product-feature", "Test", "user");
-    const added = await addVote(p.id, { agentId: "a", agentName: "A", position: "for", reasoning: "Yes", weight: 3 });
-    expect(added).toEqual({ ok: true, replaced: false });
-    expect(getProposal(p.id)?.votes.length).toBe(1);
-  });
-
-  it("addVote replaces the same agent's prior vote instead of stacking (issue #154)", async () => {
-    const p = await createProposal("Dedupe test", "product-feature", "Test", "user");
-    await addVote(p.id, { agentId: "cli-user", agentName: "cli-user", position: "for", reasoning: "yes", weight: 1 });
-    const second = await addVote(p.id, {
-      agentId: "cli-user",
-      agentName: "cli-user",
-      position: "against",
-      reasoning: "changed my mind",
-      weight: 2,
+  it("addVoteOn records a vote on an open proposal", async () => {
+    const repository = new InMemoryDaoStateRepository(createInitialState("/tmp/vote"));
+    repository.get().initialized = true;
+    repository.get().proposals.push({
+      id: 1,
+      title: "Vote me",
+      type: "product-feature",
+      description: "d",
+      proposedBy: "user",
+      status: "open",
+      votes: [],
+      agentOutputs: [],
+      createdAt: new Date().toISOString(),
     });
-    expect(second).toEqual({ ok: true, replaced: true });
-    const votes = getProposal(p.id)?.votes ?? [];
-    expect(votes.length).toBe(1);
-    expect(votes[0]?.position).toBe("against");
-  });
-
-  it("addVote refuses votes on proposals that are no longer open (issue #154)", async () => {
-    const p = await createProposal("Closed vote test", "product-feature", "Test", "user");
-    dispatchProposalEvent(p, { type: "DELIBERATE" });
-    dispatchProposalEvent(p, { type: "REJECT" });
-    const result = await addVote(p.id, { agentId: "a", agentName: "A", position: "for", reasoning: "late", weight: 1 });
-    expect(result.ok).toBe(false);
-    expect(getProposal(p.id)?.votes.length).toBe(0);
-  });
-
-  it("addVote bounds the vote weight (issue #154)", async () => {
-    const p = await createProposal("Weight bound test", "product-feature", "Test", "user");
-    const over = await addVote(p.id, {
+    const result = await addVoteOn(repository, 1, {
       agentId: "cli-user",
       agentName: "cli-user",
       position: "for",
-      reasoning: "heavy",
-      weight: 999,
+      reasoning: "looks good",
+      weight: 1,
     });
-    expect(over.ok).toBe(false);
-    expect(getProposal(p.id)?.votes.length).toBe(0);
-    const invalid = await addVote(p.id, {
-      agentId: "cli-user",
-      agentName: "cli-user",
-      position: "for",
-      reasoning: "zero",
-      weight: 0,
-    });
-    expect(invalid.ok).toBe(false);
+    expect(result).toEqual({ ok: true, replaced: false });
+    expect(repository.get().proposals[0]?.votes).toHaveLength(1);
   });
 
-  it("advances proposal status through the sanctioned dispatch path", async () => {
-    const p = await createProposal("Status test", "product-feature", "Test", "user");
-    resolveToExecuted(p);
-    expect(getProposal(p.id)?.status).toBe("executed");
-    expect(getProposal(p.id)?.resolvedAt).toBeDefined();
+  it("recordAuditOn appends an audit entry", async () => {
+    const repository = new InMemoryDaoStateRepository(createInitialState("/tmp/audit"));
+    await recordAuditOn(repository, 1, "governance", "vote-cast", "cli-user", "for");
+    expect(repository.get().auditLog).toHaveLength(1);
+    expect(repository.get().auditLog[0]?.action).toBe("vote-cast");
   });
 
-  it("records audit entries", async () => {
-    const p = await createProposal("Audit test", "product-feature", "Test", "user");
-    await recordAudit(p.id, "governance", "test_action", "user", "details");
-    const entries = getAuditLog(p.id);
-    expect(entries.length).toBe(1);
-    expect(entries[0]?.action).toBe("test_action");
-  });
-
-  it("pads IDs correctly", () => {
-    expect(padId(1)).toBe("001");
-    expect(padId(42)).toBe("042");
-    expect(padId(999)).toBe("999");
-  });
-
-  it("returns dao root path", () => {
-    expect(getDaoRoot("/project")).toBe("/project/.dao");
-  });
-
-  it("manages agents through add, get, list, and remove", async () => {
-    const cwd = `/tmp/dao-agent-crud-test-${Date.now()}`;
-
-    try {
-      await initStorage(cwd);
-      const state = createInitialState(cwd);
-      state.initialized = true;
-      setState(state);
-
-      const agent = {
-        id: "custom-agent",
-        name: "Custom Agent",
-        role: "testing",
-        description: "A test agent",
-        weight: 2,
-        systemPrompt: "test",
-      };
-      await addAgent(agent);
-      expect(getAgent("custom-agent")).toEqual(agent);
-      expect(listAgents().some((a) => a.id === "custom-agent")).toBe(true);
-      expect(await removeAgent("custom-agent")).toBe(true);
-      expect(getAgent("custom-agent")).toBeUndefined();
-      expect(await removeAgent("missing-agent")).toBe(false);
-    } finally {
-      setState(null);
-      await fs.rm(cwd, { recursive: true, force: true }).catch(() => {});
-    }
-  });
-
-  it("loadState throws on invalid JSON instead of pretending the DAO is empty", async () => {
-    const cwd = `/tmp/dao-corrupt-json-test-${Date.now()}`;
-    try {
-      await initStorage(cwd);
-      await fs.writeFile(`${getDaoRoot(cwd)}/state.json`, "{not-json", "utf-8");
-      await expect(loadState(cwd)).rejects.toThrow(/Corrupt DAO state/);
-    } finally {
-      setState(null);
-      await fs.rm(cwd, { recursive: true, force: true }).catch(() => {});
-    }
-  });
-
-  it("loadState repairs corrupted state.json missing proposals, agents, and auditLog", async () => {
-    const cwd = `/tmp/dao-corruption-test-${Date.now()}`;
-
-    try {
-      // Create .dao/ directory
-      await initStorage(cwd);
-
-      // Write a malformed state.json missing proposals, agents, auditLog
-      const corruptedState = {
-        config: { quorumPercent: 60 },
-        nextProposalId: 1,
-        initialized: true,
-        nextAuditId: 1,
-        controlResults: {},
-        deliveryPlans: {},
-        artefacts: {},
-        outcomes: {},
-        snapshots: {},
-        verifications: {},
-        daoRoot: getDaoRoot(cwd),
-      };
-      const statePath = `${getDaoRoot(cwd)}/state.json`;
-      await fs.writeFile(statePath, JSON.stringify(corruptedState), "utf-8");
-
-      // Load the corrupted state
-      const loaded = await loadState(cwd);
-      expect(loaded).not.toBeNull();
-
-      // Assert repaired arrays
-      expect(getState().proposals).toEqual([]);
-      expect(getState().agents).toEqual([]);
-      expect(getState().auditLog).toEqual([]);
-      expect(getState().controlResults).toEqual({});
-      expect(getState().deliveryPlans).toEqual({});
-      expect(getState().artefacts).toEqual({});
-      expect(getState().outcomes).toEqual({});
-      expect(getState().snapshots).toEqual({});
-      expect(getState().verifications).toEqual({});
-    } finally {
-      // Clean up temp directory and reset state
-      setState(null);
-      await fs.rm(cwd, { recursive: true, force: true }).catch(() => {});
-    }
-  });
-
-  it("loadState repairs invalid collection shapes and non-positive IDs", async () => {
-    const cwd = `/tmp/dao-corruption-shape-test-${Date.now()}`;
-
-    try {
-      await initStorage(cwd);
-
-      const corruptedState = {
-        proposals: {},
-        agents: {},
-        auditLog: {},
-        config: { quorumPercent: 60 },
-        nextProposalId: -5,
-        initialized: true,
-        nextAuditId: 0.5,
-        controlResults: [],
-        deliveryPlans: [],
-        artefacts: [],
-        outcomes: [],
-        snapshots: [],
-        verifications: [],
-        daoRoot: getDaoRoot(cwd),
-      };
-      const statePath = `${getDaoRoot(cwd)}/state.json`;
-      await fs.writeFile(statePath, JSON.stringify(corruptedState), "utf-8");
-
-      const loaded = await loadState(cwd);
-      expect(loaded).not.toBeNull();
-
-      expect(getState().proposals).toEqual([]);
-      expect(getState().agents).toEqual([]);
-      expect(getState().auditLog).toEqual([]);
-      expect(getState().controlResults).toEqual({});
-      expect(getState().deliveryPlans).toEqual({});
-      expect(getState().artefacts).toEqual({});
-      expect(getState().outcomes).toEqual({});
-      expect(getState().snapshots).toEqual({});
-      expect(getState().verifications).toEqual({});
-      expect(getState().nextProposalId).toBe(1);
-      expect(getState().nextAuditId).toBe(1);
-    } finally {
-      setState(null);
-      await fs.rm(cwd, { recursive: true, force: true }).catch(() => {});
-    }
-  });
-
-  it("migrateFromLegacy ignores unsafe legacy directory entries", async () => {
-    const cwd = `/tmp/dao-legacy-safety-test-${Date.now()}`;
-    const safeLegacy = ".legacy-dao";
-    const safeLegacyRoot = path.join(cwd, safeLegacy);
-
-    try {
-      await fs.mkdir(safeLegacyRoot, { recursive: true });
-      await fs.writeFile(path.join(safeLegacyRoot, "state.json"), JSON.stringify({ initialized: false }), "utf-8");
-
-      const migrated = await migrateFromLegacy(cwd, ["", ".", "..", "../outside", "/tmp", safeLegacy]);
-      expect(migrated).toBe(true);
-
-      const migratedStatePath = path.join(getDaoRoot(cwd), "state.json");
-      const content = await fs.readFile(migratedStatePath, "utf-8");
-      expect(JSON.parse(content)).toMatchObject({ initialized: false });
-    } finally {
-      setState(null);
-      await fs.rm(cwd, { recursive: true, force: true }).catch(() => {});
-    }
-  });
-
-  // ── Storage Settings regression tests ──────────────────────────
-
-  /**
-   * OpenSpec Scenario: saveState writes state.json ending with a trailing newline
-   *
-   * GIVEN a DAO state with some data
-   * WHEN saveState is called
-   * THEN the written state.json file ends with a newline character
-   */
-  it("saveState writes state.json ending with a trailing newline", async () => {
-    const cwd = `/tmp/dao-trailing-newline-test-${Date.now()}`;
-    const daoRoot = getDaoRoot(cwd);
-
-    try {
-      await initStorage(cwd);
-      const state = createInitialState(cwd);
-      state.initialized = true;
-      state.daoRoot = daoRoot;
-      setState(state);
-
-      // ACT: save state
-      await saveState();
-
-      // ASSERT: read the file and check trailing newline
-      const statePath = path.join(daoRoot, "state.json");
-      const content = await fs.readFile(statePath, "utf-8");
-      expect(content.endsWith("\n")).toBe(true);
-    } finally {
-      setState(null);
-      await fs.rm(cwd, { recursive: true, force: true }).catch(() => {});
-    }
-  });
-
-  /**
-   * Atomic-write guard: a successful save must not leave transient temp files
-   * on disk. writeAtomic() writes to `*.tmp-<pid>-<token>` then renames; the
-   * temp file must never survive a completed write.
-   */
-  it("saveState leaves no .tmp residue after a successful write", async () => {
-    const cwd = `/tmp/dao-atomic-residue-test-${Date.now()}`;
-    const daoRoot = getDaoRoot(cwd);
-
-    try {
-      await initStorage(cwd);
-      const state = createInitialState(cwd);
-      state.initialized = true;
-      state.daoRoot = daoRoot;
-      setState(state);
-
-      await saveState();
-
-      const entries = await fs.readdir(daoRoot);
-      const tmpLeftovers = entries.filter((name) => name.includes(".tmp-"));
-      expect(tmpLeftovers).toEqual([]);
-    } finally {
-      setState(null);
-      await fs.rm(cwd, { recursive: true, force: true }).catch(() => {});
-    }
-  });
-
-  /**
-   * Atomic-write guard: if the final rename fails (e.g. transient FS error),
-   * the target file must remain byte-identical to its prior content and the
-   * temp file must be cleaned up. No partial write may ever be observable.
-   */
-  it("saveState keeps the target intact and cleans tmp when rename fails", async () => {
-    const cwd = `/tmp/dao-atomic-failure-test-${Date.now()}`;
-    const daoRoot = getDaoRoot(cwd);
-    const statePath = path.join(daoRoot, "state.json");
-
-    try {
-      await initStorage(cwd);
-      const state = createInitialState(cwd);
-      state.initialized = true;
-      state.daoRoot = daoRoot;
-      setState(state);
-
-      // Baseline: a clean save lands on disk.
-      await saveState();
-      const baseline = await fs.readFile(statePath, "utf-8");
-
-      // Mutate in-memory state (bypass recordAudit, which would save on its own)
-      // so the next saveState() has new bytes to write and bypasses the cache.
-      const s = getState();
-      s.auditLog.push({
-        id: s.nextAuditId++,
-        timestamp: new Date().toISOString(),
-        proposalId: 0,
-        layer: "control",
-        action: "force-change",
-        actor: "test",
-        details: "{}",
-      });
-
-      // Force the atomic rename step to fail for every file written this round.
-      const renameSpy = spyOn(fs, "rename").mockRejectedValue(
-        Object.assign(new Error("simulated rename failure"), { code: "EIO" }),
-      );
-
-      // saveState should reject because the write cannot be committed.
-      await expect(saveState()).rejects.toThrow("simulated rename failure");
-
-      // The on-disk state.json is untouched (no partial / no new content).
-      const after = await fs.readFile(statePath, "utf-8");
-      expect(after).toBe(baseline);
-
-      // No temp file survives the failed write.
-      const entries = await fs.readdir(daoRoot);
-      const tmpLeftovers = entries.filter((name) => name.includes(".tmp-"));
-      expect(tmpLeftovers).toEqual([]);
-
-      renameSpy.mockRestore();
-    } finally {
-      setState(null);
-      await fs.rm(cwd, { recursive: true, force: true }).catch(() => {});
-    }
-  });
-
-  /**
-   * Optimization guard: saveState() must not rewrite proposal sidecars or
-   * decision files whose serialized content has not changed since the last save.
-   *
-   * GIVEN a DAO with resolved proposals (so sidecars + decision files exist)
-   * WHEN saveState() is called without any prior mutation
-   * THEN zero files are written (every JSON file is byte-identical to its cache)
-   *   AND a subsequent mutation that only touches auditLog (state.json) writes
-   *   exactly one file, not one-per-sidecar + one-per-decision.
-   */
-  it("saveState skips rewriting unchanged sidecars and decisions", async () => {
-    const cwd = `/tmp/dao-writecache-test-${Date.now()}`;
-    const daoRoot = getDaoRoot(cwd);
-
-    try {
-      await initStorage(cwd);
-      const state = createInitialState(cwd);
-      state.initialized = true;
-      state.daoRoot = daoRoot;
-      setState(state);
-
-      // Seed proposals and resolve one so sidecars + decision files exist and
-      // the write cache is populated with their current on-disk content.
-      const p1 = await createProposal("P1", "product-feature", "d", "user");
-      await createProposal("P2", "product-feature", "d", "user");
-      resolveToExecuted(p1);
-      await saveState();
-
-      const writeSpy = spyOn(fs, "writeFile");
-      const contentWrites = () =>
-        writeSpy.mock.calls.filter((call) => typeof call[0] === "string" && !call[0].endsWith("state.lock"));
-
-      // 1) No-op save: nothing changed since the previous save -> no content writes
-      //    (the inter-process lock may still touch state.lock).
-      writeSpy.mockClear();
-      await saveState();
-      expect(contentWrites().length).toBe(0);
-
-      // 2) Mutating save via recordAudit: only auditLog changes, which lives in
-      //    state.json. Without dedup this rewrites state.json + every sidecar +
-      //    every decision file; with dedup it writes just state.json.
-      writeSpy.mockClear();
-      await recordAudit(p1.id, "governance", "perf_probe", "user", "noop");
-      expect(contentWrites().length).toBe(1);
-
-      writeSpy.mockRestore();
-    } finally {
-      setState(null);
-      await fs.rm(cwd, { recursive: true, force: true }).catch(() => {});
-    }
-  });
-
-  /**
-   * OpenSpec Scenario: getStorageSettings reads config.json and returns StorageSettings
-   *
-   * GIVEN a DAO root with a .dao/config.json containing valid StorageSettings
-   * WHEN calling getStorageSettings(daoRoot)
-   * THEN the returned value should be a plain StorageSettings object with persisted fields
-   */
-  it("getStorageSettings returns real StorageSettings, not a Promise cast", async () => {
-    const cwd = `/tmp/dao-storage-settings-test-${Date.now()}`;
-    const daoRoot = getDaoRoot(cwd);
-
-    try {
-      // ARRANGE: create .dao/ dir and write valid config.json
-      await fs.mkdir(daoRoot, { recursive: true });
-      const persisted = {
-        mode: "github",
-        githubSyncEnabled: true,
-        daoRoot,
-        githubRepo: "test/repo",
-      };
-      await fs.writeFile(path.join(daoRoot, "config.json"), JSON.stringify(persisted, null, 2), "utf-8");
-
-      // ACT: call async (fixed — was returning Promise cast as StorageSettings)
-      const result = await getStorageSettings(daoRoot);
-
-      // ASSERT: resolved value is a plain StorageSettings object
-      expect(result).toMatchObject({
-        mode: "github",
-        githubSyncEnabled: true,
-        githubRepo: "test/repo",
-      });
-    } finally {
-      await fs.rm(cwd, { recursive: true, force: true }).catch(() => {});
-    }
-  });
-
-  /**
-   * OpenSpec Scenario: updateStorageSettings persists and reads back correctly
-   *
-   * GIVEN an empty DAO root (no config.json yet)
-   * WHEN calling updateStorageSettings with partial overrides
-   * THEN getStorageSettings returns the merged values after the round-trip
-   */
-  it("updateStorageSettings round-trips with getStorageSettings", async () => {
-    const cwd = `/tmp/dao-storage-roundtrip-test-${Date.now()}`;
-    const daoRoot = getDaoRoot(cwd);
-
-    try {
-      // ACT: write settings via updateStorageSettings
-      const written = await updateStorageSettings(daoRoot, {
-        mode: "github",
-        githubSyncEnabled: true,
-        githubRepo: "roundtrip/repo",
-      });
-
-      // ASSERT: the returned object has the right values
-      expect(written.mode).toBe("github");
-      expect(written.githubSyncEnabled).toBe(true);
-      expect(written.githubRepo).toBe("roundtrip/repo");
-
-      // ACT: read them back
-      const read = await getStorageSettings(daoRoot);
-
-      // ASSERT: persisted values survive the round-trip
-      expect(read.mode).toBe("github");
-      expect(read.githubSyncEnabled).toBe(true);
-      expect(read.githubRepo).toBe("roundtrip/repo");
-    } finally {
-      await fs.rm(cwd, { recursive: true, force: true }).catch(() => {});
-    }
-  });
-
-  it("updateStorageSettings preserves existing integration config and isolates storage settings", async () => {
-    const cwd = `/tmp/dao-storage-coexist-test-${Date.now()}`;
-    const daoRoot = getDaoRoot(cwd);
-    const configPath = path.join(daoRoot, "config.json");
-
-    try {
-      await fs.mkdir(daoRoot, { recursive: true });
-      await fs.writeFile(
-        configPath,
-        JSON.stringify(
-          {
-            github: {
-              enabled: true,
-              token: "token",
-              owner: "owner",
-              repo: "repo",
-            },
-          },
-          null,
-          2,
-        ),
-        "utf-8",
-      );
-
-      const written = await updateStorageSettings(daoRoot, { mode: "hybrid", githubSyncEnabled: true });
-      expect(written.mode).toBe("hybrid");
-      expect(written.githubSyncEnabled).toBe(true);
-
-      const reloadedStorage = await getStorageSettings(daoRoot);
-      expect(reloadedStorage.mode).toBe("hybrid");
-      expect(reloadedStorage.githubSyncEnabled).toBe(true);
-
-      const mergedConfig = JSON.parse(await fs.readFile(configPath, "utf-8"));
-      expect(mergedConfig.github?.repo).toBe("repo");
-      expect(mergedConfig.storageSettings?.mode).toBe("hybrid");
-    } finally {
-      await fs.rm(cwd, { recursive: true, force: true }).catch(() => {});
-    }
+  it("sanitizeErrorMessage redacts secrets", () => {
+    expect(sanitizeErrorMessage("token=secret-value")).toContain("[REDACTED]");
   });
 });

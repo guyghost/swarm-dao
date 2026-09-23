@@ -17,7 +17,6 @@ import {
 import { InMemoryDaoStateRepository } from "../src/adapters/persistence/in-memory-dao-state.repository.js";
 import type { DaoToolContext } from "../src/host-tools/handlers.js";
 import { handleDaoCheckEdit, handleDaoExecute, handleDaoSetup, handleDaoShip } from "../src/host-tools/handlers.js";
-import { getState, setState } from "../src/persistence.js";
 import type { AgentOutput, HostAdapter } from "../src/types/index.js";
 
 type ExecCall = { command: string; options?: { cwd?: string } };
@@ -230,22 +229,20 @@ describe("host tools: execution isolation wiring", () => {
 
 describe("host tools: repository workDir binding", () => {
   test("setup on a second workDir does not mutate the first workspace's state", async () => {
-    const first = createInitialState(await fs.mkdtemp(path.join(tmpdir(), "swarm-dao-repo-a-")));
-    first.initialized = true;
-    first.proposals.push({
-      id: 1,
+    const rootA = await fs.mkdtemp(path.join(tmpdir(), "swarm-dao-repo-a-"));
+    const workspaceA = new InMemoryDaoStateRepository(createInitialState(rootA));
+    await new InitializeDaoUseCase({ repository: workspaceA }).execute({ agents: DEFAULT_AGENTS });
+    const created = await new CreateProposalUseCase({ repository: workspaceA, clock: systemClock }).execute({
       title: "workspace-A-only",
       type: "product-feature",
       description: "must stay on A",
       proposedBy: "test",
-      status: "open",
-      votes: [],
-      agentOutputs: [],
-      createdAt: "2031-01-01T00:00:00.000Z",
     });
-    setState(first);
+    if (!created.ok) throw new Error(created.error);
     const workB = await fs.mkdtemp(path.join(tmpdir(), "swarm-dao-repo-b-"));
     try {
+      // No repository on the context: setup must bind to workB alone, with no
+      // process-global state to leak workspace A's proposal into it.
       const output = await handleDaoSetup(
         {
           adapter: recordingHost([]),
@@ -256,8 +253,8 @@ describe("host tools: repository workDir binding", () => {
         true,
       );
       expect(output).toContain("DAO Initialized");
-      expect(getState().proposals.some((proposal) => proposal.title === "workspace-A-only")).toBe(true);
-      expect(path.resolve(getState().daoRoot)).toBe(path.resolve(first.daoRoot));
+      expect(workspaceA.get().proposals.some((proposal) => proposal.title === "workspace-A-only")).toBe(true);
+      expect(path.resolve(workspaceA.get().daoRoot)).toBe(path.resolve(rootA));
       const persisted = JSON.parse(await fs.readFile(path.join(workB, ".dao", "state.json"), "utf8")) as {
         initialized?: boolean;
         proposals?: { title?: string }[];
@@ -265,9 +262,8 @@ describe("host tools: repository workDir binding", () => {
       expect(persisted.initialized).toBe(true);
       expect(persisted.proposals?.some((proposal) => proposal.title === "workspace-A-only") ?? false).toBe(false);
     } finally {
-      setState(null);
       await fs.rm(workB, { recursive: true, force: true });
-      await fs.rm(first.daoRoot, { recursive: true, force: true });
+      await fs.rm(rootA, { recursive: true, force: true });
     }
   });
 });

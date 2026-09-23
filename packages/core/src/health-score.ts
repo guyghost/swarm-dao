@@ -2,8 +2,9 @@
 // Swarm DAO Core — Health Score & Dashboard
 // ============================================================
 
-import { getState, saveState } from "./persistence.js";
+import type { DaoStateRepositoryPort } from "./ports/repository.js";
 import type {
+  DAOState,
   HealthMetric,
   HealthScore,
   HealthSnapshot,
@@ -149,8 +150,8 @@ export function formatHealthTrend(trend: { improving: boolean; change: number })
   return `${arrow} ${sign}${trend.change.toFixed(1)} points`;
 }
 
-export async function recordHealthSnapshot(): Promise<HealthSnapshot> {
-  const state = getState();
+export async function recordHealthSnapshot(repository: DaoStateRepositoryPort): Promise<HealthSnapshot> {
+  const state = repository.get();
   const score = computeHealthScore(state.proposals, state.outcomes, state.config.healthWeights);
   const now = new Date();
   const start = new Date(now.getFullYear(), 0, 1);
@@ -179,16 +180,16 @@ export async function recordHealthSnapshot(): Promise<HealthSnapshot> {
     state.healthSnapshots = state.healthSnapshots.slice(-52);
   }
 
-  await saveState();
+  await repository.persist();
   return snapshot;
 }
 
-export function getHealthSnapshots(): HealthSnapshot[] {
-  return getState().healthSnapshots ?? [];
+export function getHealthSnapshots(state: DAOState): HealthSnapshot[] {
+  return state.healthSnapshots ?? [];
 }
 
-export function getLatestHealthSnapshot(): HealthSnapshot | undefined {
-  const snaps = getState().healthSnapshots;
+export function getLatestHealthSnapshot(state: DAOState): HealthSnapshot | undefined {
+  const snaps = state.healthSnapshots;
   return snaps && snaps.length > 0 ? snaps[snaps.length - 1] : undefined;
 }
 

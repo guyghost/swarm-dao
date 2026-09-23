@@ -1,11 +1,12 @@
 import { describe, expect, it, spyOn } from "bun:test";
 import { promises as fs } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import {
-  createInitialState,
   type DaoToolContext,
-  getState,
+  FileDaoStateRepository,
   handleDaoRoundtable,
-  setState,
+  initStorage,
 } from "@guyghost/swarm-dao-core";
 import { buildModelResolutionContext } from "../src/intelligence/model.js";
 import { buildRuntimeResolutionContext } from "../src/intelligence/runtime.js";
@@ -140,11 +141,12 @@ describe("intelligence/swarm.ts", () => {
 
 describe("handleDaoRoundtable — batched audit writes (task 8)", () => {
   it("records all audit entries in a single save burst, not one-per-proposal", async () => {
-    const daoRoot = `/tmp/dao-roundtable-perf-${Date.now()}`;
+    const workDir = await fs.mkdtemp(path.join(tmpdir(), "dao-roundtable-perf-"));
     try {
-      const state = createInitialState(daoRoot);
-      state.initialized = true;
-      setState(state);
+      await initStorage(workDir);
+      const repository = await FileDaoStateRepository.open(workDir);
+      repository.get().initialized = true;
+      await repository.persist();
 
       // Fake adapter: every agent returns a parseable round-table suggestion, so
       // each agent yields one created proposal (k = number of default agents).
@@ -160,9 +162,10 @@ describe("handleDaoRoundtable — batched audit writes (task 8)", () => {
       } as unknown as HostAdapter;
       const ctx: DaoToolContext = {
         adapter,
-        workDir: daoRoot,
+        workDir,
         deliberationMode: "auto",
         controlToolName: "dao_control",
+        repository,
       };
 
       const writeSpy = spyOn(fs, "writeFile");
@@ -173,7 +176,7 @@ describe("handleDaoRoundtable — batched audit writes (task 8)", () => {
       const writeCount = writeSpy.mock.calls.length;
       writeSpy.mockRestore();
 
-      const after = getState();
+      const after = repository.get();
       const createdProposals = after.proposals;
       const entries = after.auditLog.filter((e) => e.action === "roundtable_proposal_created");
 
@@ -200,14 +203,12 @@ describe("handleDaoRoundtable — batched audit writes (task 8)", () => {
       // Sanity: the spy intercepted at least one write (saves actually happened).
       expect(writeCount).toBeGreaterThanOrEqual(1);
       // Single save burst: a constant number of writes, bounded independent of k.
-      // (One save = state.json + decisions index.json; here createProposalsBatch +
-      //  trailing save = 3 writes for any k. Old code was ~k+2, i.e. 9 for k=7.)
+      // (One save = lock + state.tmp; old code was ~k+2, i.e. 9 for k=7.)
       expect(writeCount).toBeLessThanOrEqual(4);
       // And strictly sub-linear in the number of created proposals.
       expect(writeCount).toBeLessThan(createdProposals.length);
     } finally {
-      setState(null);
-      await fs.rm(daoRoot, { recursive: true, force: true }).catch(() => {});
+      await fs.rm(workDir, { recursive: true, force: true }).catch(() => {});
     }
   });
 });

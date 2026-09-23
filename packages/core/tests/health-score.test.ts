@@ -12,10 +12,9 @@ import {
   getHealthSnapshots,
   getHealthTrend,
   getLatestHealthSnapshot,
-  getState,
+  InMemoryDaoStateRepository,
   initStorage,
   recordHealthSnapshot,
-  setState,
 } from "@guyghost/swarm-dao-core";
 
 describe("health-score", () => {
@@ -176,25 +175,24 @@ describe("health-score", () => {
     });
 
     afterEach(async () => {
-      setState(null);
       await fs.rm(testDir, { recursive: true, force: true });
     });
 
     it("getHealthSnapshots returns empty array when none recorded", () => {
       const state = createInitialState(testDir);
       state.initialized = true;
-      setState(state);
+      const repository = new InMemoryDaoStateRepository(state);
 
-      const snapshots = getHealthSnapshots();
+      const snapshots = getHealthSnapshots(repository.get());
       expect(snapshots).toEqual([]);
     });
 
     it("getLatestHealthSnapshot returns undefined when none recorded", () => {
       const state = createInitialState(testDir);
       state.initialized = true;
-      setState(state);
+      const repository = new InMemoryDaoStateRepository(state);
 
-      const latest = getLatestHealthSnapshot();
+      const latest = getLatestHealthSnapshot(repository.get());
       expect(latest).toBeUndefined();
     });
 
@@ -202,9 +200,9 @@ describe("health-score", () => {
       await initStorage(testDir);
       const state = createInitialState(testDir);
       state.initialized = true;
-      setState(state);
+      const repository = new InMemoryDaoStateRepository(state);
 
-      const snapshot = await recordHealthSnapshot();
+      const snapshot = await recordHealthSnapshot(repository);
 
       expect(snapshot).toBeDefined();
       expect(typeof snapshot.score).toBe("number");
@@ -216,7 +214,7 @@ describe("health-score", () => {
       expect(snapshot.metrics).toBeDefined();
 
       // Verify persisted in state
-      const currentState = getState();
+      const currentState = repository.get();
       expect(currentState.healthSnapshots).toBeDefined();
       expect(currentState.healthSnapshots?.length).toBe(1);
       expect(currentState.healthSnapshots?.[0]?.weekKey).toBe(snapshot.weekKey);
@@ -226,13 +224,13 @@ describe("health-score", () => {
       await initStorage(testDir);
       const state = createInitialState(testDir);
       state.initialized = true;
-      setState(state);
+      const repository = new InMemoryDaoStateRepository(state);
 
       // Record two snapshots
-      const _first = await recordHealthSnapshot();
+      const _first = await recordHealthSnapshot(repository);
 
       // Manually tweak to simulate a different week
-      const currentState = getState();
+      const currentState = repository.get();
       const manualSnapshot = {
         weekKey: "W99",
         year: 2030,
@@ -244,7 +242,7 @@ describe("health-score", () => {
       };
       currentState.healthSnapshots?.push(manualSnapshot);
 
-      const latest = getLatestHealthSnapshot();
+      const latest = getLatestHealthSnapshot(repository.get());
       expect(latest).toBeDefined();
       expect(latest?.weekKey).toBe("W99");
       expect(latest?.score).toBe(95);
@@ -254,7 +252,7 @@ describe("health-score", () => {
       await initStorage(testDir);
       const state = createInitialState(testDir);
       state.initialized = true;
-      setState(state);
+      const repository = new InMemoryDaoStateRepository(state);
 
       // Manually inject 60 snapshots
       const snapshots = [];
@@ -272,9 +270,9 @@ describe("health-score", () => {
       state.healthSnapshots = snapshots;
 
       // Now record one more — should trigger pruning
-      await recordHealthSnapshot();
+      await recordHealthSnapshot(repository);
 
-      const currentSnapshots = getHealthSnapshots();
+      const currentSnapshots = getHealthSnapshots(repository.get());
       // Should be at most 52 (the newest ones kept)
       expect(currentSnapshots.length).toBeLessThanOrEqual(52);
       // The oldest entries should have been pruned
@@ -287,15 +285,15 @@ describe("health-score", () => {
       await initStorage(testDir);
       const state = createInitialState(testDir);
       state.initialized = true;
-      setState(state);
+      const repository = new InMemoryDaoStateRepository(state);
 
       // First call
-      const first = await recordHealthSnapshot();
+      const first = await recordHealthSnapshot(repository);
       const firstWeekKey = first.weekKey;
 
       // Second call — same week, should replace not append
-      const second = await recordHealthSnapshot();
-      const snapshots = getHealthSnapshots();
+      const second = await recordHealthSnapshot(repository);
+      const snapshots = getHealthSnapshots(repository.get());
 
       // Should still have only 1 snapshot (same weekKey replaced)
       expect(snapshots.length).toBe(1);
@@ -308,16 +306,16 @@ describe("health-score", () => {
       await initStorage(testDir);
       const state = createInitialState(testDir);
       state.initialized = true;
-      setState(state);
+      const repository = new InMemoryDaoStateRepository(state);
 
       // First call
-      await recordHealthSnapshot();
-      const firstSnapshots = getHealthSnapshots();
+      await recordHealthSnapshot(repository);
+      const firstSnapshots = getHealthSnapshots(repository.get());
       expect(firstSnapshots.length).toBe(1);
       const firstWeekKey = firstSnapshots[0]?.weekKey ?? "";
 
       // Manually inject a snapshot for a different week
-      const currentState = getState();
+      const currentState = repository.get();
       const differentWeekSnapshot = {
         weekKey: "W50",
         year: 2099,
@@ -330,8 +328,8 @@ describe("health-score", () => {
       currentState.healthSnapshots?.push(differentWeekSnapshot);
 
       // Third call — same week as first, should replace the original not append
-      await recordHealthSnapshot();
-      const snapshots = getHealthSnapshots();
+      await recordHealthSnapshot(repository);
+      const snapshots = getHealthSnapshots(repository.get());
 
       // Should have 2 snapshots: the replaced current-week entry + the manual W50 entry
       expect(snapshots.length).toBe(2);
@@ -367,7 +365,6 @@ describe("health-score", () => {
           createdAt: "2026-01-08T00:00:00Z",
         },
       ];
-      setState(state);
 
       const proposals = [
         {
