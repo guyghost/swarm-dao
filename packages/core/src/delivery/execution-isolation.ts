@@ -110,6 +110,7 @@ function validateBaseBranch(branch: string): string | null {
   if (branch.length === 0) return "baseBranch must not be empty";
   if (!SAFE_REF.test(branch)) return `baseBranch '${branch}' must match ${SAFE_REF.toString()}`;
   if (branch.includes("..")) return "baseBranch must not contain '..'";
+  if (branch.includes("//")) return "baseBranch must not contain consecutive '/' segments";
   if (branch.endsWith("/") || branch.endsWith("/.") || branch.endsWith(".lock")) {
     return `baseBranch '${branch}' is not a valid git refname`;
   }

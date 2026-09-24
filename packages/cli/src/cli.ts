@@ -973,6 +973,7 @@ async function cmdShip(cwd: string, positional: string[], flags: Record<string, 
   // Ship audit challenge (opt-in): first call challenges, unchanged second
   // call proceeds (models/ship-audit.md).
   let auditConsume: (() => Promise<void>) | undefined;
+  let auditRelease: (() => Promise<void>) | undefined;
   if (projectConfig.ship?.auditChallenge === true) {
     const proposal = getProposalFrom(repository, id);
     if (!proposal) err(`proposal #${id} not found`);
@@ -990,16 +991,25 @@ async function cmdShip(cwd: string, positional: string[], flags: Record<string, 
       return;
     }
     auditConsume = gate.consume;
+    auditRelease = gate.release;
   }
 
   const workspace = createExecutionWorkspace(projectConfig.execution, cliRunner(), cwd);
-  const result = await new ShipProposalUseCase({
-    repository,
-    clock: systemClock,
-    workspace,
-    // With the challenge enabled, force bypasses the audit ONLY —
-    // dependency checks still run.
-  }).execute({ proposalId: id, actor: "cli", cascade, force: auditConsume ? undefined : force });
+  let result: Awaited<ReturnType<ShipProposalUseCase["execute"]>>;
+  try {
+    result = await new ShipProposalUseCase({
+      repository,
+      clock: systemClock,
+      workspace,
+      // With the challenge enabled, force bypasses the audit ONLY —
+      // dependency checks still run.
+    }).execute({ proposalId: id, actor: "cli", cascade, force: auditConsume ? undefined : force });
+  } catch (error) {
+    // Release the audit claim on a thrown ship so it cannot leak; the
+    // confirmation is spent only on the success path below.
+    await auditRelease?.();
+    throw error;
+  }
   await auditConsume?.();
   if (!result.ok) {
     if (result.error.includes("unexecuted dependencies found")) {

@@ -28,4 +28,22 @@ describe("governance/lifecycle.ts (risk + label helpers)", () => {
     expect(statusLabel("open")).toContain("Open");
     expect(statusLabel("approved")).toContain("Approved");
   });
+
+  it("does not send a proposal to the red zone just for the word 'author'", () => {
+    const proposal: Proposal = {
+      ...base,
+      type: "product-feature",
+      title: "Add author field",
+      description: "Show the article author and its authoritative source",
+    };
+    // Word-boundary matching: "author"/"authoritative" must not match "auth".
+    expect(classifyRiskZone(proposal)).toBe("orange");
+  });
+
+  it("still classifies authentication/authorization wording as red", () => {
+    for (const title of ["Authentication flow", "Authorization rules", "Rotate the API token", "Password reset"]) {
+      const proposal: Proposal = { ...base, type: "product-feature", title, description: "d" };
+      expect(classifyRiskZone(proposal)).toBe("red");
+    }
+  });
 });

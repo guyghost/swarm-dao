@@ -278,11 +278,19 @@ Force with an explicit reason when genuinely required: re-run with \`force=true\
     // The audited path: force means "bypass the audit challenge" ONLY —
     // dependency checks still run inside the use-case (review resolution:
     // the bypass satisfies INV-1, nothing else).
-    const auditedResult = await auditedUseCase.execute({
-      proposalId,
-      actor: ctx.adapter.hostId,
-      cascade: options?.cascade,
-    });
+    let auditedResult: Awaited<ReturnType<typeof auditedUseCase.execute>>;
+    try {
+      auditedResult = await auditedUseCase.execute({
+        proposalId,
+        actor: ctx.adapter.hostId,
+        cascade: options?.cascade,
+      });
+    } catch (error) {
+      // Release the audit claim on a thrown ship so it cannot leak; the
+      // confirmation is spent only on the success path below (consume).
+      await gate.release?.();
+      throw error;
+    }
     await gate.consume?.();
     if (!auditedResult.ok) return auditedResult.error;
     for (const id of auditedResult.shipped) {

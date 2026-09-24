@@ -18,11 +18,16 @@ import { PROPOSAL_TYPE } from "../types/index.js";
 // ── Decision Brief ───────────────────────────────────────────
 
 function generateDecisionBrief(proposal: Proposal): DecisionBrief {
-  const forVotes = proposal.votes?.filter((v) => v.position === "for") ?? [];
   const safeWeight = (weight: number): number => (Number.isFinite(weight) && weight > 0 ? weight : 0);
-  const totalWeight = proposal.votes?.reduce((s, v) => s + safeWeight(v.weight), 0) ?? 0;
-  const forWeight = forVotes.reduce((s, v) => s + safeWeight(v.weight), 0);
-  const approvalScore = totalWeight > 0 ? Math.round((forWeight / totalWeight) * 100) : 0;
+  // Approval is for-weight over the DECISIVE (non-abstain) weight, matching
+  // tallyVotes (governance/voting.ts). Dividing by the total including
+  // abstentions reported a different percentage than the one governance used.
+  const decisiveWeight = (proposal.votes ?? []).reduce(
+    (s, v) => (v.position === "for" || v.position === "against" ? s + safeWeight(v.weight) : s),
+    0,
+  );
+  const forWeight = (proposal.votes ?? []).reduce((s, v) => (v.position === "for" ? s + safeWeight(v.weight) : s), 0);
+  const approvalScore = decisiveWeight > 0 ? Math.round((forWeight / decisiveWeight) * 100) : 0;
 
   return {
     proposalId: proposal.id,

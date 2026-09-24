@@ -217,6 +217,27 @@ describe("ship-audit wiring", () => {
     expect(after.message).toContain("AUDIT_REQUIRED");
   });
 
+  test("holds the claim until the confirmation is consumed (INV-6)", async () => {
+    await gate(); // first call: challenge
+    const confirm = await gate();
+    expect(confirm.proceed).toBe(true);
+    if (!confirm.proceed) throw new Error("expected the unchanged call to proceed");
+
+    // The unconsumed confirmation still owns the claim: a concurrent gate is
+    // blocked, so two confirms can never proceed from one challenge.
+    const blocked = await gate();
+    expect(blocked.proceed).toBe(false);
+    if (blocked.proceed) return;
+    expect(blocked.message).toContain("concurrent");
+
+    // Consuming spends the confirmation AND releases the claim.
+    await confirm.consume?.();
+    const after = await gate();
+    expect(after.proceed).toBe(false);
+    if (after.proceed) return;
+    expect(after.message).toContain("AUDIT_REQUIRED");
+  });
+
   test("a claim left by a dead process is reclaimable (issue #167.5)", async () => {
     const store = new FsShipAuditStore(path.dirname(daoRoot));
     const lockPath = path.join(daoRoot, "ship-audits", `${proposalId}.lock`);

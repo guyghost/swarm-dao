@@ -44,8 +44,9 @@ export function validateAmendmentPayload(payload: AmendmentPayload): AmendmentVa
         if (!validFields.includes(key)) errors.push(`Unknown field: ${key}`);
       }
       if (payload.changes.weight !== undefined) {
-        if (payload.changes.weight < 1 || payload.changes.weight > 10) {
-          errors.push("weight must be between 1 and 10");
+        const weight = payload.changes.weight;
+        if (typeof weight !== "number" || !Number.isFinite(weight) || weight < 1 || weight > 10) {
+          errors.push("weight must be a number between 1 and 10");
         }
       }
       break;
@@ -53,8 +54,9 @@ export function validateAmendmentPayload(payload: AmendmentPayload): AmendmentVa
     case "agent-add": {
       if (!payload.agent.id) errors.push("agent.id is required");
       if (!payload.agent.name) errors.push("agent.name is required");
-      if (!payload.agent.weight || payload.agent.weight < 1 || payload.agent.weight > 10) {
-        errors.push("agent.weight must be between 1 and 10");
+      const weight = payload.agent.weight;
+      if (typeof weight !== "number" || !Number.isFinite(weight) || weight < 1 || weight > 10) {
+        errors.push("agent.weight must be a number between 1 and 10");
       }
       break;
     }
@@ -226,6 +228,12 @@ export function executeAmendment(payload: AmendmentPayload, state: DAOState): Am
         break;
       }
       case "agent-add": {
+        // Ids are identity keys (votes, councils, delegation) — a duplicate
+        // would make two council members share an identity and silently
+        // overwrite each other's vote.
+        if (state.agents.some((agent) => agent.id === payload.agent.id)) {
+          return { success: false, error: `Agent ${payload.agent.id} already exists` };
+        }
         state.agents.push({ ...payload.agent, systemPrompt: payload.agent.systemPrompt || "You are a DAO agent." });
         break;
       }
