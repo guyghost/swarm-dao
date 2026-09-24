@@ -18,9 +18,11 @@ Fix five latent core defects found in the bug hunt:
 
 Second pass (low-severity hardening):
 
-- Risk classification now matches security keywords on word boundaries:
-  "author"/"authoritative" no longer force the red zone, while authentication,
-  authorization, token, password, etc. still do.
+- Risk classification matches the "auth" family on word boundaries (with
+  prefixes: unauthorized/reauthentication/OAuth/deauthorize) so
+  "author"/"authoritative" no longer force the red zone while the security forms
+  still do; the unambiguous stems (security, token, password, …) stay substring
+  based so compounds like "cybersecurity"/"passwordless" keep matching.
 - Amendments reject non-numeric / out-of-range agent weights and refuse to add
   a duplicate agent id (identity keys must stay unique).
 - The ship-audit claim is held until the confirmation is consumed, so two
