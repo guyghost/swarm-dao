@@ -6,6 +6,7 @@ import type { ClockPort } from "../ports/clock.js";
 import type { AgentWorkerPort } from "../ports/host.js";
 import type { DAOAgent, ProposalType } from "../types/index.js";
 import { PROPOSAL_TYPE, PROPOSAL_TYPES } from "../types/index.js";
+import { normalizeBatchSize } from "../utils/batching.js";
 import { type ModelResolutionContext, resolveAgentModel } from "./model.js";
 
 export interface RoundTableSuggestion {
@@ -47,9 +48,11 @@ export async function runRoundTable(
   const suggestions: RoundTableSuggestion[] = [];
   const brief = options.projectBrief?.trim();
 
-  // Process in batches
-  for (let i = 0; i < agents.length; i += maxConcurrent) {
-    const batch = agents.slice(i, i + maxConcurrent);
+  // Process in batches. Normalized: a zero/negative/NaN size would stall the
+  // `i += size` loop forever (config is editable).
+  const batchSize = normalizeBatchSize(maxConcurrent);
+  for (let i = 0; i < agents.length; i += batchSize) {
+    const batch = agents.slice(i, i + batchSize);
 
     const batchPromises = batch.map(async (agent) => {
       try {

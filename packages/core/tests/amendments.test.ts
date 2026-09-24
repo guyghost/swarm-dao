@@ -25,4 +25,16 @@ describe("governance/amendments.ts", () => {
     const preview = previewAmendment(payload, state);
     expect(preview.length).toBeGreaterThan(0);
   });
+
+  it("rejects a non-positive maxConcurrent in a config-update amendment", () => {
+    for (const maxConcurrent of [0, -1, 1.5, Number.NaN]) {
+      const validation = validateAmendmentPayload({
+        type: "config-update",
+        changes: { maxConcurrent },
+      });
+      expect(validation.valid).toBe(false);
+      expect(validation.errors.join("\n")).toContain("maxConcurrent");
+    }
+    expect(validateAmendmentPayload({ type: "config-update", changes: { maxConcurrent: 4 } }).valid).toBe(true);
+  });
 });

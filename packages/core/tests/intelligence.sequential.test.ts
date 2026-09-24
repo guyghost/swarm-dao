@@ -27,6 +27,20 @@ describe("extractAnalysis", () => {
       expect(extractAnalysis(content)).toBe("## Analysis\nKeep this.");
     }
   });
+
+  test("also strips the rendered heading forms the tally parses (issue #178)", () => {
+    // Hosts like herdr harvest rendered terminal text where the `##` glyphs are
+    // gone; the tally still parses these as votes, so they must not leak.
+    for (const variant of ["Vote\nfor", "Vote:\nfor", "  Vote  \nagainst"]) {
+      const content = `## Analysis\nKeep this.\n\n${variant}\nsecret reasoning`;
+      expect(extractAnalysis(content)).toBe("## Analysis\nKeep this.");
+    }
+  });
+
+  test("ignores a vote heading inside a fenced code block", () => {
+    const content = "## Analysis\nKeep this.\n\n```\n## Vote\nfor\n```\nstill analysis";
+    expect(extractAnalysis(content)).toBe(content.trim());
+  });
 });
 
 describe("buildPriorAnalysesSection", () => {

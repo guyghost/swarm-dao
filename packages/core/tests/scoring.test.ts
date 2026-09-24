@@ -27,6 +27,16 @@ describe("governance/scoring.ts", () => {
     expect(ranked[0]?.rank).toBe(1);
   });
 
+  it("bounds RICE inputs before scoring (finite score when effort is 0)", () => {
+    const rice = calculateRICEScore(100, 20, 150, 0);
+    expect(rice.impact).toBe(10);
+    expect(rice.confidence).toBe(100);
+    expect(rice.effort).toBe(0.1);
+    expect(Number.isFinite(rice.riceScore)).toBe(true);
+    // The score must be derived from the bounded values, not the raw inputs.
+    expect(rice.riceScore).toBe((100 * 10 * (100 / 100)) / 0.1);
+  });
+
   it("parseScoresFromOutput: single pass captures all axes, orderings, formats, and edge cases (parity)", () => {
     const cases = [
       {

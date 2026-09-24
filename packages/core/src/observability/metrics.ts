@@ -437,7 +437,11 @@ export function formatMetricsPrometheus(): string {
     output += `# TYPE ${histogram.name} histogram\n`;
     const buckets = histogram.getBucketCounts();
     for (const [bucket, count] of Object.entries(buckets)) {
-      output += `${histogram.name}_bucket{le="${bucket}"} ${count}\n`;
+      // getBucketCounts keys are prefixed (`le_10`, `+Inf`) to stay distinct in
+      // the returned record; the exposition-format `le` label must carry the raw
+      // boundary (`10`, `+Inf`), never the internal key (`le="le_10"`).
+      const boundary = bucket.startsWith("le_") ? bucket.slice(3) : bucket;
+      output += `${histogram.name}_bucket{le="${boundary}"} ${count}\n`;
     }
     output += `${histogram.name}_count ${histogram.getCount()}\n`;
     output += `${histogram.name}_sum ${histogram.getSum()}\n\n`;

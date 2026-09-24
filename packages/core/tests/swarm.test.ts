@@ -137,6 +137,27 @@ describe("intelligence/swarm.ts", () => {
     // The per-agent role round-trips, proving each output maps to the right agent.
     expect(outputs.map((o) => o.role).sort()).toEqual(["r-alpha", "r-beta", "r-gamma"]);
   });
+
+  it("does not stall when maxConcurrent is zero (editable config)", async () => {
+    const agents: DAOAgent[] = [
+      { id: "alpha", name: "Alpha", role: "r-alpha", description: "d", systemPrompt: "sp", weight: 1 },
+      { id: "beta", name: "Beta", role: "r-beta", description: "d", systemPrompt: "sp", weight: 2 },
+    ];
+    const dispatched: string[] = [];
+    const adapter = {
+      hostId: "test-host",
+      spawnAgent: async ({ agent }: { agent: DAOAgent }): Promise<AgentOutput> => {
+        dispatched.push(agent.id);
+        return { agentId: agent.id, agentName: agent.name, role: agent.role, content: "ok", durationMs: 1 };
+      },
+    } as unknown as HostAdapter;
+
+    // Regression: `i += maxConcurrent` stalled forever on a non-positive size.
+    const outputs = await dispatchSwarm(briefProposal, agents, adapter, 0, buildModelResolutionContext());
+
+    expect(outputs.length).toBe(2);
+    expect(dispatched.sort()).toEqual(["alpha", "beta"]);
+  });
 });
 
 describe("handleDaoRoundtable — batched audit writes (task 8)", () => {

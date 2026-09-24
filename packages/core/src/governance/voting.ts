@@ -37,6 +37,15 @@ export function resolveTypeThresholds(proposal: Proposal, config: DAOConfig): Ty
 // can cross a newline.
 const VOTE_HEADING = /^[ \t]*(?:##[ \t]*)?vote[ \t:]*$/i;
 const VOTE_WORD = /^(for|against|abstain)$/i;
+
+/** True for a line that opens a vote section. Exported as the single source of
+ *  truth for "a line the tally parses as a vote heading": the sequential
+ *  pipeline strips everything from this line on before forwarding an analysis,
+ *  so it must accept exactly the same variants (raw `## Vote` AND the rendered
+ *  `Vote`/`Vote:` form a host TUI leaves on screen — issue #178). */
+export function isVoteHeadingLine(line: string): boolean {
+  return VOTE_HEADING.test(line);
+}
 const REASONING_HEADING = /^[ \t]*(?:##[ \t]*)?reasoning[ \t:]*$/i;
 const DELEGATED_FACETS_HEADING = /^##[ \t]*delegated[ \t]+facets[ \t]*$/i;
 const FENCE = /^[ \t]*```/;

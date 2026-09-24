@@ -3,6 +3,7 @@ import {
   createCounter,
   createGauge,
   createHistogram,
+  formatMetricsPrometheus,
   getCounter,
   recordProposalCreated,
   resetMetrics,
@@ -67,6 +68,17 @@ describe("observability/metrics.ts", () => {
     expect(buckets.le_10).toBe(1);
     expect(buckets.le_100).toBe(4);
     expect(buckets["+Inf"]).toBe(5);
+  });
+
+  it("emits raw le boundaries in the Prometheus exposition, not internal keys", () => {
+    const histogram = createHistogram("exposition_histogram", "Test", [10, 100]);
+    histogram.observe(5, { kind: "t" });
+
+    const out = formatMetricsPrometheus();
+    expect(out).toContain('exposition_histogram_bucket{le="10"}');
+    expect(out).toContain('exposition_histogram_bucket{le="100"}');
+    expect(out).toContain('exposition_histogram_bucket{le="+Inf"}');
+    expect(out).not.toContain('le="le_10"');
   });
 
   it("reset clears aggregated state", () => {

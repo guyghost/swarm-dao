@@ -82,6 +82,16 @@ export function validateAmendmentPayload(payload: AmendmentPayload): AmendmentVa
       ) {
         errors.push("quorumPercent must be 1-100");
       }
+      // maxConcurrent feeds the `i += size` chunking loops: zero/negative/NaN
+      // would stall deliberation forever, so it must be a positive integer.
+      if (
+        payload.changes.maxConcurrent !== undefined &&
+        (typeof payload.changes.maxConcurrent !== "number" ||
+          !Number.isInteger(payload.changes.maxConcurrent) ||
+          payload.changes.maxConcurrent < 1)
+      ) {
+        errors.push("maxConcurrent must be a positive integer");
+      }
       break;
     }
     case "quorum-update": {

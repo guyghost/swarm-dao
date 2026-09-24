@@ -336,4 +336,43 @@ describe("FileDaoStateRepository concurrency", () => {
       await fs.rm(cwd, { recursive: true, force: true });
     }
   });
+
+  it("repairs a partial config from state.json so downstream gates cannot crash", async () => {
+    const cwd = await mkRoot();
+    try {
+      const daoRoot = path.join(cwd, ".dao");
+      await fs.mkdir(daoRoot, { recursive: true });
+      // Regression: `{ "config": {} }` used to replace the whole default config,
+      // leaving `requiredGates`/`typeQuorum` undefined (runGates/tallyVotes crash).
+      await fs.writeFile(path.join(daoRoot, "state.json"), JSON.stringify({ initialized: true, config: {} }), "utf8");
+
+      const repo = await FileDaoStateRepository.open(cwd);
+      const config = repo.get().config;
+      expect(Array.isArray(config.requiredGates)).toBe(true);
+      expect(config.requiredGates.length).toBeGreaterThan(0);
+      expect(typeof config.quorumPercent).toBe("number");
+      expect(config.maxConcurrent).toBeGreaterThanOrEqual(1);
+      expect(typeof config.typeQuorum["product-feature"]?.quorumPercent).toBe("number");
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("normalizes a non-positive maxConcurrent from state.json", async () => {
+    const cwd = await mkRoot();
+    try {
+      const daoRoot = path.join(cwd, ".dao");
+      await fs.mkdir(daoRoot, { recursive: true });
+      await fs.writeFile(
+        path.join(daoRoot, "state.json"),
+        JSON.stringify({ initialized: true, config: { maxConcurrent: 0 } }),
+        "utf8",
+      );
+
+      const repo = await FileDaoStateRepository.open(cwd);
+      expect(repo.get().config.maxConcurrent).toBeGreaterThanOrEqual(1);
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
 });
