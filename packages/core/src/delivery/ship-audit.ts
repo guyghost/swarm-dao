@@ -86,7 +86,16 @@ export interface ShipAuditGateOptions {
 }
 
 export type ShipAuditGateResult =
-  | { proceed: true; note?: string; consume?: () => Promise<void> }
+  | {
+      proceed: true;
+      note?: string;
+      /** Spends the single confirmation. Releases the exclusive claim when it
+       *  completes (the confirmation write runs under the claim). */
+      consume?: () => Promise<void>;
+      /** Idempotent safety release for caller error paths; `consume` calls it
+       *  too. Calling it without `consume` leaves the confirmation unspent. */
+      release?: () => Promise<void>;
+    }
   | { proceed: false; message: string };
 
 const REQUEST = (fingerprint: string) =>
@@ -151,11 +160,41 @@ export async function evaluateShipAuditChallenge(input: {
       message: `A concurrent ship gate for proposal #${input.proposal.id} is in flight; retry once it completes.`,
     };
   }
-  try {
-    return await gate(input);
-  } finally {
+  let released = false;
+  const release = async (): Promise<void> => {
+    if (released) return;
+    released = true;
     await claim.release();
+  };
+
+  let result: ShipAuditGateResult;
+  try {
+    result = await gate(input);
+  } catch (error) {
+    await release();
+    throw error;
   }
+
+  // INV-6: when a confirmation is granted, HOLD the claim until the caller
+  // spends it — the write that marks the cycle consumed must run under the same
+  // exclusive claim that read the snapshot, so two concurrent confirms cannot
+  // both proceed. Every other path releases immediately.
+  if (result.proceed && result.consume) {
+    const consume = result.consume;
+    return {
+      ...result,
+      release,
+      consume: async () => {
+        try {
+          await consume();
+        } finally {
+          await release();
+        }
+      },
+    };
+  }
+  await release();
+  return result;
 }
 
 async function gate(input: {

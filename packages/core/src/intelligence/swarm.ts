@@ -10,6 +10,7 @@ import {
 } from "../governance/delegation.utils.js";
 import type { AgentWorkerPort } from "../ports/host.js";
 import type { AgentOutput, DAOAgent, DAOConfig, Proposal } from "../types/index.js";
+import { normalizeBatchSize } from "../utils/batching.js";
 import { drainDelegations, runDelegations } from "./delegation.js";
 import {
   buildModelResolutionContext,
@@ -186,9 +187,12 @@ export async function dispatchSwarm(
   }
 
   try {
-    // Process in batches based on maxConcurrent
-    for (let i = 0; i < instructions.length; i += maxConcurrent) {
-      const batch = instructions.slice(i, i + maxConcurrent);
+    // Process in batches based on maxConcurrent. Normalized: a zero/negative/
+    // NaN size (editable config, `config-update` amendment) would otherwise
+    // stall this `i += size` loop forever (never reaches the next batch).
+    const batchSize = normalizeBatchSize(maxConcurrent);
+    for (let i = 0; i < instructions.length; i += batchSize) {
+      const batch = instructions.slice(i, i + batchSize);
 
       const batchPromises = batch.map(async (inst) => {
         const agent = agentById.get(inst.agentId);

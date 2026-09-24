@@ -124,12 +124,18 @@ export function formatCompositeScore(score: CompositeScore): string {
 // ── RICE Scoring ─────────────────────────────────────────────
 
 export function calculateRICEScore(reach: number, impact: number, confidence: number, effort: number): RICEScore {
-  const riceScore = (reach * impact * (confidence / 100)) / effort;
+  // Bound the inputs BEFORE scoring: computing from the raw values both
+  // mismatched the reported normalized fields and let `effort = 0` divide to
+  // Infinity (the returned `effort` floor of 0.1 was applied too late).
+  const boundedImpact = Math.min(10, Math.max(1, impact));
+  const boundedConfidence = Math.min(100, Math.max(0, confidence));
+  const boundedEffort = Math.max(0.1, effort);
+  const riceScore = (reach * boundedImpact * (boundedConfidence / 100)) / boundedEffort;
   return {
     reach,
-    impact: Math.min(10, Math.max(1, impact)),
-    confidence: Math.min(100, Math.max(0, confidence)),
-    effort: Math.max(0.1, effort),
+    impact: boundedImpact,
+    confidence: boundedConfidence,
+    effort: boundedEffort,
     riceScore: Math.round(riceScore * 10) / 10,
   };
 }

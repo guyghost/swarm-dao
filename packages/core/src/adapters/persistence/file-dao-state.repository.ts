@@ -4,7 +4,14 @@ import { logger } from "../../observability/logging.js";
 import { TraceLog } from "../../observability/tracing.js";
 import { PersistConflictError } from "../../ports/persist-conflict.js";
 import type { DaoStateRepositoryPort } from "../../ports/repository.js";
-import { createInitialState, type DAOState, type DecisionRecord } from "../../types/index.js";
+import {
+  createInitialState,
+  type DAOConfig,
+  type DAOState,
+  type DecisionRecord,
+  type ProposalType,
+} from "../../types/index.js";
+import { normalizeBatchSize } from "../../utils/batching.js";
 import { resolveDaoLayout } from "../dao-home/dao-home.js";
 import {
   ARCHIVE_FILE_NAME,
@@ -22,6 +29,10 @@ function formatJson(value: unknown): string {
 
 function isPositiveInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value > 0;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /**
@@ -52,6 +63,76 @@ interface RepairResult {
   /** True when shape repair substituted data (a sign of a damaged file that
    *  the caller should back up before the first persist overwrites it). */
   repaired: boolean;
+}
+
+/** Shape of a `typeQuorum` entry: both thresholds must be numbers. */
+function sanitizeTypeQuorum(
+  candidate: unknown,
+  fallback: DAOConfig["typeQuorum"],
+): { value: DAOConfig["typeQuorum"]; repaired: boolean } {
+  if (candidate === undefined) return { value: fallback, repaired: false };
+  if (!isRecord(candidate)) return { value: fallback, repaired: true };
+  const value: DAOConfig["typeQuorum"] = { ...fallback };
+  let repaired = false;
+  for (const [type, entry] of Object.entries(candidate)) {
+    if (
+      !isRecord(entry) ||
+      typeof entry.quorumPercent !== "number" ||
+      !Number.isFinite(entry.quorumPercent) ||
+      typeof entry.approvalPercent !== "number" ||
+      !Number.isFinite(entry.approvalPercent)
+    ) {
+      repaired = true;
+      continue;
+    }
+    value[type as ProposalType] = {
+      quorumPercent: entry.quorumPercent,
+      approvalPercent: entry.approvalPercent,
+      description: typeof entry.description === "string" ? entry.description : String(type),
+    };
+  }
+  return { value, repaired };
+}
+
+/**
+ * Repair the persisted `config` (issue: config shape was never validated, so
+ * `{ "config": {} }` in an editable state.json replaced the whole default and
+ * crashed `runGates`/`tallyVotes`). Missing fields fall back to the defaults;
+ * present-but-invalid fields are substituted and flag the file for backup.
+ * `maxConcurrent` is normalized so the chunking loops can never stall.
+ */
+function repairConfig(candidate: unknown, fallback: DAOConfig): { config: DAOConfig; repaired: boolean } {
+  if (candidate === undefined) return { config: fallback, repaired: false };
+  if (!isRecord(candidate)) return { config: fallback, repaired: true };
+  let repaired = false;
+  const config: DAOConfig = { ...fallback, ...(candidate as Partial<DAOConfig>) };
+  for (const key of ["quorumPercent", "approvalThreshold", "riskThreshold", "quorumFloor"] as const) {
+    const raw = candidate[key];
+    if (raw === undefined) continue;
+    if (typeof raw !== "number" || !Number.isFinite(raw)) {
+      config[key] = fallback[key];
+      repaired = true;
+    }
+  }
+  if (
+    candidate.maxConcurrent !== undefined &&
+    (typeof candidate.maxConcurrent !== "number" ||
+      !Number.isFinite(candidate.maxConcurrent) ||
+      candidate.maxConcurrent < 1)
+  ) {
+    repaired = true;
+  }
+  config.maxConcurrent = normalizeBatchSize(config.maxConcurrent);
+  if (candidate.requiredGates !== undefined) {
+    if (!Array.isArray(candidate.requiredGates) || !candidate.requiredGates.every((gate) => typeof gate === "string")) {
+      config.requiredGates = [...fallback.requiredGates];
+      repaired = true;
+    }
+  }
+  const typeQuorum = sanitizeTypeQuorum(candidate.typeQuorum, fallback.typeQuorum);
+  config.typeQuorum = typeQuorum.value;
+  if (typeQuorum.repaired) repaired = true;
+  return { config, repaired };
 }
 
 function repairState(value: Partial<DAOState>, daoRoot: string): RepairResult {
@@ -89,6 +170,9 @@ function repairState(value: Partial<DAOState>, daoRoot: string): RepairResult {
   state.nextProposalId = intOr(value.nextProposalId, 1);
   state.nextAuditId = intOr(value.nextAuditId, 1);
   state.stateRevision = readRevision(value);
+  const configRepair = repairConfig((value as { config?: unknown }).config, fallback.config);
+  state.config = configRepair.config;
+  if (configRepair.repaired) repaired = true;
   repairCounters(state);
   return { state, repaired };
 }

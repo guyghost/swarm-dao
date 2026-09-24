@@ -105,4 +105,30 @@ describe("intelligence/roundtable", () => {
       },
     ]);
   });
+
+  it("does not stall when maxConcurrent is zero (editable config)", async () => {
+    const agent = (id: string): DAOAgent => ({
+      id,
+      name: id,
+      role: "r",
+      description: "d",
+      systemPrompt: "sp",
+      weight: 1,
+    });
+    const adapter = {
+      spawnAgent: async (input: { agent: DAOAgent }): Promise<AgentOutput> => ({
+        agentId: input.agent.id,
+        agentName: input.agent.name,
+        role: input.agent.role,
+        content: "## Suggested Proposal\n**Title:** t\n**Type:** technical-change\n**Description:** d",
+        durationMs: 1,
+      }),
+      spawnAgents: async (): Promise<AgentOutput[]> => [],
+    };
+
+    // Regression: `i += maxConcurrent` stalled forever on a non-positive size.
+    const suggestions = await runRoundTable(adapter, [agent("a"), agent("b")], 0, buildModelResolutionContext());
+
+    expect(suggestions.length).toBe(2);
+  });
 });

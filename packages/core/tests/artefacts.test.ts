@@ -82,6 +82,19 @@ describe("delivery/artefacts", () => {
     expect(brief.approvalScore).toBe(0);
   });
 
+  it("excludes abstain weight from the decision-brief approval score", () => {
+    const brief = generateDecisionBrief({
+      ...mockProposal,
+      votes: [
+        { agentId: "a", agentName: "A", position: "for", reasoning: "ok", weight: 2 },
+        { agentId: "b", agentName: "B", position: "against", reasoning: "no", weight: 1 },
+        { agentId: "c", agentName: "C", position: "abstain", reasoning: "meh", weight: 3 },
+      ],
+    });
+    // for 2 / decisive (2 + 1) = 67%, not 2 / 6 = 33%.
+    expect(brief.approvalScore).toBe(67);
+  });
+
   it("generates ADR", () => {
     const adr = generateADR(mockProposal);
     expect(adr.adrId).toBe("ADR-042");

@@ -106,6 +106,8 @@ describe("planExecutionIsolation", () => {
       "a/../b",
       "origin/../evil",
       "main..next",
+      "main//next",
+      "feature//x",
       "main ",
       "",
     ];

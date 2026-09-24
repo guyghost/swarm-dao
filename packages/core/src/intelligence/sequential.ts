@@ -11,23 +11,37 @@
 // transitions, no new AI authority — agents still emit text that is parsed
 // into votes exactly as in the parallel strategy.
 
+import { isVoteHeadingLine } from "../governance/voting.js";
 import type { AgentWorkerPort } from "../ports/host.js";
 import type { AgentOutput, DAOAgent, Proposal } from "../types/index.js";
 import type { ModelResolutionContext } from "./model.js";
 import { type RuntimeResolutionContext, resolveAgentRuntime } from "./runtime.js";
 import { buildDispatchInstructions } from "./swarm.js";
 
+const FENCE = /^[ \t]*```/;
+
 /**
  * Content up to the first vote section: the analysis an agent produced,
  * stripped of its vote and reasoning so later voters stay independent.
- * Accepts exactly the heading variants the tally parser accepts
- * (VOTE_PATTERN in governance/voting.ts) — a vote the tally can parse must
- * never leak downstream.
+ * Uses `isVoteHeadingLine` (governance/voting.ts) — the SAME matcher as the
+ * tally parser, so every heading the tally can parse (raw `## Vote` AND the
+ * rendered `Vote`/`Vote:` form) is stripped here too; a vote the tally can
+ * parse must never leak downstream. Fenced code headings are ignored, exactly
+ * as the tally ignores them.
  */
 export function extractAnalysis(content: string): string {
-  const voteIndex = content.search(/##\s*Vote\s*\n/i);
-  const analysis = voteIndex === -1 ? content : content.slice(0, voteIndex);
-  return analysis.trim();
+  const lines = content.split("\n");
+  let inFence = false;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] ?? "";
+    if (FENCE.test(line)) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence) continue;
+    if (isVoteHeadingLine(line)) return lines.slice(0, i).join("\n").trim();
+  }
+  return content.trim();
 }
 
 export interface PriorAnalysesOptions {
