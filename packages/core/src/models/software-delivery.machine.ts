@@ -40,6 +40,9 @@ export type SoftwareDeliveryContext = {
   readonly proposalId: string | null;
   readonly scope: string;
   readonly scopeHash: string;
+  readonly creditsPerGraphAttempt: number | null;
+  readonly observationWindowMs: number | null;
+  readonly observationIntervalMs: number | null;
   readonly initialRiskClass: DeliveryRiskClass;
   riskClass: DeliveryRiskClass;
   modelArtifactHash: string | null;
@@ -64,6 +67,9 @@ export type SoftwareDeliveryMachineInput = Readonly<{
   proposalId?: string | null;
   scope: string;
   scopeHash: string;
+  creditsPerGraphAttempt?: number;
+  observationWindowMs?: number;
+  observationIntervalMs?: number;
   riskClass: DeliveryRiskClass;
 }>;
 
@@ -146,6 +152,9 @@ const initialContext = (input: SoftwareDeliveryMachineInput): SoftwareDeliveryCo
   proposalId: input.proposalId ?? null,
   scope: input.scope,
   scopeHash: input.scopeHash,
+  creditsPerGraphAttempt: input.creditsPerGraphAttempt ?? null,
+  observationWindowMs: input.observationWindowMs ?? null,
+  observationIntervalMs: input.observationIntervalMs ?? null,
   initialRiskClass: input.riskClass,
   riskClass: input.riskClass,
   modelArtifactHash: null,

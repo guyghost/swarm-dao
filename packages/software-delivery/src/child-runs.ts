@@ -6,6 +6,7 @@ import {
   type GraphAnchorResult,
   type GraphEngineeringContext,
   PRODUCT_ALLOWED_CATEGORIES,
+  PRODUCT_SHIP_GATE_ANCHORS,
   type ProductContext,
   type ProductSignalSource,
   REQUIRED_GRAPH_ANCHORS,
@@ -57,6 +58,8 @@ export type ProductChildInspection =
       budgetRemaining: number;
       rollbackArtifact: string;
       scopeEvidence: string;
+      reviewReason: string | null;
+      shipGateReady: boolean;
     }>
   | Readonly<{ kind: "rejected"; issues: readonly string[] }>;
 
@@ -77,6 +80,7 @@ export type ProductChildOptions = Readonly<{
 export type ProductInspectionOptions = Readonly<{
   stageRoot?: string;
   allowedStates?: readonly string[];
+  expectedRollbackArtifact?: string;
 }>;
 
 export type GraphChildOptions = Readonly<{
@@ -228,9 +232,11 @@ export const inspectProductChild = (
     Number.isFinite(budget.consumed) &&
     budget.initial > 0 &&
     budget.consumed >= 0 &&
-    Array.isArray(budget.history) &&
-    budget.initial - budget.consumed > 0;
-  if (!validBudget) issues.push("Product budget envelope is invalid or exhausted");
+    Array.isArray(budget.history);
+  const budgetRemaining = validBudget && budget ? budget.initial - budget.consumed : 0;
+  if (!validBudget || (budgetRemaining <= 0 && snapshot.state !== "review")) {
+    issues.push("Product budget envelope is invalid or exhausted");
+  }
 
   const rollbackArtifact = draft?.rollbackArtifact ?? "";
   if (!nonEmptyString(rollbackArtifact)) issues.push("rollback artifact reference is missing");
@@ -242,12 +248,28 @@ export const inspectProductChild = (
   ) {
     issues.push("rollback artifact is outside the configured staging target");
   }
+  if (
+    options.stageRoot &&
+    options.expectedRollbackArtifact &&
+    nonEmptyString(rollbackArtifact) &&
+    resolve(options.stageRoot, rollbackArtifact) !== resolve(options.stageRoot, options.expectedRollbackArtifact)
+  ) {
+    issues.push("rollback artifact does not resolve to the configured active staging pointer");
+  }
 
-  if (issues.length > 0 || !draft || !validBudget) return { kind: "rejected", issues };
+  if (issues.length > 0 || !draft || !validBudget || !budget) return { kind: "rejected", issues };
 
   const category = draft.category;
   const riskClass: "standard" | "sensitive" =
     category === "security" || draft.touchesSensitive ? "sensitive" : "standard";
+  const controls = Object.values(context.controls);
+  const shipGateReady =
+    budgetRemaining > 0 &&
+    controls.length > 0 &&
+    controls.every((control) => control.status === "passed" && nonEmptyString(control.evidence)) &&
+    PRODUCT_SHIP_GATE_ANCHORS.every(
+      (anchor) => context.anchors[anchor]?.status === "passed" && nonEmptyString(context.anchors[anchor]?.evidence),
+    );
   return {
     kind: "ready",
     productRunId: expectedRunId,
@@ -257,9 +279,11 @@ export const inspectProductChild = (
     riskClass,
     category,
     touchesSensitive: draft.touchesSensitive,
-    budgetRemaining: budget.initial - budget.consumed,
+    budgetRemaining,
     rollbackArtifact,
     scopeEvidence: draft.evidence,
+    reviewReason: context.reviewReason,
+    shipGateReady,
   };
 };
 

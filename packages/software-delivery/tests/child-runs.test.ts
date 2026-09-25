@@ -149,6 +149,23 @@ describe("delivery child run adapters", () => {
     if (rejected.kind === "rejected") expect(rejected.issues.join("\n")).toMatch(/rollback.*stag|stag.*rollback/i);
   });
 
+  it("requires the Product rollback artifact to resolve to active.json when delivery supplies an exact pointer", () => {
+    const exact = productSnapshotWithDraft({ rollbackArtifact: "active.json" });
+    const accepted = inspectProductChild("product-7", exact, {
+      stageRoot: "/tmp/delivery-stage",
+      expectedRollbackArtifact: "active.json",
+    });
+    expect(accepted.kind).toBe("ready");
+
+    const wrong = productSnapshotWithDraft({ rollbackArtifact: `rollback/${rollbackHash}.json` });
+    const rejected = inspectProductChild("product-7", wrong, {
+      stageRoot: "/tmp/delivery-stage",
+      expectedRollbackArtifact: "active.json",
+    });
+    expect(rejected.kind).toBe("rejected");
+    if (rejected.kind === "rejected") expect(rejected.issues.join("\n")).toMatch(/active staging pointer/i);
+  });
+
   it("requires a replayable accepted Graph approval for the exact model hash", () => {
     const good = inspectGraphChild("graph-7", graphSnapshot(), [approval()]);
     expect(good.kind).toBe("ready");

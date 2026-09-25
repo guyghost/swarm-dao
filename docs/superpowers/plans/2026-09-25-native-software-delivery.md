@@ -289,7 +289,7 @@
 
 **Interfaces:** `createLocalStagingTarget({ stageRoot, snapshotSource })` exposes `initialize()`, `snapshot()`, `inspect()`, `ship({ effectId, artifact })`, and `rollback({ effectId, expectedActiveHash })`. Artifacts are immutable and SHA-256 keyed; initial baseline is an empty active pointer.
 
-- [ ] **Step 1: Write stage and rollback tests**
+- [x] **Step 1: Write stage and rollback tests**
 
   ```ts
   it("ships one immutable artifact and restores the empty baseline", async () => {
@@ -304,11 +304,11 @@
 
   Also test duplicate effects, altered pointer, missing blob, interrupted pointer update, and rollback replay.
 
-- [ ] **Step 2: Implement immutable storage and atomic pointer updates**
+- [x] **Step 2: Implement immutable storage and atomic pointer updates**
 
   Write under `<stageRoot>/artifacts/<sha256>`; verify before atomically replacing `active.json`. Preserve previous blobs. Return prior result for a completed effect key. Rollback checks current hash before restoring the previous pointer.
 
-- [ ] **Step 3: Write observation omission tests**
+- [x] **Step 3: Write observation omission tests**
 
   ```ts
   it("omits unavailable provider cost and records measured staging checks", async () => {
@@ -323,15 +323,15 @@
 
   Require three actual clean measurements and the configured window before Product Loop evaluation. Missing customer/provider data produces no sample.
 
-- [ ] **Step 4: Charge budget before Graph implementation**
+- [x] **Step 4: Charge budget before Graph implementation**
 
   Require positive immutable `creditsPerGraphAttempt`. Submit `BUDGET_CHARGE` through ProductRunner's `budget-ledger` producer before `runGraphImplementing`. If rejected or Product enters review, do not invoke the worker. Credits are task units, not money; monetary `aiCost` is reported only when measured by the host.
 
-- [ ] **Step 5: Verify rollback proof and gate ship**
+- [x] **Step 5: Verify rollback proof and gate ship**
 
   Require Product `draft.rollbackArtifact` to resolve to the configured active pointer; prove it is readable and restorable before recording `rollback-path-exists`. Ship only when ProductRunner is in `ship`. Sensitive work waits for the Product runner's human deploy approval and resulting `ship` state.
 
-- [ ] **Step 6: Verify and commit**
+- [x] **Step 6: Verify and commit**
 
   Run: `bun test packages/software-delivery/tests/staging-target.test.ts packages/software-delivery/tests/observations.test.ts`.
 

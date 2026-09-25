@@ -42,6 +42,20 @@ const reachImplementation = (actor: DeliveryActor, riskClass: DeliveryRiskClass 
 };
 
 describe("software delivery machine", () => {
+  it("freezes per-run budget and observation limits in the parent context", () => {
+    const actor = createSoftwareDeliveryActor({
+      ...input(),
+      creditsPerGraphAttempt: 3,
+      observationWindowMs: 60_000,
+      observationIntervalMs: 20_000,
+    });
+
+    expect(actor.getSnapshot().context.creditsPerGraphAttempt).toBe(3);
+    expect(actor.getSnapshot().context.observationWindowMs).toBe(60_000);
+    expect(actor.getSnapshot().context.observationIntervalMs).toBe(20_000);
+    actor.stop();
+  });
+
   it("holds unknown risk before model preparation and preserves the initial classification", () => {
     const actor = createSoftwareDeliveryActor(input("unknown"));
     send(actor, { type: "INTAKE_ACCEPTED", source: "tool", evidence: "product-journal:8" });

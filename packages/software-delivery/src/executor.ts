@@ -1,3 +1,4 @@
+import type { ObservationSample } from "@guyghost/swarm-dao-core";
 import type { PersistedGraphSnapshot } from "@guyghost/swarm-dao-graph";
 import type { PersistedProductSnapshot } from "@guyghost/swarm-dao-product";
 import {
@@ -6,6 +7,7 @@ import {
   inspectGraphChild,
   inspectProductChild,
 } from "./child-runs.js";
+import { evaluateStagingObservation } from "./observations.js";
 import { type DeliveryRunner, deriveDeliveryEffectKey, type PersistedDeliveryEffect } from "./runner.js";
 
 export type DeliveryProductRunView = Readonly<{
@@ -53,11 +55,19 @@ export type DeliveryExecutorPorts = Readonly<{
     effectId: string;
   }) => Promise<DeliveryEffectOutput<{ state?: string }>>;
   verifyGraphAnchors: (input: { runId: string; effectId: string }) => Promise<DeliveryEffectOutput>;
-  submitProductSignal: (runId: string, signal: unknown) => Promise<DeliveryEffectOutput<{ accepted?: boolean }>>;
+  submitProductSignal: (
+    runId: string,
+    signal: unknown,
+  ) => Promise<DeliveryEffectOutput<{ accepted?: boolean; state?: string }>>;
   verifyProduct: (input: {
     runId: string;
     effectId: string;
   }) => Promise<DeliveryEffectOutput<{ state: "ship" | "review" | "blocked" }>>;
+  verifyRollbackPath: (input: {
+    runId: string;
+    rollbackArtifact: string;
+    effectId: string;
+  }) => Promise<DeliveryEffectOutput<{ restorable: boolean }>>;
   hasReversibleStaging: () => Promise<boolean>;
   ship: (input: {
     runId: string;
@@ -77,7 +87,14 @@ export type DeliveryExecutorPorts = Readonly<{
     artifactHash: string;
     sampleIndex: number;
     effectId: string;
-  }) => Promise<DeliveryEffectOutput<{ healthy: boolean; windowElapsed: boolean }>>;
+    observationWindowMs: number;
+  }) => Promise<
+    DeliveryEffectOutput<{
+      samples: readonly ObservationSample[];
+      windowElapsed: boolean;
+      observedAt: string;
+    }>
+  >;
   cancelChildren: (input: {
     productRunId: string;
     graphRunId: string;
@@ -100,7 +117,50 @@ type EffectOutput = Readonly<{ evidence: string; value?: unknown }>;
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
+const nonEmptyString = (value: unknown): value is string => typeof value === "string" && value.trim().length > 0;
+
 const validHash = (value: unknown): value is string => typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
+
+const isObservationSample = (value: unknown): value is ObservationSample =>
+  isRecord(value) &&
+  ["errors", "aiCost", "latency", "satisfaction"].includes(String(value.metric)) &&
+  typeof value.value === "number" &&
+  Number.isFinite(value.value) &&
+  typeof value.threshold === "number" &&
+  Number.isFinite(value.threshold) &&
+  typeof value.exceeded === "boolean" &&
+  nonEmptyString(value.evidence);
+
+const deployAuthorizationExists = (product: DeliveryProductRunView): boolean =>
+  product.acceptedSignals.some(
+    (signal) =>
+      signal.eventType === "REVIEW_RESOLVED" &&
+      signal.source === "human" &&
+      signal.producer === "human-owner" &&
+      signal.payload.resolution === "deploy-authorized" &&
+      signal.evidence.some(nonEmptyString),
+  );
+
+const productVerificationDecisionExists = (product: DeliveryProductRunView): boolean => {
+  const lastControlRun = product.acceptedSignals
+    .filter(
+      (signal) =>
+        signal.eventType === "VERIFY_RUN" &&
+        signal.source === "tool" &&
+        signal.producer === "verifier" &&
+        signal.evidence.some(nonEmptyString),
+    )
+    .at(-1);
+  if (!lastControlRun) return false;
+  return product.acceptedSignals.some(
+    (signal) =>
+      signal.eventType === "VERIFY_EVALUATE" &&
+      signal.source === "system" &&
+      signal.producer === "product-runner" &&
+      signal.sequence > lastControlRun.sequence &&
+      signal.evidence.some(nonEmptyString),
+  );
+};
 
 const advanceResult = (runner: DeliveryRunner, evidence?: string): DeliveryAdvanceResult => ({
   kind: "advanced",
@@ -307,7 +367,10 @@ export const advanceDeliveryOnce = async (
   if (current.state === "intake") {
     if (!product)
       return childSignal(runner, ports, "INTAKE_REJECTED", "intake-validator", "Product child run was not found");
-    const inspected = inspectProductChild(context.productRunId, product.snapshot, { stageRoot: ports.stageRoot });
+    const inspected = inspectProductChild(context.productRunId, product.snapshot, {
+      stageRoot: ports.stageRoot,
+      expectedRollbackArtifact: "active.json",
+    });
     if (inspected.kind === "rejected") {
       return childSignal(runner, ports, "INTAKE_REJECTED", "intake-validator", inspected.issues.join("; "));
     }
@@ -352,6 +415,7 @@ export const advanceDeliveryOnce = async (
     const inspected = inspectProductChild(context.productRunId, product.snapshot, {
       stageRoot: ports.stageRoot,
       allowedStates: ["execution", "verification", "review", "ship", "observation"],
+      expectedRollbackArtifact: "active.json",
     });
     if (inspected.kind === "rejected") {
       return childSignal(runner, ports, "CHILD_BLOCKED", "product-child-adapter", inspected.issues.join("; "));
@@ -390,6 +454,7 @@ export const advanceDeliveryOnce = async (
     const inspected = inspectProductChild(context.productRunId, product.snapshot, {
       stageRoot: ports.stageRoot,
       allowedStates: ["execution", "verification", "review", "ship", "observation"],
+      expectedRollbackArtifact: "active.json",
     });
     if (inspected.kind === "rejected") {
       return childSignal(runner, ports, "CHILD_BLOCKED", "product-child-adapter", inspected.issues.join("; "));
@@ -586,8 +651,9 @@ export const advanceDeliveryOnce = async (
       });
     }
     if (inspected.kind === "verifying") {
+      const attempt = graph.snapshot.context.attempt;
       const implementationEffect = runner.getEffect(
-        deriveDeliveryEffectKey(current.runId, "run-graph-implementation", 0),
+        deriveDeliveryEffectKey(current.runId, "run-graph-implementation", attempt),
       );
       if (implementationEffect?.status === "pending") {
         return finishEffect(
@@ -595,8 +661,8 @@ export const advanceDeliveryOnce = async (
             runner,
             ports,
             "run-graph-implementation",
-            0,
-            { graphRunId: context.graphRunId, modelHash: inspected.modelHash },
+            attempt,
+            { graphRunId: context.graphRunId, modelHash: inspected.modelHash, attempt },
             (effectId) =>
               ports.runGraphImplementation({ runId: context.graphRunId, modelHash: inspected.modelHash, effectId }),
           ),
@@ -617,21 +683,91 @@ export const advanceDeliveryOnce = async (
           runner,
           ports,
           "verify-graph-anchors",
-          0,
-          { graphRunId: context.graphRunId, modelHash: inspected.modelHash },
+          attempt,
+          { graphRunId: context.graphRunId, modelHash: inspected.modelHash, attempt },
           (effectId) => ports.verifyGraphAnchors({ runId: context.graphRunId, effectId }),
         ),
         async (output) => ({ kind: "waiting-observation", state: runner.snapshot().state, reason: output.evidence }),
       );
     }
     if (inspected.kind === "implementing") {
+      const creditsPerGraphAttempt = context.creditsPerGraphAttempt;
+      if (!Number.isSafeInteger(creditsPerGraphAttempt) || (creditsPerGraphAttempt ?? 0) <= 0) {
+        throw new Error("creditsPerGraphAttempt must be a positive integer frozen in the delivery run");
+      }
+      if (product?.snapshot.state === "review") {
+        return {
+          kind: "waiting-human",
+          state: current.state,
+          reason: "Product budget or policy review must be resolved before Graph implementation",
+        };
+      }
+      if (product?.snapshot.state !== "execution") {
+        return {
+          kind: "waiting-human",
+          state: current.state,
+          reason: `Product is ${product?.snapshot.state ?? "unavailable"}; Graph implementation remains gated`,
+        };
+      }
+
+      const attempt = graph.snapshot.context.attempt;
+      const budgetEffectKey = deriveDeliveryEffectKey(current.runId, "charge-product-budget", attempt);
+      const budgetEffect = runner.getEffect(budgetEffectKey);
+      const priorBudgetValue =
+        isRecord(budgetEffect?.result) && isRecord(budgetEffect.result.value) ? budgetEffect.result.value : null;
+      if (budgetEffect?.status === "completed" && priorBudgetValue?.accepted !== true) {
+        return {
+          kind: "waiting-human",
+          state: current.state,
+          reason: "Product did not accept the Graph attempt budget charge",
+        };
+      }
+      if (budgetEffect?.status !== "completed") {
+        return finishEffect(
+          runEffect(
+            runner,
+            ports,
+            "charge-product-budget",
+            attempt,
+            { productRunId: context.productRunId, graphRunId: context.graphRunId, attempt, creditsPerGraphAttempt },
+            (effectId) =>
+              ports.submitProductSignal(context.productRunId, {
+                runId: context.productRunId,
+                type: "BUDGET_CHARGE",
+                source: "tool",
+                producer: "budget-ledger",
+                occurredAt: ports.clock(),
+                payload: {
+                  action: {
+                    amount: creditsPerGraphAttempt,
+                    description: `Graph implementation attempt ${attempt + 1} for delivery ${current.runId}`,
+                    evidence: `delivery:${current.runId}:attempt:${attempt}:budget-effect:${effectId}`,
+                  },
+                },
+                evidence: [`delivery:${current.runId}:attempt:${attempt}:budget-charge`],
+              }),
+          ),
+          async (output) => {
+            const value = output.value;
+            if (!isRecord(value) || value.accepted !== true || value.state === "review") {
+              return {
+                kind: "waiting-human",
+                state: current.state,
+                reason: "Product budget charge was rejected or entered review",
+              };
+            }
+            return advanceResult(runner, output.evidence);
+          },
+        );
+      }
+
       return finishEffect(
         runEffect(
           runner,
           ports,
           "run-graph-implementation",
-          0,
-          { graphRunId: context.graphRunId, modelHash: inspected.modelHash },
+          attempt,
+          { graphRunId: context.graphRunId, modelHash: inspected.modelHash, attempt },
           (effectId) =>
             ports.runGraphImplementation({ runId: context.graphRunId, modelHash: inspected.modelHash, effectId }),
         ),
@@ -648,13 +784,47 @@ export const advanceDeliveryOnce = async (
   if (current.state === "productVerification") {
     if (!product) return { kind: "waiting-human", state: current.state, reason: "Product child run is unavailable" };
     const productState = product.snapshot.state;
-    if (productState === "review") {
+    const inspectedProduct = inspectProductChild(context.productRunId, product.snapshot, {
+      stageRoot: ports.stageRoot,
+      allowedStates: ["execution", "verification", "review", "ship", "observation"],
+      expectedRollbackArtifact: "active.json",
+    });
+    if (inspectedProduct.kind === "rejected") {
       return childSignal(
         runner,
         ports,
-        "PRODUCT_REVIEW_REQUIRED",
+        "PRODUCT_REVIEW_BLOCKED",
         "product-child-adapter",
-        product.snapshot.context.reviewReason ?? "Product requested owner review",
+        inspectedProduct.issues.join("; "),
+      );
+    }
+    if (productState === "review") {
+      if (
+        context.riskClass === "sensitive" &&
+        inspectedProduct.shipGateReady &&
+        productVerificationDecisionExists(product)
+      ) {
+        return childSignal(
+          runner,
+          ports,
+          "PRODUCT_REVIEW_REQUIRED",
+          "product-child-adapter",
+          product.snapshot.context.reviewReason ?? "sensitive Product deploy requires owner authorization",
+        );
+      }
+      if (product.snapshot.context.reviewReason === "budget-exhausted") {
+        return {
+          kind: "waiting-human",
+          state: current.state,
+          reason: "Product budget review must be resolved before delivery verification",
+        };
+      }
+      return childSignal(
+        runner,
+        ports,
+        "PRODUCT_REVIEW_BLOCKED",
+        "product-child-adapter",
+        "Product review does not satisfy the sensitive deploy gate",
       );
     }
     if (productState === "budgetBlocked" || productState === "blocked" || productState === "rejected") {
@@ -693,6 +863,97 @@ export const advanceDeliveryOnce = async (
       );
     }
     if (productState === "verification") {
+      const rollbackAnchor = product.snapshot.context.anchors["rollback-path-exists"];
+      if (!rollbackAnchor) {
+        const rollbackProofEffect = runner.getEffect(deriveDeliveryEffectKey(current.runId, "verify-rollback-path", 0));
+        if (rollbackProofEffect?.status !== "completed") {
+          return finishEffect(
+            runEffect(
+              runner,
+              ports,
+              "verify-rollback-path",
+              0,
+              { productRunId: context.productRunId, rollbackArtifact: inspectedProduct.rollbackArtifact },
+              (effectId) =>
+                ports.verifyRollbackPath({
+                  runId: context.productRunId,
+                  rollbackArtifact: inspectedProduct.rollbackArtifact,
+                  effectId,
+                }),
+            ),
+            async (output) => advanceResult(runner, output.evidence),
+          );
+        }
+        const rollbackProof = outputFromEffect(rollbackProofEffect);
+        if (!isRecord(rollbackProof.value) || typeof rollbackProof.value.restorable !== "boolean") {
+          return {
+            kind: "waiting-human",
+            state: current.state,
+            reason: "rollback-path verifier returned no restorable decision",
+          };
+        }
+        const rollbackCanRestore = rollbackProof.value.restorable;
+        const anchorEffect = runner.getEffect(deriveDeliveryEffectKey(current.runId, "record-rollback-path-anchor", 0));
+        if (anchorEffect?.status === "completed") {
+          return {
+            kind: "waiting-human",
+            state: current.state,
+            reason: "Product accepted rollback-path evidence but its replayed snapshot has no anchor",
+          };
+        }
+        return finishEffect(
+          runEffect(
+            runner,
+            ports,
+            "record-rollback-path-anchor",
+            0,
+            {
+              productRunId: context.productRunId,
+              rollbackArtifact: inspectedProduct.rollbackArtifact,
+              restorable: rollbackCanRestore,
+            },
+            async (effectId) => {
+              const restorable = rollbackCanRestore;
+              const evidence = `${rollbackProof.evidence};${effectId}`;
+              const signal = await ports.submitProductSignal(context.productRunId, {
+                runId: context.productRunId,
+                type: "ANCHOR_RECORDED",
+                source: "tool",
+                producer: "verifier",
+                occurredAt: ports.clock(),
+                payload: {
+                  anchor: "rollback-path-exists",
+                  status: restorable ? "passed" : "failed",
+                  effectId,
+                },
+                evidence: [evidence],
+              });
+              return {
+                evidence: signal.evidence,
+                value: { restorable, accepted: signal.value?.accepted === true },
+              };
+            },
+          ),
+          async (output) => {
+            if (!isRecord(output.value) || output.value.accepted !== true) {
+              return {
+                kind: "waiting-human",
+                state: current.state,
+                reason: "Product rejected the rollback-path evidence",
+              };
+            }
+            return advanceResult(runner, output.evidence);
+          },
+        );
+      }
+      const verificationEffect = runner.getEffect(deriveDeliveryEffectKey(current.runId, "verify-product", 0));
+      if (verificationEffect?.status === "completed") {
+        return {
+          kind: "waiting-observation",
+          state: current.state,
+          reason: "Product verifier completed but Product has not left verification",
+        };
+      }
       return finishEffect(
         runEffect(
           runner,
@@ -702,19 +963,24 @@ export const advanceDeliveryOnce = async (
           { productRunId: context.productRunId, implementationHash: context.implementationHash },
           (effectId) => ports.verifyProduct({ runId: context.productRunId, effectId }),
         ),
-        async (output) => {
-          const value = output.value;
-          if (!isRecord(value))
-            return { kind: "waiting-human", state: current.state, reason: "Product verification returned no decision" };
-          if (value.state === "ship")
-            return childSignal(runner, ports, "PRODUCT_SHIP_READY", "product-child-adapter", output.evidence);
-          if (value.state === "review")
-            return childSignal(runner, ports, "PRODUCT_REVIEW_REQUIRED", "product-child-adapter", output.evidence);
-          return childSignal(runner, ports, "PRODUCT_REVIEW_BLOCKED", "product-child-adapter", output.evidence);
-        },
+        async (output) => advanceResult(runner, output.evidence),
       );
     }
     if (productState === "ship" || productState === "observation") {
+      if (
+        !inspectedProduct.shipGateReady ||
+        (context.riskClass === "sensitive"
+          ? !deployAuthorizationExists(product)
+          : !productVerificationDecisionExists(product))
+      ) {
+        return childSignal(
+          runner,
+          ports,
+          "PRODUCT_REVIEW_BLOCKED",
+          "product-child-adapter",
+          "Product is not authorized to ship: a ship-gate anchor, control, or sensitive owner authorization is missing",
+        );
+      }
       return childSignal(
         runner,
         ports,
@@ -731,13 +997,30 @@ export const advanceDeliveryOnce = async (
   }
 
   if (current.state === "awaitingShipReview") {
+    const inspectedProduct = inspectProductChild(context.productRunId, product.snapshot, {
+      stageRoot: ports.stageRoot,
+      allowedStates: ["execution", "verification", "review", "ship", "observation"],
+      expectedRollbackArtifact: "active.json",
+    });
+    if (
+      context.riskClass !== "sensitive" ||
+      inspectedProduct.kind !== "ready" ||
+      !inspectedProduct.shipGateReady ||
+      !productVerificationDecisionExists(product)
+    ) {
+      return {
+        kind: "waiting-human",
+        state: current.state,
+        reason: "Product ship-gate proof is missing for sensitive deploy review",
+      };
+    }
     const authorization = product.acceptedSignals.find(
       (signal) =>
         signal.eventType === "REVIEW_RESOLVED" &&
         signal.source === "human" &&
         signal.producer === "human-owner" &&
         signal.payload.resolution === "deploy-authorized" &&
-        signal.evidence.some((entry) => typeof entry === "string" && entry.trim().length > 0),
+        signal.evidence.some(nonEmptyString),
     );
     if ((product.snapshot.state === "ship" || product.snapshot.state === "observation") && authorization) {
       return childSignal(
@@ -756,6 +1039,32 @@ export const advanceDeliveryOnce = async (
   }
 
   if (current.state === "shipReady" || current.state === "awaitingShipCapability") {
+    if (!product) {
+      return {
+        kind: "waiting-human",
+        state: current.state,
+        reason: "Product child run is unavailable at the ship gate",
+      };
+    }
+    const inspectedProduct = inspectProductChild(context.productRunId, product.snapshot, {
+      stageRoot: ports.stageRoot,
+      allowedStates: ["ship", "observation"],
+      expectedRollbackArtifact: "active.json",
+    });
+    if (
+      inspectedProduct.kind !== "ready" ||
+      !inspectedProduct.shipGateReady ||
+      (context.riskClass === "sensitive"
+        ? !deployAuthorizationExists(product)
+        : !productVerificationDecisionExists(product))
+    ) {
+      return {
+        kind: "waiting-human",
+        state: current.state,
+        reason:
+          "staging is gated until Product's current ship anchors, controls, budget, and sensitive authorization pass",
+      };
+    }
     const hasCapability = await ports.hasReversibleStaging();
     if (!hasCapability) {
       if (current.state === "awaitingShipCapability")
@@ -843,33 +1152,206 @@ export const advanceDeliveryOnce = async (
       );
     }
     const sampleIndex = context.observationEvidence.length;
-    const output = await runEffect(
-      runner,
-      ports,
-      "sample-staging-observation",
-      sampleIndex,
-      {
-        artifactHash: context.artifactHash,
-        sampleIndex,
-      },
-      (effectId) =>
-        ports.sampleObservation({
-          runId: current.runId,
-          artifactHash: context.artifactHash ?? "",
-          sampleIndex,
-          effectId,
-        }),
+    const observationWindowMs = context.observationWindowMs;
+    const observationIntervalMs = context.observationIntervalMs;
+    if (
+      typeof observationWindowMs !== "number" ||
+      !Number.isSafeInteger(observationWindowMs) ||
+      observationWindowMs <= 0
+    ) {
+      throw new Error("observationWindowMs must be a positive integer frozen in the delivery run");
+    }
+    if (
+      typeof observationIntervalMs !== "number" ||
+      !Number.isSafeInteger(observationIntervalMs) ||
+      observationIntervalMs <= 0
+    ) {
+      throw new Error("observationIntervalMs must be a positive integer frozen in the delivery run");
+    }
+
+    const sampleEffect = runner.getEffect(
+      deriveDeliveryEffectKey(current.runId, "sample-staging-observation", sampleIndex),
     );
-    return finishEffect(Promise.resolve(output), async (completed) => {
-      const value = completed.value;
-      if (!isRecord(value))
-        return { kind: "waiting-observation", state: current.state, reason: "observation sample has no health result" };
-      if (value.healthy !== true)
-        return childSignal(runner, ports, "ROLLBACK_REQUIRED", "product-child-adapter", completed.evidence);
-      if (value.windowElapsed === true)
-        return childSignal(runner, ports, "OBSERVATION_VALIDATED", "product-child-adapter", completed.evidence);
-      return childSignal(runner, ports, "OBSERVATION_SAMPLE_RECORDED", "observer", completed.evidence);
+    if (sampleEffect?.status !== "completed") {
+      const previousMeasurement = runner
+        .effects()
+        .filter((effect) => effect.name === "sample-staging-observation" && effect.status === "completed")
+        .sort((left, right) => left.attempt - right.attempt)
+        .at(-1);
+      if (!sampleEffect && previousMeasurement) {
+        const previousValue = outputFromEffect(previousMeasurement).value;
+        const previousAt = isRecord(previousValue) ? previousValue.observedAt : undefined;
+        const elapsed =
+          typeof previousAt === "string" ? Date.parse(ports.clock()) - Date.parse(previousAt) : Number.NaN;
+        if (!Number.isFinite(elapsed)) {
+          return {
+            kind: "waiting-human",
+            state: current.state,
+            reason: "previous observation has no valid measurement time",
+          };
+        }
+        if (elapsed < observationIntervalMs) {
+          return {
+            kind: "waiting-observation",
+            state: current.state,
+            reason: "configured observation interval has not elapsed",
+          };
+        }
+      }
+      return finishEffect(
+        runEffect(
+          runner,
+          ports,
+          "sample-staging-observation",
+          sampleIndex,
+          { artifactHash: context.artifactHash, sampleIndex, observationWindowMs, observationIntervalMs },
+          (effectId) =>
+            ports.sampleObservation({
+              runId: current.runId,
+              artifactHash: context.artifactHash ?? "",
+              sampleIndex,
+              effectId,
+              observationWindowMs,
+            }),
+        ),
+        async (output) => advanceResult(runner, output.evidence),
+      );
+    }
+
+    const batch = outputFromEffect(sampleEffect).value;
+    if (
+      !isRecord(batch) ||
+      !Array.isArray(batch.samples) ||
+      batch.samples.length === 0 ||
+      batch.samples.length > 4 ||
+      !batch.samples.every(isObservationSample) ||
+      typeof batch.windowElapsed !== "boolean" ||
+      typeof batch.observedAt !== "string" ||
+      Number.isNaN(Date.parse(batch.observedAt))
+    ) {
+      return {
+        kind: "waiting-human",
+        state: current.state,
+        reason: "observation adapter returned incomplete or invalid measurements",
+      };
+    }
+
+    for (const [index, sample] of batch.samples.entries()) {
+      const productSampleAttempt = sampleIndex * 4 + index;
+      const productSampleEffect = runner.getEffect(
+        deriveDeliveryEffectKey(current.runId, "record-product-observation", productSampleAttempt),
+      );
+      if (productSampleEffect?.status === "completed") {
+        const value = outputFromEffect(productSampleEffect).value;
+        if (!isRecord(value) || value.accepted !== true) {
+          return {
+            kind: "waiting-human",
+            state: current.state,
+            reason: "Product rejected a measured observation sample",
+          };
+        }
+        continue;
+      }
+      return finishEffect(
+        runEffect(
+          runner,
+          ports,
+          "record-product-observation",
+          productSampleAttempt,
+          { productRunId: context.productRunId, sampleIndex, index, sample },
+          async (effectId) => {
+            const signal = await ports.submitProductSignal(context.productRunId, {
+              runId: context.productRunId,
+              type: "OBSERVATION_SAMPLE",
+              source: "tool",
+              producer: "observation-gate",
+              occurredAt: ports.clock(),
+              payload: { sample: { ...sample, evidence: `${sample.evidence};${effectId}` } },
+              evidence: [`${sample.evidence};${effectId}`],
+            });
+            return {
+              evidence: signal.evidence,
+              value: { accepted: signal.value?.accepted === true, state: signal.value?.state },
+            };
+          },
+        ),
+        async (output) => {
+          if (!isRecord(output.value) || output.value.accepted !== true) {
+            return {
+              kind: "waiting-human",
+              state: current.state,
+              reason: "Product rejected a measured observation sample",
+            };
+          }
+          return advanceResult(runner, output.evidence);
+        },
+      );
+    }
+
+    const gate = evaluateStagingObservation(product.snapshot.context.observationSamples, {
+      windowElapsed: batch.windowElapsed,
     });
+    const batchEvidence = batch.samples.map((sample) => sample.evidence).join("; ");
+    if (gate.status === "collecting") {
+      return childSignal(runner, ports, "OBSERVATION_SAMPLE_RECORDED", "observer", batchEvidence);
+    }
+
+    return finishEffect(
+      runEffect(
+        runner,
+        ports,
+        "evaluate-product-observation",
+        sampleIndex,
+        { productRunId: context.productRunId, sampleIndex, gate, windowElapsed: batch.windowElapsed },
+        async (effectId) => {
+          const evaluated = await ports.submitProductSignal(context.productRunId, {
+            runId: context.productRunId,
+            type: "OBSERVATION_EVALUATE",
+            source: "system",
+            producer: "product-runner",
+            occurredAt: ports.clock(),
+            payload: { windowElapsed: batch.windowElapsed, effectId },
+            evidence: [`${batchEvidence};${effectId}`],
+          });
+          return {
+            evidence: evaluated.evidence,
+            value: { accepted: evaluated.value?.accepted === true, state: evaluated.value?.state },
+          };
+        },
+      ),
+      async (output) => {
+        if (!isRecord(output.value) || output.value.accepted !== true) {
+          return {
+            kind: "waiting-human",
+            state: current.state,
+            reason: "Product rejected its system-owned observation evaluation",
+          };
+        }
+        const sampleRecorded = await runner.submit({
+          runId: current.runId,
+          type: "OBSERVATION_SAMPLE_RECORDED",
+          source: "tool",
+          producer: "observer",
+          occurredAt: ports.clock(),
+          payload: {},
+          evidence: [batchEvidence],
+        });
+        if (!sampleRecorded.accepted) {
+          throw new Error(`delivery parent rejected observation evidence: ${sampleRecorded.issues.join("; ")}`);
+        }
+        if (gate.status === "degraded" && output.value.state === "rollback") {
+          return childSignal(runner, ports, "ROLLBACK_REQUIRED", "product-child-adapter", output.evidence);
+        }
+        if (gate.status === "ready" && output.value.state === "validated") {
+          return childSignal(runner, ports, "OBSERVATION_VALIDATED", "product-child-adapter", output.evidence);
+        }
+        return {
+          kind: "waiting-observation",
+          state: runner.snapshot().state,
+          reason: `Product observation evaluation left the child in ${String(output.value.state ?? "unknown")}`,
+        };
+      },
+    );
   }
 
   return {
