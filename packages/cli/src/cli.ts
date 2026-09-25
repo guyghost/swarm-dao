@@ -1418,11 +1418,9 @@ function graphImplementProposal(runId: string): Proposal {
 }
 
 async function hashCheckout(cwd: string): Promise<string> {
-  const head = await execCommand("git rev-parse HEAD", { cwd, timeout: 10_000 });
-  if (head.exitCode !== 0) throw new Error(head.stderr.trim() || "git rev-parse HEAD failed");
-  const status = await execCommand("git status --porcelain", { cwd, timeout: 10_000 });
-  const diff = await execCommand("git diff HEAD", { cwd, timeout: 30_000 });
-  return createHash("sha256").update(`${head.stdout}\n${status.stdout}\n${diff.stdout}`).digest("hex");
+  return createHash("sha256")
+    .update(await checkoutSnapshot(cwd))
+    .digest("hex");
 }
 
 const toToolStatus = (exitCode: number): ToolCheckStatus => (exitCode === 0 ? "passed" : "failed");
@@ -1509,7 +1507,37 @@ async function checkoutSnapshot(cwd: string): Promise<string> {
   if (head.exitCode !== 0) throw new Error(head.stderr.trim() || "git rev-parse HEAD failed");
   const status = await execCommand("git status --porcelain", { cwd, timeout: 10_000 });
   const diff = await execCommand("git diff HEAD", { cwd, timeout: 30_000 });
-  return `${head.stdout}\n${status.stdout}\n${diff.stdout}`;
+  const untracked = await execCommand("git ls-files --others --exclude-standard -z", { cwd, timeout: 30_000 });
+  if (untracked.exitCode !== 0) throw new Error(untracked.stderr.trim() || "git ls-files failed");
+  const repositoryRoot = path.resolve(cwd);
+  const untrackedPaths = untracked.stdout.split("\0").filter(Boolean).sort();
+  const untrackedFiles = await Promise.all(
+    untrackedPaths.map(async (relativePath) => {
+      const filePath = path.resolve(repositoryRoot, relativePath);
+      const fromRoot = path.relative(repositoryRoot, filePath);
+      if (
+        fromRoot.length === 0 ||
+        fromRoot === ".." ||
+        fromRoot.startsWith(`..${path.sep}`) ||
+        path.isAbsolute(fromRoot)
+      ) {
+        throw new Error(`untracked checkout path resolves outside the repository: ${relativePath}`);
+      }
+      const fileStat = await fs.lstat(filePath);
+      if (fileStat.isSymbolicLink()) {
+        return { path: relativePath, kind: "symlink", target: await fs.readlink(filePath) };
+      }
+      if (!fileStat.isFile()) throw new Error(`unsupported untracked checkout entry: ${relativePath}`);
+      const bytes = await fs.readFile(filePath);
+      return {
+        path: relativePath,
+        kind: "file",
+        mode: fileStat.mode & 0o777,
+        dataBase64: bytes.toString("base64"),
+      };
+    }),
+  );
+  return `${head.stdout}\n${status.stdout}\n${diff.stdout}\n${JSON.stringify(untrackedFiles)}`;
 }
 
 async function readJsonFileOrNull<T>(filePath: string): Promise<T | null> {

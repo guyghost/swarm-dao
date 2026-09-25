@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createGraphRunner } from "@guyghost/swarm-dao-graph";
@@ -150,7 +150,7 @@ describe("swarm-dao delivery CLI route", () => {
 
   it("initializes staging and resumes a Product delivery to its exact-hash Graph approval gate", async () => {
     const cwd = await tempRoot();
-    await writeFile(path.join(cwd, ".gitignore"), "deliveries/\nproducts/\ngraphs/\nstage/\nbin/\n", "utf8");
+    await writeFile(path.join(cwd, ".gitignore"), "deliveries/\nproducts/\ngraphs/\nstage/\nbin/\ndao-home/\n", "utf8");
     execFileSync("git", ["init", cwd], { stdio: "ignore" });
     execFileSync("git", ["-C", cwd, "add", ".gitignore"], { stdio: "ignore" });
     execFileSync(
@@ -289,10 +289,33 @@ describe("swarm-dao delivery CLI route", () => {
     const productAfterCharge = await createProductRunner({ evidenceRoot: productRoot, runId: productRunId });
     expect(productAfterCharge.snapshot().context.budget?.consumed).toBe(1);
 
+    await mkdir(path.join(cwd, "src"), { recursive: true });
+    const untrackedImplementation = "export const stagedFixture = 'captured';\n";
+    await writeFile(path.join(cwd, "src", "new-implementation.ts"), untrackedImplementation, "utf8");
     const head = execFileSync("git", ["-C", cwd, "rev-parse", "HEAD"], { encoding: "utf8" });
     const status = execFileSync("git", ["-C", cwd, "status", "--porcelain"], { encoding: "utf8" });
     const diff = execFileSync("git", ["-C", cwd, "diff", "HEAD"], { encoding: "utf8" });
-    const implementationHash = createHash("sha256").update(`${head}\n${status}\n${diff}`).digest("hex");
+    const untrackedPaths = execFileSync("git", ["-C", cwd, "ls-files", "--others", "--exclude-standard", "-z"], {
+      encoding: "utf8",
+    })
+      .split("\0")
+      .filter(Boolean)
+      .sort();
+    const untrackedFiles = await Promise.all(
+      untrackedPaths.map(async (relativePath) => {
+        const filePath = path.join(cwd, relativePath);
+        const [fileStat, bytes] = await Promise.all([stat(filePath), readFile(filePath)]);
+        return {
+          path: relativePath,
+          kind: "file",
+          mode: fileStat.mode & 0o777,
+          dataBase64: bytes.toString("base64"),
+        };
+      }),
+    );
+    const implementationHash = createHash("sha256")
+      .update(`${head}\n${status}\n${diff}\n${JSON.stringify(untrackedFiles)}`)
+      .digest("hex");
     const implementation = await graphAfterStart.submit({
       runId: graphRunId,
       type: "IMPLEMENTATION_READY",
@@ -382,6 +405,8 @@ describe("swarm-dao delivery CLI route", () => {
         activeHash: string | null;
       };
       expect(active.activeHash).toMatch(/^[a-f0-9]{64}$/);
+      const stagedArtifact = await Bun.file(path.join(stageRoot, "artifacts", active.activeHash ?? "")).text();
+      expect(stagedArtifact).toContain(Buffer.from(untrackedImplementation).toString("base64"));
       expect(await runDeliveryCli(["delivery", "once", "--delivery-id", deliveryId, ...commonRoots], fakeBunPath)).toBe(
         0,
       );
