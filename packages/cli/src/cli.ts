@@ -1739,6 +1739,7 @@ async function deliveryPortsFrom(
     readProductRun: productView,
     readGraphRun: graphView,
     stageRoot: roots.stageRoot,
+    artifactBaseRoot: cwd,
     clock,
     createGraphRun: async (runId, effectId) => {
       await createGraphRunner({ evidenceRoot: graphEvidenceRoot, runId });
@@ -1786,7 +1787,7 @@ async function deliveryPortsFrom(
     },
     validateGraphModel: async ({ runId, effectId }) => {
       const model = await fs.readFile(graphModelPath, "utf8");
-      const modelHash = createHash("sha256").update(model.trimEnd()).digest("hex");
+      const modelHash = createHash("sha256").update(model).digest("hex");
       const requiredHeadings = ["Scope", "Acceptance criteria", "Rollback", "Validation"];
       const valid = requiredHeadings.every((heading) => new RegExp(`^#{1,3}\\s+${heading}\\s*$`, "im").test(model));
       if (valid) {

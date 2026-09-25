@@ -166,6 +166,19 @@ describe("delivery child run adapters", () => {
     if (rejected.kind === "rejected") expect(rejected.issues.join("\n")).toMatch(/active staging pointer/i);
   });
 
+  it("accepts a repository-relative active pointer while containing it inside the staging root", () => {
+    const repoRoot = "/tmp/swarm-repository";
+    const stageRoot = resolve(repoRoot, "evidence/software-delivery-stage");
+    const product = productSnapshotWithDraft({ rollbackArtifact: "evidence/software-delivery-stage/active.json" });
+    const result = inspectProductChild("product-7", product, {
+      stageRoot,
+      artifactBaseRoot: repoRoot,
+      expectedRollbackArtifact: "active.json",
+    });
+
+    expect(result.kind).toBe("ready");
+  });
+
   it("requires a replayable accepted Graph approval for the exact model hash", () => {
     const good = inspectGraphChild("graph-7", graphSnapshot(), [approval()]);
     expect(good.kind).toBe("ready");

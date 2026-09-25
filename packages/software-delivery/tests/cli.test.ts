@@ -26,7 +26,7 @@ const productSnapshot = (runId = "product-1"): PersistedProductSnapshot =>
         touchesSensitive: false,
         dependencies: [],
         budgetAllocation: 10,
-        rollbackArtifact: "active.json",
+        rollbackArtifact: "evidence/software-delivery-stage/active.json",
         evidence: "product:scope",
       },
       voteConfig: { quorum: 1, kind: "standard", expiryHours: 72 },

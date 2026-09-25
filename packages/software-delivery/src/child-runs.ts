@@ -79,6 +79,8 @@ export type ProductChildOptions = Readonly<{
 
 export type ProductInspectionOptions = Readonly<{
   stageRoot?: string;
+  /** Base directory for repo-relative rollback artifacts, usually the checkout root. */
+  artifactBaseRoot?: string;
   allowedStates?: readonly string[];
   expectedRollbackArtifact?: string;
 }>;
@@ -187,9 +189,9 @@ const anchorHasEvidence = (context: ProductContext, name: "vote-quorum" | "budge
   return anchor?.status === "passed" && nonEmptyString(anchor.evidence);
 };
 
-const isInsideStageRoot = (stageRoot: string, artifact: string): boolean => {
+const isInsideStageRoot = (stageRoot: string, artifact: string, artifactBaseRoot = stageRoot): boolean => {
   const root = resolve(stageRoot);
-  const resolvedArtifact = resolve(root, artifact);
+  const resolvedArtifact = resolve(artifactBaseRoot, artifact);
   const artifactPath = relative(root, resolvedArtifact);
   return (
     artifactPath.length > 0 &&
@@ -244,7 +246,7 @@ export const inspectProductChild = (
   if (
     options.stageRoot &&
     nonEmptyString(rollbackArtifact) &&
-    !isInsideStageRoot(options.stageRoot, rollbackArtifact)
+    !isInsideStageRoot(options.stageRoot, rollbackArtifact, options.artifactBaseRoot)
   ) {
     issues.push("rollback artifact is outside the configured staging target");
   }
@@ -252,7 +254,8 @@ export const inspectProductChild = (
     options.stageRoot &&
     options.expectedRollbackArtifact &&
     nonEmptyString(rollbackArtifact) &&
-    resolve(options.stageRoot, rollbackArtifact) !== resolve(options.stageRoot, options.expectedRollbackArtifact)
+    resolve(options.artifactBaseRoot ?? options.stageRoot, rollbackArtifact) !==
+      resolve(options.stageRoot, options.expectedRollbackArtifact)
   ) {
     issues.push("rollback artifact does not resolve to the configured active staging pointer");
   }

@@ -8,6 +8,7 @@
 
 - [Installation in Pi](#installation-in-pi)
 - [Installation in OpenCode](#installation-in-opencode)
+- [Repository-native Software Delivery](#repository-native-software-delivery)
 - [Common Workflows](#common-workflows)
 - [Configuring Agent Runtimes (Model & Harness)](#configuring-agent-runtimes-model--harness)
 - [Pi vs OpenCode Differences](#pi-vs-opencode-differences)
@@ -164,6 +165,64 @@ opencode
 ```
 
 ---
+
+## Repository-native Software Delivery
+
+Software Delivery coordinates an existing Product Loop run with a new Graph
+Engineering run. The Product run must already be in `execution`, with its
+qualification evidence, a sealed vote quorum, an open budget envelope, and a
+rollback artifact. The reference setup uses a Product quorum of **3** and
+stores the active staging pointer at
+`evidence/software-delivery-stage/active.json`:
+
+```ts
+VOTE_OPENED {
+  config: { quorum: 3, kind: "standard", expiryHours: 72 }
+}
+```
+
+Set the Product draft's `rollbackArtifact` to exactly
+`evidence/software-delivery-stage/active.json`. Initialize the local reversible
+staging target before starting delivery:
+
+```bash
+bun run software-delivery:stage-init
+```
+
+Start from the Product run after it reaches `execution`:
+
+```bash
+bun run software-delivery:init --delivery-id release-42 --product-run-id product-42
+bun run software-delivery:status --delivery-id release-42
+bun run software-delivery:resume --delivery-id release-42
+```
+
+The first resume drafts and validates a Graph change model, then pauses for
+owner approval. Read the exact Graph run ID and SHA-256 model hash from delivery
+status. Review that hash, then approve the Graph child through its human gate:
+
+```bash
+swarm-dao approve --run-id <graph-run-id> --evidence-root .dao/graph-runs
+```
+
+The Graph runner accepts approval only for its exact current model hash. After
+approval, resume delivery to run the implementation and repository checks:
+
+```bash
+bun run software-delivery:resume --delivery-id release-42
+bun run software-delivery:status --delivery-id release-42
+bun run software-delivery:scorecard
+```
+
+The staging adapter snapshots the current checkout into immutable local
+evidence and switches the local `active.json` pointer. Observation reads only
+that staging target; it does not send traffic to production. A confirmed
+degradation restores the prior local pointer and leaves the run waiting for a
+corrective Product task. This workflow does not deploy to production.
+
+The scorecard reports aggregates across local delivery journals. It omits run
+IDs, repository paths, prompts, and identities. Optional provider-cost data is
+reported as unavailable when the local host does not provide measurements.
 
 ## Common Workflows
 

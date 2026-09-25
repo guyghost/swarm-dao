@@ -348,7 +348,7 @@
 
 **Interfaces:** Export `buildDeliveryScorecard(entries, { now, since? })` and `runDeliveryCommand(argv, dependencies)`. Commands: `init`, `status`, `submit`, `once`, `resume`, `scorecard`, `stage-init`.
 
-- [ ] **Step 1: Write denominator and availability tests**
+- [x] **Step 1: Write denominator and availability tests**
 
   ```ts
   it("reports unavailable rates when no eligible terminal run exists", () => {
@@ -361,19 +361,19 @@
 
   Test formulas for post-approval autonomy, all terminal outcomes including rollback, human intervention, retries, failed controls, rollback, incomplete observation, unknown initial risk, missing cost, and nearest-rank p95.
 
-- [ ] **Step 2: Implement the pure journal reducer**
+- [x] **Step 2: Implement the pure journal reducer**
 
   Return `{ numerator, denominator, rate }`; `rate` is null when denominator is zero. Define post-approval autonomy as validated runs that reached their outcome without human action after exact-hash approval, divided by approved runs whose observations reached a terminal outcome. Define end-to-end completion as `validated` divided by all terminal delivery runs. Define rollback as confirmed rollbacks divided by shipped runs with a determined `validated` or `rolledBack` outcome. Also report human intervention, retries, failed controls, active runs, incomplete observation, and unavailable data separately. Count `validated`, `rolledBack`, `failed`, `blocked`, `cancelled`, and `rejected` as terminal outcomes. Do not use run IDs, paths, prompts, or identities as aggregate labels.
 
-- [ ] **Step 3: Add the CLI using the current Graph worker adapter**
+- [x] **Step 3: Add the CLI using the current Graph worker adapter**
 
   Route `delivery` in `packages/cli/src/cli.ts`. Reuse `childSessionOptionsFrom`, `childAdapter`, `IMPLEMENTATION_AGENT`, and `runGraphImplementing` through injected `ImplementingPorts`. Charge Product budget before worker invocation. Never synthesize child approval, Product review, or child cancellation.
 
-- [ ] **Step 4: Implement parsing, status, pauses, and exit codes**
+- [x] **Step 4: Implement parsing, status, pauses, and exit codes**
 
   `init` requires `--delivery-id` and `--product-run-id`. Accept `--evidence-root`, `--stage-root`, positive `--credits-per-graph-attempt`, and positive `--observation-window-ms` and `--observation-interval-ms`. `status` prints child states, required human action, effect checkpoint, evidence path. `once` advances one effect; `resume` stops at a human/capability/observation wait or terminal. `scorecard` shows counts and denominators. `stage-init` seeds/verifies the empty pointer. Exit codes: 0 success, 2 machine rejection, 1 usage/execution error.
 
-- [ ] **Step 5: Test the CLI without a real agent**
+- [x] **Step 5: Test the CLI without a real agent**
 
   Test flags, malformed signal JSON, each command, no worker before preflight, output, and exit codes using fake dependencies.
 
@@ -381,7 +381,7 @@
 
   Expected: PASS with writes limited to temporary roots.
 
-- [ ] **Step 6: Commit scorecard and CLI**
+- [x] **Step 6: Commit scorecard and CLI**
 
   ```bash
   git add packages/software-delivery/src/scorecard.ts packages/software-delivery/src/index.ts packages/software-delivery/tests/scorecard.test.ts packages/software-delivery/tests/cli.test.ts packages/cli/src/cli.ts packages/cli/tests/software-delivery.test.ts
@@ -394,7 +394,7 @@
 
 **Interfaces:** Root scripts: `software-delivery:validate`, `software-delivery:anchors`, `software-delivery:demo`, `software-delivery:regression`, `software-delivery:stage-init`, `software-delivery:init`, `software-delivery:status`, `software-delivery:once`, `software-delivery:resume`, `software-delivery:scorecard`.
 
-- [ ] **Step 1: Write nominal integration coverage**
+- [x] **Step 1: Write nominal integration coverage**
 
   Use temporary Product, Graph, Delivery, and stage roots. Prepare ProductRunner in `execution` with sealed quorum/budget; use fake worker/check ports; submit the exact Graph human approval through GraphRunner.
 
@@ -408,19 +408,19 @@
   });
   ```
 
-- [ ] **Step 2: Add human-gate and failure integration scenarios**
+- [x] **Step 2: Add human-gate and failure integration scenarios**
 
   Cover stale hash, unknown risk, sensitive review, Product budget review, failed controls, absent ship capability, effect recovery, three rollback measurements, cancellation, unavailable metrics, and corrupt child journals. Assert child transitions go through their own `submit()`.
 
-- [ ] **Step 3: Implement anchors and temporary-root demo**
+- [x] **Step 3: Implement anchors and temporary-root demo**
 
   Read commands only from the graph JSON; validate hash parity and spawn with `shell: false`. Demo reaches `validated` and `rolledBack` without printing prompts or personal data.
 
-- [ ] **Step 4: Add scripts, evidence ignores, changeset, and operating docs**
+- [x] **Step 4: Add scripts, evidence ignores, changeset, and operating docs**
 
   Ignore both evidence roots. Add minor changesets for core, CLI, and the new public runtime package. Document Product `rollbackArtifact: "evidence/software-delivery-stage/active.json"`, stage initialization, Product quorum, delivery start, exact Graph approval, resume/status, scorecard, local-only observations, and no production deploy.
 
-- [ ] **Step 5: Run integration, anchors, typechecks, and canonical CI**
+- [x] **Step 5: Run integration, anchors, typechecks, and canonical CI**
 
   ```bash
   bun test packages/software-delivery/tests/integration.test.ts
@@ -434,7 +434,7 @@
 
   Expected: anchors and CI pass; demo reaches `validated`; rollback scenario reaches `rolledBack`.
 
-- [ ] **Step 6: Commit the integrated feature**
+- [x] **Step 6: Commit the integrated feature**
 
   ```bash
   git add models/software-delivery.md models/software-delivery.review.md models/software-delivery.graph.json models/software-delivery.graph.schema.json packages/software-delivery packages/core/tests/software-delivery.frozen.test.ts packages/cli tools/software-delivery package.json tsconfig.tests.json tools/tsconfig.json .gitignore .changeset/native-software-delivery.md docs/USAGE.md

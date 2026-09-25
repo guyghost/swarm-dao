@@ -102,6 +102,7 @@ export type DeliveryExecutorPorts = Readonly<{
   }) => Promise<DeliveryEffectOutput>;
   reconcileEffect: (effect: PersistedDeliveryEffect) => Promise<DeliveryReconciliation>;
   stageRoot?: string;
+  artifactBaseRoot?: string;
   clock: () => string;
 }>;
 
@@ -369,6 +370,7 @@ export const advanceDeliveryOnce = async (
       return childSignal(runner, ports, "INTAKE_REJECTED", "intake-validator", "Product child run was not found");
     const inspected = inspectProductChild(context.productRunId, product.snapshot, {
       stageRoot: ports.stageRoot,
+      artifactBaseRoot: ports.artifactBaseRoot,
       expectedRollbackArtifact: "active.json",
     });
     if (inspected.kind === "rejected") {
@@ -414,6 +416,7 @@ export const advanceDeliveryOnce = async (
     }
     const inspected = inspectProductChild(context.productRunId, product.snapshot, {
       stageRoot: ports.stageRoot,
+      artifactBaseRoot: ports.artifactBaseRoot,
       allowedStates: ["execution", "verification", "review", "ship", "observation"],
       expectedRollbackArtifact: "active.json",
     });
@@ -453,7 +456,15 @@ export const advanceDeliveryOnce = async (
     }
     const inspected = inspectProductChild(context.productRunId, product.snapshot, {
       stageRoot: ports.stageRoot,
-      allowedStates: ["execution", "verification", "review", "ship", "observation"],
+      artifactBaseRoot: ports.artifactBaseRoot,
+      allowedStates: [
+        "execution",
+        "verification",
+        "review",
+        "ship",
+        "observation",
+        ...(current.state === "observing" ? ["rollback"] : []),
+      ],
       expectedRollbackArtifact: "active.json",
     });
     if (inspected.kind === "rejected") {
@@ -786,6 +797,7 @@ export const advanceDeliveryOnce = async (
     const productState = product.snapshot.state;
     const inspectedProduct = inspectProductChild(context.productRunId, product.snapshot, {
       stageRoot: ports.stageRoot,
+      artifactBaseRoot: ports.artifactBaseRoot,
       allowedStates: ["execution", "verification", "review", "ship", "observation"],
       expectedRollbackArtifact: "active.json",
     });
@@ -999,6 +1011,7 @@ export const advanceDeliveryOnce = async (
   if (current.state === "awaitingShipReview") {
     const inspectedProduct = inspectProductChild(context.productRunId, product.snapshot, {
       stageRoot: ports.stageRoot,
+      artifactBaseRoot: ports.artifactBaseRoot,
       allowedStates: ["execution", "verification", "review", "ship", "observation"],
       expectedRollbackArtifact: "active.json",
     });
@@ -1048,6 +1061,7 @@ export const advanceDeliveryOnce = async (
     }
     const inspectedProduct = inspectProductChild(context.productRunId, product.snapshot, {
       stageRoot: ports.stageRoot,
+      artifactBaseRoot: ports.artifactBaseRoot,
       allowedStates: ["ship", "observation"],
       expectedRollbackArtifact: "active.json",
     });

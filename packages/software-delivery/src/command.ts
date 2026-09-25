@@ -261,6 +261,7 @@ export const runDeliveryCommand = async (
       }
       const inspected = inspectProductChild(productRunId, product.snapshot, {
         stageRoot: roots.stageRoot,
+        artifactBaseRoot: roots.cwd,
         expectedRollbackArtifact: "active.json",
       });
       if (inspected.kind === "rejected") {
