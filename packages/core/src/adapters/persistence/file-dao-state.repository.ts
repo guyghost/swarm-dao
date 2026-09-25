@@ -723,10 +723,20 @@ export async function withFileLock<T>(daoRoot: string, fn: (lease: LockLease) =>
   // when it still holds ITS OWN token, so a stale takeover can never trick a
   // live writer into deleting someone else's lock.
   const token = `${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-  const lockPayload = (): string => JSON.stringify({ pid: process.pid, ts: Date.now(), token });
+  // Omit the legacy ts field: older readers must not reclaim an active
+  // mtime-based lease merely because its immutable payload is old.
+  const lockPayload = (): string => JSON.stringify({ pid: process.pid, token, heartbeat: "mtime" });
+  let lockHandle: import("node:fs/promises").FileHandle | undefined;
   for (;;) {
     try {
-      await fs.writeFile(lockPath, lockPayload(), { flag: "wx" });
+      lockHandle = await fs.open(lockPath, "wx");
+      try {
+        await lockHandle.writeFile(lockPayload());
+      } catch (error) {
+        await lockHandle.close();
+        await safeUnlink(lockPath);
+        throw error;
+      }
       break;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
@@ -740,22 +750,11 @@ export async function withFileLock<T>(daoRoot: string, fn: (lease: LockLease) =>
       await new Promise((r) => setTimeout(r, LOCK_RETRY_MS));
     }
   }
-  // Heartbeat: refresh the timestamp while the critical section runs, so a
-  // legitimately long write is not declared stale by a waiting process. Only
-  // refresh while the lock file still holds OUR token (review): after a
-  // stale takeover by another writer, the old owner's heartbeat must not
-  // clobber the new owner's token.
+  // Touch the owned inode through its open descriptor: the JSON stays immutable,
+  // and a stale owner can never refresh a replacement writer's lock file.
   const heartbeat = setInterval(() => {
-    void (async () => {
-      try {
-        const raw = await fs.readFile(lockPath, "utf8");
-        const parsed = JSON.parse(raw) as { token?: unknown };
-        if (parsed.token !== token) return; // we no longer own the lock file
-        await fs.writeFile(lockPath, lockPayload(), { flag: "w" });
-      } catch {
-        // Lock already gone or unreadable — nothing to refresh.
-      }
-    })();
+    const now = new Date();
+    void lockHandle?.utimes(now, now).catch(() => undefined);
   }, LOCK_STALE_MS / 2);
   let probed = false;
   let written = false;
@@ -792,6 +791,7 @@ export async function withFileLock<T>(daoRoot: string, fn: (lease: LockLease) =>
     return await fn(lease);
   } finally {
     clearInterval(heartbeat);
+    await lockHandle?.close();
     try {
       const raw = await fs.readFile(lockPath, "utf8");
       const parsed = JSON.parse(raw) as { token?: unknown };
@@ -805,15 +805,18 @@ export async function withFileLock<T>(daoRoot: string, fn: (lease: LockLease) =>
 async function isLockStale(lockPath: string): Promise<boolean> {
   try {
     const raw = await fs.readFile(lockPath, "utf8");
-    const parsed = JSON.parse(raw) as { ts?: unknown };
-    return typeof parsed.ts === "number" && Date.now() - parsed.ts > LOCK_STALE_MS;
+    const parsed = JSON.parse(raw) as { ts?: unknown; heartbeat?: unknown };
+    const stats = await fs.stat(lockPath);
+    const timestamp = parsed.heartbeat === "mtime" ? stats.mtimeMs : parsed.ts;
+    return typeof timestamp === "number" && Date.now() - timestamp > LOCK_STALE_MS;
   } catch {
-    // Unreadable lock: treat missing as not-stale (retry), corrupt as stale.
+    // A new lock may still be receiving its initial payload. Give malformed
+    // locks the same grace period, rather than stealing an active acquisition.
     try {
-      await fs.stat(lockPath);
+      const stats = await fs.stat(lockPath);
+      return Date.now() - stats.mtimeMs > LOCK_STALE_MS;
     } catch {
       return false;
     }
-    return true;
   }
 }

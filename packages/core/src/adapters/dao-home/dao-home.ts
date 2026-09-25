@@ -18,7 +18,7 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { logger } from "../../observability/logging.js";
-import { branchDirName, deriveProjectId, planGcDirs } from "./naming.js";
+import { branchDirName, deriveProjectId, planGcDirs, slugifyDirName } from "./naming.js";
 
 const execFileAsync = promisify(execFile);
 const GIT_TIMEOUT_MS = 10_000;
@@ -122,27 +122,68 @@ function resolveRepoIdentity(cwd: string): Promise<{ repoRoot: string; repoName:
 }
 
 async function resolveBranchId(cwd: string): Promise<string> {
-  const branch = await git(cwd, "rev-parse", "--abbrev-ref", "HEAD");
-  const headSha = await git(cwd, "rev-parse", "HEAD");
-  return branchDirName(branch, headSha);
+  const branch = await git(cwd, "symbolic-ref", "--short", "HEAD");
+  if (branch) return branchDirName(branch, null);
+  const headSha = await git(cwd, "rev-parse", "--verify", "HEAD");
+  if (!headSha) throw new Error("Cannot determine Git HEAD; DAO state resolution refused.");
+  return branchDirName(null, headSha);
 }
 
 /** Live state dir ids: every local branch plus every worktree HEAD (detached included). */
 async function collectLiveIds(cwd: string): Promise<Set<string>> {
   const live = new Set<string>();
   const refs = await git(cwd, "for-each-ref", "refs/heads", "--format=%(refname:short)");
-  if (refs !== null) {
-    for (const branch of refs.split("\n")) {
-      if (branch.length > 0) live.add(branchDirName(branch, null));
+  if (refs === null) throw new Error("Cannot enumerate local branches; DAO garbage collection refused.");
+  for (const branch of refs.split("\n")) {
+    if (branch.length > 0) {
+      live.add(branchDirName(branch, null));
+      // Preserve legacy state until its owning branch is resolved and migrated.
+      live.add(slugifyDirName(branch, "branch"));
     }
   }
   const worktrees = await git(cwd, "worktree", "list", "--porcelain");
-  if (worktrees !== null) {
-    for (const line of worktrees.split("\n")) {
-      if (line.startsWith("HEAD ")) live.add(branchDirName(null, line.slice(5).trim()));
-    }
+  if (worktrees === null) throw new Error("Cannot enumerate worktrees; DAO garbage collection refused.");
+  for (const line of worktrees.split("\n")) {
+    if (line.startsWith("HEAD ")) live.add(branchDirName(null, line.slice(5).trim()));
   }
   return live;
+}
+
+/** Resolve legacy branch storage without assigning shared data to an arbitrary branch. */
+async function resolveBranchStateRoot(
+  cwd: string,
+  projectRoot: string,
+  branchId: string,
+  ensure: boolean,
+): Promise<string> {
+  const target = path.join(projectRoot, "branches", branchId);
+  if (!branchId.startsWith("branch-") || (await pathExists(target))) return target;
+  const branch = await git(cwd, "symbolic-ref", "--short", "HEAD");
+  if (!branch) throw new Error("Cannot determine branch identity; DAO state resolution refused.");
+  const legacyId = slugifyDirName(branch, "branch");
+  const legacy = path.join(projectRoot, "branches", legacyId);
+  if (!(await pathExists(legacy))) return target;
+  const refs = await git(cwd, "for-each-ref", "refs/heads", "--format=%(refname:short)");
+  if (refs === null) throw new Error("Cannot enumerate branches for DAO storage migration.");
+  const owners = refs.split("\n").filter((name) => name && slugifyDirName(name, "branch") === legacyId);
+  if (
+    owners.length !== 1 ||
+    owners[0] !== branch ||
+    legacyId.startsWith("detached-") ||
+    /^branch-.*-[a-f0-9]{16}$/.test(legacyId)
+  ) {
+    throw new Error(
+      `Ambiguous legacy DAO state at ${legacy}; preserve it and assign only the data belonging to branch ${JSON.stringify(branch)} to ${target} before retrying.`,
+    );
+  }
+  if (!ensure) return legacy;
+  try {
+    await fs.rename(legacy, target);
+  } catch (error) {
+    // Another opener may have completed the same migration.
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT" || !(await pathExists(target))) throw error;
+  }
+  return target;
 }
 
 export interface ProjectManifest {
@@ -268,7 +309,7 @@ export async function resolveDaoLayout(cwd: string, options: ResolveDaoLayoutOpt
   const projectId = deriveProjectId(identity.repoRoot, identity.repoName);
   const projectRoot = path.join(daoHomeBase(options.env), projectId);
   const branchId = await resolveBranchId(cwd);
-  const stateRoot = path.join(projectRoot, "branches", branchId);
+  const stateRoot = await resolveBranchStateRoot(cwd, projectRoot, branchId, ensure);
   if (!ensure) return { mode: "home", projectRoot, stateRoot, branchId };
 
   const manifest = await ensureProjectManifest(projectRoot, projectId, identity.repoRoot);

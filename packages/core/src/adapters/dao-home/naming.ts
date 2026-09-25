@@ -38,11 +38,14 @@ export function deriveProjectId(repoRoot: string, repoName: string): string {
  * Branch/worktree state directory name (ADR-007 §3): the checked-out branch
  * (a branch is checked out in at most one worktree, so the branch key
  * already disambiguates worktrees), `detached-<sha8>` for detached HEADs,
- * `default` when no git identity exists. `sep`-containing branch names are
- * flattened; `feature/x` and `feature-x` map to the same dir by design.
+ * `default` when no git identity exists. Branch names include a hash of their exact spelling, preserving identity
+ * across punctuation, case, and truncation of the readable prefix.
  */
 export function branchDirName(branch: string | null, headSha: string | null): string {
-  if (branch !== null && branch !== "HEAD") return slugifyDirName(branch, "branch");
+  if (branch !== null && branch !== "HEAD") {
+    const hash = createHash("sha256").update(branch).digest("hex").slice(0, 16);
+    return `branch-${slugifyDirName(branch, "branch")}-${hash}`;
+  }
   if (headSha !== null && headSha.length > 0) return `detached-${headSha.slice(0, 8)}`;
   return "default";
 }
