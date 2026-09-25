@@ -4,6 +4,27 @@ export type DeliveryRiskClass = "unknown" | "standard" | "sensitive";
 export type DeliveryTerminalOutcome = "validated" | "rolledBack" | "failed" | "blocked" | "cancelled" | "rejected";
 export type DeliverySignalSource = "ai" | "tool" | "human" | "system";
 
+export const SOFTWARE_DELIVERY_STATES = [
+  "intake",
+  "awaitingRiskReview",
+  "draftingGraphModel",
+  "validatingGraphModel",
+  "awaitingGraphApproval",
+  "graphReady",
+  "implementing",
+  "productVerification",
+  "awaitingShipReview",
+  "shipReady",
+  "awaitingShipCapability",
+  "observing",
+  "validated",
+  "rolledBack",
+  "failed",
+  "blocked",
+  "cancelled",
+  "rejected",
+] as const;
+
 export type DeliveryEffectCheckpoint = Readonly<{
   name: "ship" | "rollback";
   status: "confirmed";
@@ -85,6 +106,36 @@ export type SoftwareDeliveryEvent =
   | { type: "CORRECTIVE_TASK_OPENED"; source: DeliverySignalSource; evidence: string }
   | { type: "CANCEL_REQUESTED"; source: DeliverySignalSource; evidence: string }
   | { type: "CANCEL_SETTLED"; source: DeliverySignalSource; evidence: string };
+
+export const SOFTWARE_DELIVERY_EVENTS = [
+  "INTAKE_ACCEPTED",
+  "INTAKE_REJECTED",
+  "RISK_CLASSIFICATION_RESOLVED",
+  "GRAPH_MODEL_DRAFTED",
+  "MODEL_CONTRACT_VALID",
+  "MODEL_CONTRACT_INVALID",
+  "GRAPH_APPROVAL_CONFIRMED",
+  "GRAPH_APPROVAL_REJECTED",
+  "GRAPH_IMPLEMENTATION_STARTED",
+  "GRAPH_IMPLEMENTATION_SUCCEEDED",
+  "CHILD_FAILED",
+  "CHILD_BLOCKED",
+  "CHILD_CANCELLED",
+  "PRODUCT_REVIEW_REQUIRED",
+  "PRODUCT_REVIEW_BLOCKED",
+  "PRODUCT_SHIP_READY",
+  "PRODUCT_SHIP_AUTHORIZED",
+  "SHIP_CAPABILITY_MISSING",
+  "SHIP_CAPABILITY_CONFIRMED",
+  "SHIP_CONFIRMED",
+  "OBSERVATION_SAMPLE_RECORDED",
+  "OBSERVATION_VALIDATED",
+  "ROLLBACK_REQUIRED",
+  "ROLLBACK_CONFIRMED",
+  "CORRECTIVE_TASK_OPENED",
+  "CANCEL_REQUESTED",
+  "CANCEL_SETTLED",
+] as const satisfies readonly SoftwareDeliveryEvent["type"][];
 
 const isNonEmpty = (value: unknown): value is string => typeof value === "string" && value.trim().length > 0;
 

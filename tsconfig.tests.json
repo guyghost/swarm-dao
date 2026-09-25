@@ -10,6 +10,7 @@
       "@guyghost/swarm-dao-cli": ["./packages/cli/src/cli.ts"],
       "@guyghost/swarm-dao-graph": ["./packages/graph-engineering/src/index.ts"],
       "@guyghost/swarm-dao-improvement": ["./packages/improvement-loop/src/index.ts"],
+      "@guyghost/swarm-dao-software-delivery": ["./packages/software-delivery/src/index.ts"],
       "@guyghost/swarm-dao-mcp": ["./packages/mcp-server/src/index.ts"],
       "@guyghost/swarm-dao-herdr-adapter": ["./packages/herdr-adapter/src/index.ts"],
       "@guyghost/swarm-dao-copilot-adapter": ["./packages/copilot-adapter/src/index.ts"],

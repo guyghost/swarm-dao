@@ -54,6 +54,7 @@
     "product:init": "bun tools/product-loop/productctl.ts init",
     "product:status": "bun tools/product-loop/productctl.ts status",
     "product:submit": "bun tools/product-loop/productctl.ts submit",
+    "software-delivery:validate": "bun tools/software-delivery/validate.ts",
     "ci": "bun run check:changesets && bun run check:publish-manifests && bun run check:doc-links && bun run setup-workspace && bun run build && bun run lint && bun run typecheck && bun run test && bun run test:integration && bun run test:coverage && bun run pack:pi",
     "check:changesets": "bun scripts/check-changesets.ts",
     "check:publish-manifests": "bun scripts/check-publish-manifests.ts",
@@ -102,6 +103,7 @@
     "@guyghost/swarm-dao-graph": "workspace:*",
     "@guyghost/swarm-dao-improvement": "workspace:*",
     "@guyghost/swarm-dao-product": "workspace:*",
+    "@guyghost/swarm-dao-software-delivery": "workspace:*",
     "typebox": "^1.3.1"
   },
   "type": "module"

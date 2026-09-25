@@ -4,7 +4,8 @@
     "noEmit": true,
     "types": ["node", "bun"],
     "paths": {
-      "@guyghost/swarm-dao-herdr-adapter": ["../packages/herdr-adapter/dist/index.d.ts"]
+      "@guyghost/swarm-dao-herdr-adapter": ["../packages/herdr-adapter/dist/index.d.ts"],
+      "@guyghost/swarm-dao-software-delivery": ["../packages/software-delivery/src/index.ts"]
     }
   },
   "include": ["**/*.ts"],
