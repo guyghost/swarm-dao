@@ -207,6 +207,40 @@ describe("observability/alerts", () => {
     expect(rules.length).toBeGreaterThanOrEqual(0);
   });
 
+  it("reads the requested histogram aggregate instead of the observation count", () => {
+    const histogram = createHistogram("test_hist_aggregate", "", [10, 100, 1000, 10_000]);
+    histogram.observe(5);
+    histogram.observe(10);
+    histogram.observe(60_000); // slow tail: P95 is 60s but COUNT is only 3
+    createAlertRule({
+      name: "Slow",
+      description: "P95 exceeds 30s",
+      metric: "test_hist_aggregate",
+      aggregate: "p95",
+      condition: "gt",
+      threshold: 30_000,
+      severity: "warning",
+      enabled: true,
+    });
+
+    // A count-based read would see 3 (below the 30s threshold) and stay silent
+    // while the P95 the rule describes is actually breached.
+    const alerts = evaluateRules();
+    expect(alerts.map((alert) => alert.name)).toEqual(["Slow"]);
+    expect(alerts[0]?.value).toBe(60_000);
+  });
+
+  it("fires the default P95 deliberation rule on a slow P95, not on the observation count", () => {
+    // Ten fast deliberations and one slow tail: the P95 is ~45s (well above
+    // the 30s threshold) while the observation count (11) is nowhere near it.
+    for (let i = 0; i < 10; i++) DAO_METRICS.deliberationDuration.observe(5);
+    DAO_METRICS.deliberationDuration.observe(45_000);
+    initializeDefaultAlertRules();
+
+    const fired = evaluateRules().map((alert) => alert.name);
+    expect(fired).toContain("High Deliberation Time");
+  });
+
   it("keeps at most 256 alerts", () => {
     for (let i = 0; i < 300; i++) {
       createAlertRule({
