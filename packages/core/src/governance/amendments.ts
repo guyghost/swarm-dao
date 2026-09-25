@@ -112,6 +112,22 @@ export function validateAmendmentPayload(payload: AmendmentPayload): AmendmentVa
       if (!payload.typeQuorum || Object.keys(payload.typeQuorum).length === 0) {
         errors.push("At least one type quorum change is required");
       }
+      for (const [type, quorum] of Object.entries(payload.typeQuorum ?? {})) {
+        if (!Object.hasOwn(TYPE_QUORUM, type)) errors.push(`Unknown proposal type: ${type}`);
+        if (!quorum || typeof quorum !== "object" || Array.isArray(quorum)) {
+          errors.push(`typeQuorum.${type} must be an object`);
+          continue;
+        }
+        for (const key of ["quorumPercent", "approvalPercent"] as const) {
+          const value = quorum[key];
+          if (
+            value !== undefined &&
+            (typeof value !== "number" || !Number.isFinite(value) || value < 1 || value > 100)
+          ) {
+            errors.push(`typeQuorum.${type}.${key} must be a finite number between 1 and 100`);
+          }
+        }
+      }
       break;
     }
     case "gate-update": {
@@ -224,6 +240,8 @@ export function previewAmendment(payload: AmendmentPayload, state: DAOState): Am
 }
 
 export function executeAmendment(payload: AmendmentPayload, state: DAOState): AmendmentExecutionResult {
+  const validation = validateAmendmentPayload(payload);
+  if (!validation.valid) return { success: false, error: validation.errors.join("; ") };
   // Capture snapshot before changes
   const snapshot: AmendmentSnapshot = {
     agents: state.agents.map((a) => ({ ...a })),

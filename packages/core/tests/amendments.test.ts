@@ -76,3 +76,33 @@ describe("governance/amendments.ts", () => {
     expect(state.agents).toHaveLength(1);
   });
 });
+
+describe("quorum amendment boundaries", () => {
+  it("rejects invalid percentages before any mutation", () => {
+    for (const key of ["quorumPercent", "approvalPercent"] as const) {
+      for (const value of [-1, 0, 101, Number.NaN, Number.POSITIVE_INFINITY, "55", null]) {
+        const payload = {
+          type: "quorum-update" as const,
+          typeQuorum: { "product-feature": { [key]: value } },
+        } as Parameters<typeof validateAmendmentPayload>[0];
+        const state = createInitialState("/tmp/dao-test");
+        const before = JSON.stringify(state);
+        expect(validateAmendmentPayload(payload).valid).toBe(false);
+        expect(executeAmendment(payload, state).success).toBe(false);
+        expect(JSON.stringify(state)).toBe(before);
+      }
+    }
+  });
+
+  it("accepts partial threshold updates at both bounds", () => {
+    for (const value of [1, 100]) {
+      const state = createInitialState("/tmp/dao-test");
+      const approval = state.config.typeQuorum["product-feature"]?.approvalPercent;
+      expect(
+        executeAmendment({ type: "quorum-update", typeQuorum: { "product-feature": { quorumPercent: value } } }, state)
+          .success,
+      ).toBe(true);
+      expect(state.config.typeQuorum["product-feature"]?.approvalPercent).toBe(approval);
+    }
+  });
+});

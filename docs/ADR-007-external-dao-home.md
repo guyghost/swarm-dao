@@ -94,20 +94,28 @@ Example: `swarm-dao-a1b2c3d4`.
 ├── project.json                  # schemaVersion, repoPath, createdAt, storageMode
 ├── config.json                   # ProjectConfig — shared across branches
 ├── branches/
-│   ├── main/
+│   ├── branch-main-<hash16>/
 │   │   ├── state.json            # proposals (existing DAOState format)
 │   │   ├── decisions/            # existing per-proposal summaries
 │   │   └── audit.jsonl           # existing audit trail
-│   └── feat-external-home/
+│   └── branch-feat-external-home-<hash16>/
 │       └── …
 └── detached-a1b2c3d/             # detached-HEAD sessions, keyed by short sha
 ```
 
-- **Branch id**: the checked-out branch name
-  (`git rev-parse --abbrev-ref HEAD`). A branch can be checked out in at most
+- **Branch id**: `branch-<readable-slug>-<hash16>`, where the suffix is the
+  first 16 hex characters of SHA-256 over the exact checked-out branch name.
+  This separates names that differ by punctuation, case, or characters beyond
+  the readable prefix's length limit. A branch can be checked out in at most
   one worktree, so the branch key already disambiguates worktrees; detached
   HEADs fall back to `detached-<shortsha>`. Projects without a git identity
   never enter home mode (see precedence above).
+- **Existing branch storage**: old slug-only directories are read in place by
+  read-only commands and renamed on the next writable open when exactly one
+  local branch owns that slug. Ambiguous legacy directories are preserved and
+  opening fails with their path; the operator must assign the existing data to
+  the appropriate new branch directories. GC preserves legacy directories for
+  all live branch slugs until migration.
 - **Why config is shared**: agent definitions, activation mode, and remote
   config do not vary per branch; duplicating them per branch forces users to
   re-run setup on every branch and risks config drift between branches.
@@ -136,7 +144,9 @@ cleanup is **garbage collection driven by live git state**:
   - never GC the current branch's directory;
   - only run when `project.json.repoPath` matches the current repo (prevents
     a moved/renamed project from wiping another project's state);
-  - skip silently when git metadata is unavailable (non-git project);
+  - skip deletion when either local-ref or worktree enumeration fails; passive
+    GC logs the failure, and explicit GC returns an error;
+  - refuse state resolution when Git HEAD cannot be determined;
   - deletions are logged (what was removed, not silently).
 - **Explicit command**: `swarm-dao gc [--dry-run]` for manual sweeps.
 

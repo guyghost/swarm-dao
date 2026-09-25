@@ -189,13 +189,17 @@ describe("handleDaoRoundtable — batched audit writes (task 8)", () => {
         repository,
       };
 
-      const writeSpy = spyOn(fs, "writeFile");
-      writeSpy.mockClear();
-
-      await handleDaoRoundtable(ctx);
-
-      const writeCount = writeSpy.mock.calls.length;
-      writeSpy.mockRestore();
+      // Observe state commits, not incidental writes to the lock file.
+      const writeSpy = spyOn(fs, "rename");
+      let writeCount: number;
+      try {
+        await handleDaoRoundtable(ctx);
+        writeCount = writeSpy.mock.calls.filter(
+          ([, target]) => target === path.join(repository.get().daoRoot, "state.json"),
+        ).length;
+      } finally {
+        writeSpy.mockRestore();
+      }
 
       const after = repository.get();
       const createdProposals = after.proposals;
@@ -218,16 +222,8 @@ describe("handleDaoRoundtable — batched audit writes (task 8)", () => {
         expect(proposalIds.has(entry.proposalId)).toBe(true);
       }
 
-      // Performance: writes must NOT scale with the number of proposals.
-      // Old code issued one full saveState per proposal (~k writes via recordAudit);
-      // the batched approach appends in-memory and persists once.
-      // Sanity: the spy intercepted at least one write (saves actually happened).
-      expect(writeCount).toBeGreaterThanOrEqual(1);
-      // Single save burst: a constant number of writes, bounded independent of k.
-      // (One save = lock + state.tmp; old code was ~k+2, i.e. 9 for k=7.)
-      expect(writeCount).toBeLessThanOrEqual(4);
-      // And strictly sub-linear in the number of created proposals.
-      expect(writeCount).toBeLessThan(createdProposals.length);
+      // All proposals and their audit entries are committed in one state write.
+      expect(writeCount).toBe(1);
     } finally {
       await fs.rm(workDir, { recursive: true, force: true }).catch(() => {});
     }
