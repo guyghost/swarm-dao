@@ -89,6 +89,22 @@ describe("product signal validation", () => {
     }
   });
 
+  it("accepts a human deploy authorization for sensitive Product review", () => {
+    const result = validateProductSignal({
+      runId: "product-signal-test",
+      type: "REVIEW_RESOLVED",
+      source: "human",
+      producer: "human-owner",
+      occurredAt: "2026-07-30T10:00:00.000Z",
+      payload: { resolution: "deploy-authorized" },
+      evidence: ["owner:deploy-review"],
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.event).toEqual({ type: "REVIEW_RESOLVED", source: "human", resolution: "deploy-authorized" });
+  });
+
   it("rejects a wrong source for a given event type", () => {
     // QUALIFICATION_RUN is tool-only.
     expect(validateProductSignal({ ...baseToolSignal, source: "ai" }).ok).toBe(false);

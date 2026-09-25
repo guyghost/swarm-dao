@@ -1,20 +1,19 @@
 {
-  "name": "@guyghost/swarm-dao-cli",
-  "version": "0.16.0",
-  "description": "Swarm DAO standalone CLI",
+  "name": "@guyghost/swarm-dao-software-delivery",
+  "version": "0.1.0",
+  "description": "Swarm DAO repository-local software delivery coordinator with producer-bound signals",
   "type": "module",
-  "main": "./dist/cli.js",
-  "types": "./dist/cli.d.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "sideEffects": false,
   "files": [
-    "dist"
+    "dist",
+    "README.md"
   ],
-  "bin": {
-    "swarm-dao": "./dist/cli.js"
-  },
   "exports": {
     ".": {
-      "types": "./dist/cli.d.ts",
-      "import": "./dist/cli.js"
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
     }
   },
   "scripts": {
@@ -27,26 +26,29 @@
   "dependencies": {
     "@guyghost/swarm-dao-core": "^2.2.1",
     "@guyghost/swarm-dao-graph": "^0.4.1",
-    "@guyghost/swarm-dao-herdr-adapter": "^0.5.2",
-    "@guyghost/swarm-dao-improvement": "^0.6.9",
-    "@guyghost/swarm-dao-product": "^0.3.8",
-    "@guyghost/swarm-dao-software-delivery": "^0.1.0",
-    "@guyghost/swarm-dao-tmux-adapter": "^0.4.2"
+    "@guyghost/swarm-dao-product": "^0.3.8"
   },
   "devDependencies": {
-    "@types/bun": "1.3.14"
+    "@types/bun": "1.3.14",
+    "@types/node": "^26.0.1"
   },
+  "keywords": [
+    "swarm-dao",
+    "software-delivery",
+    "governance",
+    "xstate"
+  ],
+  "author": "guyghost",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/guyghost/swarm-dao.git",
-    "directory": "packages/cli"
+    "directory": "packages/software-delivery"
   },
   "bugs": {
     "url": "https://github.com/guyghost/swarm-dao/issues"
   },
   "homepage": "https://github.com/guyghost/swarm-dao#readme",
-  "author": "guyghost",
-  "license": "MIT",
   "publishConfig": {
     "access": "public"
   }

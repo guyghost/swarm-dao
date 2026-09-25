@@ -55,6 +55,7 @@ import {
   PROPOSAL_TYPES,
   presentDryRun,
   RateProposalUseCase,
+  REQUIRED_GRAPH_ANCHORS,
   RejectProposalUseCase,
   recordAuditOn,
   resolveConfigFilePath,
@@ -83,6 +84,22 @@ import {
   workerOptionsFromConfig,
 } from "@guyghost/swarm-dao-improvement";
 import { createProductRunner } from "@guyghost/swarm-dao-product";
+import {
+  advanceDeliveryOnce,
+  createDeliveryRunner,
+  createLocalStagingTarget,
+  createStagingObservationSamples,
+  type DeliveryCommandDependencies,
+  type DeliveryCommandRoots,
+  type DeliveryExecutorPorts,
+  type DeliveryReconciliation,
+  type DeliveryScorecardEntry,
+  openGraphChild,
+  openProductChild,
+  runDeliveryCommand,
+  submitGraphChildSignal,
+  submitProductChildSignal,
+} from "@guyghost/swarm-dao-software-delivery";
 import { createTmuxHostAdapter } from "@guyghost/swarm-dao-tmux-adapter";
 import { cmdDoctor } from "./doctor.js";
 import { type ChildHost, childSessionName, detectHostSession, type HostSession } from "./environment.js";
@@ -370,6 +387,7 @@ const CLI_IMPLEMENTED = [
   "status",
   "graph",
   "product",
+  "delivery",
   "improve",
   "help",
 ] as const;
@@ -415,6 +433,8 @@ const CLI_USAGE_DETAILS: Record<string, string> = {
     "  graph <init|status|submit|implement> --run-id <id> [--evidence-root <path>]\n        graph submit --run-id <id> --signal <file.json>\n        graph implement --run-id <id> --task <text>   classifier-routed implementer",
   product:
     "  product <init|status|submit> --run-id <id> [--evidence-root <path>]\n        product submit --run-id <id> --signal <file.json>",
+  delivery:
+    "  delivery <init|status|submit|once|resume|scorecard|stage-init> [options]\n        delivery init --delivery-id <id> --product-run-id <id> [--risk-class unknown]\n        delivery status|once|resume --delivery-id <id>\n        delivery submit --delivery-id <id> --signal <file.json>\n        delivery scorecard [--since <ISO timestamp>] | stage-init",
   improve: `  improve init --series-id <id> --scope <s> --reference-hash <hash> [--cooldown-ms <ms>]
         improve status --series-id <id>
         improve once --series-id <id> [--sandbox <docker|container|auto|none>] [--image <name>]
@@ -1398,11 +1418,9 @@ function graphImplementProposal(runId: string): Proposal {
 }
 
 async function hashCheckout(cwd: string): Promise<string> {
-  const head = await execCommand("git rev-parse HEAD", { cwd, timeout: 10_000 });
-  if (head.exitCode !== 0) throw new Error(head.stderr.trim() || "git rev-parse HEAD failed");
-  const status = await execCommand("git status --porcelain", { cwd, timeout: 10_000 });
-  const diff = await execCommand("git diff HEAD", { cwd, timeout: 30_000 });
-  return createHash("sha256").update(`${head.stdout}\n${status.stdout}\n${diff.stdout}`).digest("hex");
+  return createHash("sha256")
+    .update(await checkoutSnapshot(cwd))
+    .digest("hex");
 }
 
 const toToolStatus = (exitCode: number): ToolCheckStatus => (exitCode === 0 ? "passed" : "failed");
@@ -1473,6 +1491,712 @@ async function cmdGraphImplement(cwd: string, flags: Record<string, string | tru
 
 function cmdProduct(cwd: string, positional: string[], flags: Record<string, string | true>): Promise<number> {
   return cmdRunCommand(cwd, positional, flags, PRODUCT_SPEC);
+}
+
+const DELIVERY_MODEL_AGENT: DAOAgent = {
+  id: "modeler",
+  name: "Delivery modeler",
+  role: "planning",
+  description: "signal-only Graph modeler for repository-local software delivery",
+  weight: 1,
+  systemPrompt: "",
+};
+
+async function checkoutSnapshot(cwd: string): Promise<string> {
+  const head = await execCommand("git rev-parse HEAD", { cwd, timeout: 10_000 });
+  if (head.exitCode !== 0) throw new Error(head.stderr.trim() || "git rev-parse HEAD failed");
+  const status = await execCommand("git status --porcelain", { cwd, timeout: 10_000 });
+  const diff = await execCommand("git diff HEAD", { cwd, timeout: 30_000 });
+  const untracked = await execCommand("git ls-files --others --exclude-standard -z", { cwd, timeout: 30_000 });
+  if (untracked.exitCode !== 0) throw new Error(untracked.stderr.trim() || "git ls-files failed");
+  const repositoryRoot = path.resolve(cwd);
+  const untrackedPaths = untracked.stdout.split("\0").filter(Boolean).sort();
+  const untrackedFiles = await Promise.all(
+    untrackedPaths.map(async (relativePath) => {
+      const filePath = path.resolve(repositoryRoot, relativePath);
+      const fromRoot = path.relative(repositoryRoot, filePath);
+      if (
+        fromRoot.length === 0 ||
+        fromRoot === ".." ||
+        fromRoot.startsWith(`..${path.sep}`) ||
+        path.isAbsolute(fromRoot)
+      ) {
+        throw new Error(`untracked checkout path resolves outside the repository: ${relativePath}`);
+      }
+      const fileStat = await fs.lstat(filePath);
+      if (fileStat.isSymbolicLink()) {
+        return { path: relativePath, kind: "symlink", target: await fs.readlink(filePath) };
+      }
+      if (!fileStat.isFile()) throw new Error(`unsupported untracked checkout entry: ${relativePath}`);
+      const bytes = await fs.readFile(filePath);
+      return {
+        path: relativePath,
+        kind: "file",
+        mode: fileStat.mode & 0o777,
+        dataBase64: bytes.toString("base64"),
+      };
+    }),
+  );
+  return `${head.stdout}\n${status.stdout}\n${diff.stdout}\n${JSON.stringify(untrackedFiles)}`;
+}
+
+async function readJsonFileOrNull<T>(filePath: string): Promise<T | null> {
+  try {
+    return JSON.parse(await fs.readFile(filePath, "utf8")) as T;
+  } catch (error) {
+    if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+type DeliveryJournalLine = Record<string, unknown> & { sequence: number; runId: string };
+
+async function readDeliveryJournal(root: string, runId: string): Promise<DeliveryJournalLine[]> {
+  let content: string;
+  try {
+    content = await fs.readFile(path.resolve(root, runId, "journal.ndjson"), "utf8");
+  } catch (error) {
+    if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") return [];
+    throw error;
+  }
+  const lines = content.split("\n").filter((line) => line.trim().length > 0);
+  return lines.map((line, index) => {
+    const parsed: unknown = JSON.parse(line);
+    if (
+      typeof parsed !== "object" ||
+      parsed === null ||
+      Array.isArray(parsed) ||
+      (parsed as Record<string, unknown>).sequence !== index + 1 ||
+      (parsed as Record<string, unknown>).runId !== runId
+    ) {
+      throw new Error(`delivery scorecard journal ${runId} line ${index + 1} is malformed`);
+    }
+    return parsed as DeliveryJournalLine;
+  });
+}
+
+async function readScorecardJournal(root: string, runId: string): Promise<DeliveryJournalLine[]> {
+  return readDeliveryJournal(root, runId);
+}
+
+async function loadDeliveryScorecardEntries(roots: DeliveryCommandRoots): Promise<DeliveryScorecardEntry[]> {
+  const entries: DeliveryScorecardEntry[] = [];
+  let directoryEntries: Array<{ name: string; isDirectory: () => boolean }>;
+  try {
+    directoryEntries = await fs.readdir(roots.evidenceRoot, { withFileTypes: true });
+  } catch (error) {
+    if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") return [];
+    throw error;
+  }
+  for (const directoryEntry of directoryEntries) {
+    if (!directoryEntry.isDirectory()) continue;
+    const deliveryRunId = directoryEntry.name;
+    const delivery = await readJsonFileOrNull<{
+      state?: string;
+      context?: { productRunId?: string; graphRunId?: string };
+    }>(path.resolve(roots.evidenceRoot, deliveryRunId, "snapshot.json"));
+    if (!delivery?.context?.productRunId || !delivery.context.graphRunId) continue;
+    for (const row of await readScorecardJournal(roots.evidenceRoot, deliveryRunId)) {
+      entries.push({
+        deliveryRunId,
+        journal: "delivery",
+        kind: typeof row.kind === "string" ? row.kind : undefined,
+        eventType: typeof row.eventType === "string" ? row.eventType : null,
+        accepted: row.accepted === true,
+        receivedAt: typeof row.receivedAt === "string" ? row.receivedAt : undefined,
+        signal:
+          typeof row.signal === "object" && row.signal !== null
+            ? (row.signal as DeliveryScorecardEntry["signal"])
+            : undefined,
+      });
+    }
+    entries.push({
+      deliveryRunId,
+      journal: "delivery",
+      kind: "snapshot",
+      receivedAt: new Date().toISOString(),
+      snapshot: delivery,
+    });
+
+    const childSpecs = [
+      { journal: "product" as const, root: roots.productRoot, runId: delivery.context.productRunId },
+      { journal: "graph" as const, root: roots.graphRoot, runId: delivery.context.graphRunId },
+    ];
+    for (const child of childSpecs) {
+      const childSnapshot = await readJsonFileOrNull<{ state?: string; context?: Record<string, unknown> }>(
+        path.resolve(child.root, child.runId, "snapshot.json"),
+      );
+      if (!childSnapshot) continue;
+      entries.push({
+        deliveryRunId,
+        journal: child.journal,
+        kind: "snapshot",
+        receivedAt: new Date().toISOString(),
+        snapshot: childSnapshot,
+      });
+      for (const row of await readScorecardJournal(child.root, child.runId)) {
+        if (row.accepted !== true || typeof row.signal !== "object" || row.signal === null) continue;
+        const signal = row.signal as Record<string, unknown>;
+        entries.push({
+          deliveryRunId,
+          journal: child.journal,
+          kind: "signal",
+          eventType: typeof signal.type === "string" ? signal.type : null,
+          accepted: true,
+          source: typeof signal.source === "string" ? signal.source : undefined,
+          receivedAt: typeof row.receivedAt === "string" ? row.receivedAt : undefined,
+          payload:
+            typeof signal.payload === "object" && signal.payload !== null
+              ? (signal.payload as Record<string, unknown>)
+              : {},
+        });
+      }
+    }
+  }
+  return entries;
+}
+
+async function deliveryPortsFrom(
+  cwd: string,
+  roots: DeliveryCommandRoots & { deliveryRunId: string; productRunId: string; graphRunId: string },
+  flags: Record<string, string | true>,
+): Promise<DeliveryExecutorPorts> {
+  const projectConfig = await loadConfig(await daoStateRoot(cwd));
+  const child = childSessionOptionsFrom(flags, projectConfig);
+  const adapter = childAdapter(child, cwd);
+  const stageTarget = createLocalStagingTarget({
+    stageRoot: roots.stageRoot,
+    snapshotSource: () => checkoutSnapshot(cwd),
+  });
+  const graphEvidenceRoot = roots.graphRoot;
+  const productEvidenceRoot = roots.productRoot;
+  const deliveryEvidenceRoot = roots.evidenceRoot;
+  const graphModelPath = path.resolve(deliveryEvidenceRoot, roots.deliveryRunId, "graph-model.md");
+  const graphJournalPath = (runId: string): string => path.resolve(graphEvidenceRoot, runId, "journal.ndjson");
+  const productJournalPath = (runId: string): string => path.resolve(productEvidenceRoot, runId, "journal.ndjson");
+  const clock = () => new Date().toISOString();
+
+  const productView = async (runId: string) => {
+    try {
+      await fs.access(path.resolve(productEvidenceRoot, runId, "snapshot.json"));
+    } catch (error) {
+      if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") return null;
+      throw error;
+    }
+    const product = await openProductChild({ evidenceRoot: productEvidenceRoot, runId });
+    return { snapshot: product.snapshot, acceptedSignals: product.acceptedSignals };
+  };
+  const graphView = async (runId: string) => {
+    try {
+      await fs.access(path.resolve(graphEvidenceRoot, runId, "snapshot.json"));
+    } catch (error) {
+      if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") return null;
+      throw error;
+    }
+    const graph = await openGraphChild({ evidenceRoot: graphEvidenceRoot, runId });
+    return { snapshot: graph.snapshot, acceptedSignals: graph.acceptedSignals };
+  };
+  const graphSignal = async (
+    runId: string,
+    type: string,
+    source: "ai" | "tool" | "system",
+    producer: string,
+    payload: Record<string, unknown>,
+    evidence: string,
+  ) => {
+    const runner = await createGraphRunner({ evidenceRoot: graphEvidenceRoot, runId });
+    const submitted = await submitGraphChildSignal(runner, {
+      runId,
+      type,
+      source,
+      producer,
+      occurredAt: clock(),
+      payload,
+      evidence: [evidence],
+    });
+    if (!submitted.accepted) throw new Error(`Graph child rejected ${type}: ${submitted.issues.join("; ")}`);
+    return submitted;
+  };
+  const productSignal = async (runId: string, signal: unknown) => {
+    const runner = await createProductRunner({ evidenceRoot: productEvidenceRoot, runId });
+    if (typeof signal === "object" && signal !== null && !Array.isArray(signal)) {
+      const value = signal as Record<string, unknown>;
+      const payload =
+        typeof value.payload === "object" && value.payload !== null && !Array.isArray(value.payload)
+          ? (value.payload as Record<string, unknown>)
+          : {};
+      const control = payload.control as { name?: unknown; status?: unknown; evidence?: unknown } | undefined;
+      if (
+        value.type === "VERIFY_RUN" &&
+        control &&
+        typeof control.name === "string" &&
+        JSON.stringify(runner.snapshot().context.controls[control.name]) === JSON.stringify(control)
+      ) {
+        return {
+          evidence: `Product control ${control.name} already recorded`,
+          value: { accepted: true, state: runner.snapshot().state },
+        };
+      }
+      const anchor = payload.anchor;
+      const recordedAnchor =
+        typeof anchor === "string"
+          ? (runner.snapshot().context.anchors as Record<string, { status?: string } | undefined>)[anchor]
+          : undefined;
+      if (value.type === "ANCHOR_RECORDED" && typeof anchor === "string" && recordedAnchor?.status === payload.status) {
+        return {
+          evidence: `Product anchor ${anchor} already recorded`,
+          value: { accepted: true, state: runner.snapshot().state },
+        };
+      }
+      if (value.type === "VERIFY_EVALUATE" && runner.snapshot().state !== "verification") {
+        return {
+          evidence: `Product verification already evaluated`,
+          value: { accepted: true, state: runner.snapshot().state },
+        };
+      }
+    }
+    const submitted = await submitProductChildSignal(runner, signal);
+    const value = signal as { type?: string; evidence?: readonly string[] };
+    return {
+      evidence: (value.evidence ?? []).join("; ") || `product:${runId}:${value.type ?? "signal"}`,
+      value: { accepted: submitted.accepted, state: submitted.snapshot.state },
+    };
+  };
+
+  return {
+    readProductRun: productView,
+    readGraphRun: graphView,
+    stageRoot: roots.stageRoot,
+    artifactBaseRoot: cwd,
+    clock,
+    createGraphRun: async (runId, effectId) => {
+      await createGraphRunner({ evidenceRoot: graphEvidenceRoot, runId });
+      return { evidence: path.resolve(graphEvidenceRoot, runId, "snapshot.json"), value: { effectId } };
+    },
+    draftGraphModel: async (input) => {
+      let model: string;
+      try {
+        model = await fs.readFile(graphModelPath, "utf8");
+      } catch (error) {
+        if (!(typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT")) throw error;
+        const proposal = graphImplementProposal(input.runId);
+        const modelPrompt = [
+          "Draft a concise, reviewable change model for this repository task.",
+          "Return the model as plain Markdown with these exact headings: Scope, Acceptance criteria, Rollback, Validation.",
+          "Do not edit files or submit any signals. Do not include personal data or credentials.",
+          `Risk classification: ${input.riskClass}`,
+          `Scope SHA-256: ${input.scopeHash}`,
+          "Task scope:",
+          input.scope,
+        ].join("\n\n");
+        const output = await adapter.spawnAgent({
+          agent: DELIVERY_MODEL_AGENT,
+          proposal,
+          systemPrompt: modelPrompt,
+          ...(child.timeoutMs !== undefined ? { timeoutMs: child.timeoutMs } : {}),
+          ...(child.host === "herdr" ? { harness: child.kind } : {}),
+        });
+        if (output.error) throw new Error(output.error);
+        model = output.content.trim();
+        if (!model) throw new Error("delivery modeler returned an empty change model");
+        await fs.mkdir(path.dirname(graphModelPath), { recursive: true });
+        await fs.writeFile(graphModelPath, `${model}\n`, { encoding: "utf8", flag: "wx" });
+      }
+      const modelHash = createHash("sha256").update(model).digest("hex");
+      await graphSignal(
+        input.runId,
+        "MODEL_DRAFTED",
+        "ai",
+        "modeler",
+        { modelHash },
+        `delivery model artifact ${modelHash}; effect ${input.effectId}`,
+      );
+      return { evidence: graphModelPath, value: { modelArtifactHash: modelHash } };
+    },
+    validateGraphModel: async ({ runId, effectId }) => {
+      const model = await fs.readFile(graphModelPath, "utf8");
+      const modelHash = createHash("sha256").update(model).digest("hex");
+      const requiredHeadings = ["Scope", "Acceptance criteria", "Rollback", "Validation"];
+      const valid = requiredHeadings.every((heading) => new RegExp(`^#{1,3}\\s+${heading}\\s*$`, "im").test(model));
+      if (valid) {
+        await graphSignal(
+          runId,
+          "MODEL_CONTRACT_VALID",
+          "tool",
+          "model-contract-validator",
+          {},
+          `change model ${modelHash} validated; effect ${effectId}`,
+        );
+      } else {
+        await graphSignal(
+          runId,
+          "MODEL_CONTRACT_INVALID",
+          "tool",
+          "model-contract-validator",
+          { reason: "change model must include Scope, Acceptance criteria, Rollback, and Validation headings" },
+          `change model ${modelHash} failed validation; effect ${effectId}`,
+        );
+      }
+      return { evidence: `${graphModelPath}#${modelHash}`, value: { valid, modelHash } };
+    },
+    startGraphImplementation: async ({ runId, modelHash, effectId }) => {
+      const graph = await createGraphRunner({ evidenceRoot: graphEvidenceRoot, runId });
+      if (graph.snapshot().context.approvedModelHash !== modelHash)
+        throw new Error("Graph exact-hash owner approval is no longer current");
+      const submitted = await graphSignal(
+        runId,
+        "START_IMPLEMENTATION",
+        "system",
+        "graph-runner",
+        {},
+        `exact approved model ${modelHash}; effect ${effectId}`,
+      );
+      return { evidence: graphJournalPath(runId), value: { sequence: submitted.snapshot.context.attempt } };
+    },
+    runGraphImplementation: async ({ runId, modelHash, effectId }) => {
+      const graph = await createGraphRunner({ evidenceRoot: graphEvidenceRoot, runId });
+      const before = graph.snapshot();
+      if (
+        before.state !== "implementing" ||
+        before.context.approvedModelHash !== modelHash ||
+        before.context.modelHash !== modelHash
+      ) {
+        throw new Error("Graph implementation is not authorized by the exact approved model hash");
+      }
+      const product = await productView(roots.productRunId);
+      const implementationTask = product?.snapshot.context.draft?.scope;
+      if (typeof implementationTask !== "string" || implementationTask.trim().length === 0) {
+        throw new Error("Product scope is unavailable for the approved Graph implementation");
+      }
+      const approvedChangeModel = await fs.readFile(graphModelPath, "utf8");
+      announceChildren(`delivery implementer for ${runId}`, child, [
+        childName(child, graphImplementProposal(runId).id, IMPLEMENTATION_AGENT.id),
+      ]);
+      const result = await runGraphImplementing({
+        evidenceRoot: graphEvidenceRoot,
+        runId,
+        task: `${implementationTask}\n\nOwner-approved change model:\n${approvedChangeModel}\nEffect checkpoint: ${effectId}`,
+        ports: {
+          turn: async (prompt) => {
+            const output = await adapter.spawnAgent({
+              agent: IMPLEMENTATION_AGENT,
+              proposal: graphImplementProposal(runId),
+              systemPrompt: prompt,
+              ...(child.timeoutMs !== undefined ? { timeoutMs: child.timeoutMs } : {}),
+              ...(child.host === "herdr" ? { harness: child.kind } : {}),
+            });
+            if (output.error) return { ok: false, error: output.error };
+            return { ok: true, transcript: output.content };
+          },
+          runTools: () => runRepoTools(cwd),
+          implementationHash: () => hashCheckout(cwd),
+        },
+      });
+      if (result.error || !result.submitted) {
+        throw new Error(
+          result.error ?? `Graph implementer paused for ${result.loop.kind}; operator review is required`,
+        );
+      }
+      return { evidence: graphJournalPath(runId), value: { state: result.snapshot.state } };
+    },
+    verifyGraphAnchors: async ({ runId, effectId }) => {
+      const graph = await createGraphRunner({ evidenceRoot: graphEvidenceRoot, runId });
+      const commands = JSON.parse(
+        await fs.readFile(path.resolve(cwd, "models/graph-engineering.graph.json"), "utf8"),
+      ) as {
+        anchorCommands?: Record<string, string>;
+      };
+      const producers: Record<string, string> = {
+        "graph-tests": "runtime-verifier",
+        "architecture-contract": "architecture-watcher",
+        "repository-ci": "runtime-verifier",
+        "runtime-scenario": "runtime-verifier",
+        regression: "regression-watcher",
+      };
+      for (const anchor of REQUIRED_GRAPH_ANCHORS) {
+        if (
+          anchor === "model-contract" ||
+          graph.snapshot().context.anchors[anchor]?.attempt === graph.snapshot().context.attempt
+        )
+          continue;
+        const command = commands.anchorCommands?.[anchor];
+        const producer = producers[anchor];
+        if (!command || !producer) throw new Error(`Graph anchor ${anchor} has no frozen command or producer`);
+        const result = await execCommand(command, { cwd, timeout: 300_000 });
+        const status = result.exitCode === 0 ? "passed" : "failed";
+        const evidence = `command ${command}: exit ${result.exitCode}; effect ${effectId}`;
+        const submitted = await graphSignal(runId, "ANCHOR_RECORDED", "tool", producer, { anchor, status }, evidence);
+        if (!submitted.accepted) throw new Error(`Graph rejected anchor ${anchor}`);
+      }
+      await graphSignal(runId, "EVALUATE", "system", "graph-runner", {}, `Graph anchors evaluated; effect ${effectId}`);
+      return { evidence: graphJournalPath(runId), value: { state: graph.snapshot().state } };
+    },
+    submitProductSignal: productSignal,
+    verifyProduct: async ({ runId, effectId }) => {
+      const toolEvidence = await runRepoTools(cwd);
+      for (const [name, status] of Object.entries(toolEvidence)) {
+        const submitted = await productSignal(runId, {
+          runId,
+          type: "VERIFY_RUN",
+          source: "tool",
+          producer: "verifier",
+          occurredAt: clock(),
+          payload: {
+            control: {
+              name,
+              status: status === "passed" ? "passed" : "failed",
+              evidence: `repository ${name} check; effect ${effectId}`,
+            },
+          },
+          evidence: [`repository ${name} check; effect ${effectId}`],
+        });
+        if (!submitted.value?.accepted) throw new Error(`Product rejected ${name} verification control`);
+      }
+      const stageInspection = await stageTarget.inspect();
+      for (const [anchor, status, command] of [
+        ["frozen-set-intact", stageInspection.intact ? "passed" : "failed", "staging integrity inspection"],
+        ["regression", "pending", "bun test packages/product-loop/tests packages/software-delivery/tests"],
+      ] as const) {
+        const result = anchor === "regression" ? await execCommand(command, { cwd, timeout: 300_000 }) : null;
+        const resolvedStatus = anchor === "regression" ? (result?.exitCode === 0 ? "passed" : "failed") : status;
+        const submitted = await productSignal(runId, {
+          runId,
+          type: "ANCHOR_RECORDED",
+          source: "tool",
+          producer: "verifier",
+          occurredAt: clock(),
+          payload: { anchor, status: resolvedStatus },
+          evidence: [`${command}; effect ${effectId}`],
+        });
+        if (!submitted.value?.accepted) throw new Error(`Product rejected ${anchor} verification anchor`);
+      }
+      const evaluated = await productSignal(runId, {
+        runId,
+        type: "VERIFY_EVALUATE",
+        source: "system",
+        producer: "product-runner",
+        occurredAt: clock(),
+        payload: { effectId },
+        evidence: [`Product controls evaluated; effect ${effectId}`],
+      });
+      const state = evaluated.value?.state;
+      return {
+        evidence: path.resolve(productEvidenceRoot, runId, "journal.ndjson"),
+        value: { state: state === "ship" || state === "review" ? state : "blocked" },
+      };
+    },
+    verifyRollbackPath: async ({ effectId }) => {
+      const result = await stageTarget.verifyRollbackPath();
+      return { evidence: `${result.evidence}; effect ${effectId}`, value: { restorable: result.restorable } };
+    },
+    hasReversibleStaging: async () => {
+      try {
+        return (await stageTarget.inspect()).intact;
+      } catch {
+        return false;
+      }
+    },
+    ship: async ({ artifactHash, effectId }) => {
+      const artifact = await stageTarget.snapshot();
+      if (artifact.hash !== artifactHash)
+        throw new Error("staging snapshot hash differs from the Graph implementation hash");
+      const result = await stageTarget.ship({ effectId, artifact });
+      return {
+        evidence: `staging ship ${result.effectId} activated ${result.artifactHash}`,
+        value: { artifactHash: result.artifactHash },
+      };
+    },
+    rollback: async ({ artifactHash, effectId }) => {
+      const result = await stageTarget.rollback({ effectId, expectedActiveHash: artifactHash });
+      return { evidence: `staging rollback ${result.effectId} restored ${result.restoredHash ?? "empty baseline"}` };
+    },
+    sampleObservation: async ({ effectId, observationWindowMs }) => {
+      const started = Date.now();
+      const inspection = await stageTarget.inspect();
+      const elapsed = Date.now() - started;
+      const observedAt = clock();
+      const activationTime = Date.parse(inspection.activatedAt);
+      const windowElapsed =
+        Number.isFinite(activationTime) && Date.parse(observedAt) - activationTime >= observationWindowMs;
+      const samples = await createStagingObservationSamples({
+        inspect: async () => ({
+          intact: inspection.intact,
+          errorCount: inspection.intact ? 0 : 1,
+          checkLatencyMs: elapsed,
+          evidence: `staging inspection at ${observedAt}; effect ${effectId}`,
+        }),
+      });
+      return { evidence: `staging observation ${effectId}`, value: { samples, windowElapsed, observedAt } };
+    },
+    cancelChildren: async ({ productRunId, graphRunId, effectId }) => {
+      const [product, graph] = await Promise.all([productView(productRunId), graphView(graphRunId)]);
+      const productTerminal =
+        !product || ["validated", "rejected", "cancelled", "blocked", "budgetBlocked"].includes(product.snapshot.state);
+      const graphTerminal = !graph || ["succeeded", "failed", "blocked", "cancelled"].includes(graph.snapshot.state);
+      if (!productTerminal || !graphTerminal) {
+        throw new Error(
+          "child runs remain active; settle cancellation through Product and Graph human controls before delivery can finish",
+        );
+      }
+      return {
+        evidence: `child cancellation reconciliation complete; no child cancellation signal synthesized; effect ${effectId}`,
+      };
+    },
+    reconcileEffect: async (effect): Promise<DeliveryReconciliation> => {
+      const [product, graph] = await Promise.all([productView(roots.productRunId), graphView(roots.graphRunId)]);
+      const containsEffect = (signals: readonly { evidence: readonly string[] }[] | undefined): string | null =>
+        signals?.find((signal) => signal.evidence.some((item) => item.includes(effect.key)))?.evidence[0] ?? null;
+      if (effect.name === "draft-graph-model" && graph) {
+        const drafted = graph.acceptedSignals.find(
+          (signal) => signal.eventType === "MODEL_DRAFTED" && signal.evidence.some((item) => item.includes(effect.key)),
+        );
+        if (drafted && graph.snapshot.context.modelHash) {
+          return {
+            status: "completed",
+            evidence: drafted.evidence[0] ?? graphJournalPath(roots.graphRunId),
+            result: { value: { modelArtifactHash: graph.snapshot.context.modelHash } },
+          };
+        }
+      }
+      if (effect.name === "validate-graph-model" && graph) {
+        const validated = graph.acceptedSignals.find(
+          (signal) =>
+            signal.eventType === "MODEL_CONTRACT_VALID" && signal.evidence.some((item) => item.includes(effect.key)),
+        );
+        if (validated) {
+          return {
+            status: "completed",
+            evidence: validated.evidence[0] ?? graphJournalPath(roots.graphRunId),
+            result: { value: { valid: true, modelHash: graph.snapshot.context.modelHash } },
+          };
+        }
+        const rejected = graph.acceptedSignals.find(
+          (signal) =>
+            signal.eventType === "MODEL_CONTRACT_INVALID" && signal.evidence.some((item) => item.includes(effect.key)),
+        );
+        if (rejected) {
+          return {
+            status: "completed",
+            evidence: rejected.evidence[0] ?? graphJournalPath(roots.graphRunId),
+            result: { value: { valid: false, modelHash: graph.snapshot.context.modelHash } },
+          };
+        }
+      }
+      if (effect.name === "verify-product" && product?.snapshot.state === "verification") {
+        return { status: "not-started" };
+      }
+      if (effect.name === "verify-graph-anchors" && graph?.snapshot.state === "verifying") {
+        return { status: "not-started" };
+      }
+      const childEvidence = containsEffect(product?.acceptedSignals) ?? containsEffect(graph?.acceptedSignals);
+      if (childEvidence) {
+        const signal = [...(product?.acceptedSignals ?? []), ...(graph?.acceptedSignals ?? [])].find((candidate) =>
+          candidate.evidence.some((item) => item.includes(effect.key)),
+        );
+        return {
+          status: "completed",
+          evidence: childEvidence,
+          result: { value: { accepted: true, state: product?.snapshot.state, type: signal?.eventType } },
+        };
+      }
+      if (effect.name === "create-graph-run" && graph) {
+        return {
+          status: "completed",
+          evidence: path.resolve(graphEvidenceRoot, roots.graphRunId, "snapshot.json"),
+          result: { value: { effectId: effect.key } },
+        };
+      }
+      if (effect.name === "run-graph-implementation" && graph && graph.snapshot.state !== "implementing") {
+        return {
+          status: "completed",
+          evidence: graphJournalPath(roots.graphRunId),
+          result: { value: { state: graph.snapshot.state } },
+        };
+      }
+      if (
+        effect.name === "verify-product" &&
+        product &&
+        ["ship", "review", "observation", "blocked", "rejected"].includes(product.snapshot.state)
+      ) {
+        const state = ["ship", "review"].includes(product.snapshot.state) ? product.snapshot.state : "blocked";
+        return { status: "completed", evidence: productJournalPath(roots.productRunId), result: { value: { state } } };
+      }
+      if (
+        effect.name === "verify-graph-anchors" &&
+        graph &&
+        ["succeeded", "failed", "blocked", "cancelled"].includes(graph.snapshot.state)
+      ) {
+        return {
+          status: "completed",
+          evidence: graphJournalPath(roots.graphRunId),
+          result: { value: { state: graph.snapshot.state } },
+        };
+      }
+      if (
+        effect.name === "start-graph-implementation" &&
+        graph &&
+        ["implementing", "verifying", "succeeded"].includes(graph.snapshot.state)
+      ) {
+        return {
+          status: "completed",
+          evidence: graphJournalPath(roots.graphRunId),
+          result: { value: { state: graph.snapshot.state } },
+        };
+      }
+      if (effect.name === "sample-staging-observation") return { status: "not-started" };
+      return { status: effect.name === "run-graph-implementation" ? "ambiguous" : "not-started" };
+    },
+  };
+}
+
+async function cmdDelivery(cwd: string, positional: string[], flags: Record<string, string | true>): Promise<number> {
+  const args = [
+    ...positional,
+    ...Object.entries(flags).flatMap(([name, value]) => (value === true ? [`--${name}`] : [`--${name}`, value])),
+  ];
+  const dependencies: DeliveryCommandDependencies = {
+    cwd,
+    now: () => new Date().toISOString(),
+    output: info,
+    createRunner: createDeliveryRunner,
+    readDeliverySnapshot: async (evidenceRoot, runId) =>
+      readJsonFileOrNull(path.resolve(evidenceRoot, runId, "snapshot.json")),
+    readProductRun: async (evidenceRoot, runId) => {
+      try {
+        await fs.access(path.resolve(evidenceRoot, runId, "snapshot.json"));
+      } catch (error) {
+        if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") return null;
+        throw error;
+      }
+      const child = await openProductChild({ evidenceRoot, runId });
+      return { snapshot: child.snapshot, acceptedSignals: child.acceptedSignals };
+    },
+    readGraphRun: async (evidenceRoot, runId) => {
+      try {
+        await fs.access(path.resolve(evidenceRoot, runId, "snapshot.json"));
+      } catch (error) {
+        if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") return null;
+        throw error;
+      }
+      const child = await openGraphChild({ evidenceRoot, runId });
+      return { snapshot: child.snapshot, acceptedSignals: child.acceptedSignals };
+    },
+    hasReversibleStaging: async (stageRoot) => {
+      try {
+        return (
+          await createLocalStagingTarget({ stageRoot, snapshotSource: async () => checkoutSnapshot(cwd) }).inspect()
+        ).intact;
+      } catch {
+        return false;
+      }
+    },
+    createStageTarget: (stageRoot) =>
+      createLocalStagingTarget({ stageRoot, snapshotSource: async () => checkoutSnapshot(cwd) }),
+    createPorts: (roots) => deliveryPortsFrom(cwd, roots, flags),
+    advanceOnce: advanceDeliveryOnce,
+    readScorecardEntries: loadDeliveryScorecardEntries,
+  };
+  return runDeliveryCommand(args, dependencies);
 }
 
 // ── Improve (continuous improvement series in any project) ──
@@ -1966,6 +2690,8 @@ export async function main(argv: string[], cwd: string = process.cwd()): Promise
         return await cmdGraph(cwd, positional, flags);
       case "product":
         return await cmdProduct(cwd, positional, flags);
+      case "delivery":
+        return await cmdDelivery(cwd, positional, flags);
       case "vote":
         await cmdVote(cwd, positional, flags);
         return 0;

@@ -24,6 +24,10 @@ evidence/improvement-series/
 # Product Loop local evidence
 evidence/product-loops/
 
+# Repository-native software delivery evidence and reversible staging
+evidence/software-deliveries/
+evidence/software-delivery-stage/
+
 # Eval scorecards local evidence
 evidence/evals/
 
