@@ -47,14 +47,52 @@ function hasRedZoneKeyword(text: string): boolean {
   return RED_ZONE_SUBSTRING_KEYWORDS.some((keyword) => lower.includes(keyword));
 }
 
+function proposalRiskText(proposal: Proposal): string {
+  const criteria = (proposal.acceptanceCriteria ?? []).flatMap((criterion) =>
+    typeof criterion === "string"
+      ? [criterion]
+      : [criterion.given, criterion.when, criterion.then, criterion.evidence ?? ""],
+  );
+  const content = proposal.content;
+
+  return [
+    proposal.title,
+    proposal.description,
+    proposal.context,
+    proposal.problemStatement,
+    ...criteria,
+    ...(proposal.successMetrics ?? []),
+    ...(proposal.rollbackConditions ?? []),
+    ...(proposal.affectedPaths ?? []),
+    ...(content
+      ? [
+          content.problemStatement,
+          content.targetUser,
+          content.expectedOutcome,
+          ...content.successMetrics,
+          ...content.scopeIn,
+          ...content.scopeOut,
+          ...content.permissionsImpact,
+          ...content.dataImpact,
+          ...content.technicalOptions,
+          ...content.risks,
+          ...content.dependencies,
+          content.estimatedEffort,
+          content.recommendedDecision,
+        ]
+      : []),
+  ]
+    .filter((part): part is string => typeof part === "string")
+    .join(" ");
+}
+
 export function classifyRiskZone(proposal: Proposal): RiskZone {
   // Security and governance changes are classified as red
   if (proposal.type === PROPOSAL_TYPE.SECURITY_CHANGE || proposal.type === PROPOSAL_TYPE.GOVERNANCE_CHANGE) {
     return "red";
   }
 
-  const text = `${proposal.title} ${proposal.description ?? ""}`;
-  if (hasRedZoneKeyword(text)) {
+  if (hasRedZoneKeyword(proposalRiskText(proposal))) {
     return "red";
   }
 

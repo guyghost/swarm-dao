@@ -16,7 +16,33 @@ interface BitbucketConfig {
 
 let config: BitbucketConfig | null = null;
 
+/** Bitbucket workspace/repo slug charset (issue #166 parity): both values are
+ *  interpolated into the API route path. Alphanumerics plus `.`, `_`, `-`;
+ *  `/`, `\`, control characters and `..` are rejected so a config value can
+ *  never re-route the request to another API resource. */
+const BITBUCKET_SLUG = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+export function validateBitbucketSlug(kind: "workspace" | "repo", value: string): string | null {
+  if (typeof value !== "string" || value.length === 0) return `${kind} must not be empty`;
+  if (value.length > 100) return `${kind} is too long (max 100 characters)`;
+  if (!BITBUCKET_SLUG.test(value)) {
+    return `${kind} '${value}' must match ${BITBUCKET_SLUG.toString()} (no '/', '\\', '..', or control characters)`;
+  }
+  if (value.includes("..")) return `${kind} must not contain '..'`;
+  return null;
+}
+
 export function configureBitbucket(cfg: Partial<BitbucketConfig>): void {
+  // Validate at the chokepoint: every path (persistence, CLI, env) funnels
+  // through here, and these values reach the API route interpolation.
+  if (cfg.workspace !== undefined) {
+    const error = validateBitbucketSlug("workspace", cfg.workspace);
+    if (error) throw new Error(`Invalid Bitbucket configuration: ${error}`);
+  }
+  if (cfg.repo !== undefined) {
+    const error = validateBitbucketSlug("repo", cfg.repo);
+    if (error) throw new Error(`Invalid Bitbucket configuration: ${error}`);
+  }
   config = { ...config, ...cfg } as BitbucketConfig;
 }
 
@@ -56,9 +82,11 @@ export async function bbCreateBranch(
 
   const base = baseBranch || config?.defaultBranch || "main";
 
-  // Get base branch commit SHA
+  // Get base branch commit SHA. Slugs are validated at configuration, but the
+  // branch name is a path parameter that legitimately contains '/' (e.g.
+  // "feature/foo"): encode it or the request hits the wrong route.
   const refRes = await fetch(
-    `https://api.bitbucket.org/2.0/repositories/${config?.workspace}/${config?.repo}/refs/branches/${base}`,
+    `https://api.bitbucket.org/2.0/repositories/${encodeURIComponent(config?.workspace ?? "")}/${encodeURIComponent(config?.repo ?? "")}/refs/branches/${encodeURIComponent(base)}`,
     { headers: getAuthHeaders() },
   );
   if (!refRes.ok) {
@@ -70,7 +98,7 @@ export async function bbCreateBranch(
 
   // Create branch (Bitbucket calls refs)
   const createRes = await fetch(
-    `https://api.bitbucket.org/2.0/repositories/${config?.workspace}/${config?.repo}/refs/branches`,
+    `https://api.bitbucket.org/2.0/repositories/${encodeURIComponent(config?.workspace ?? "")}/${encodeURIComponent(config?.repo ?? "")}/refs/branches`,
     {
       method: "POST",
       headers: getAuthHeaders(),
@@ -97,7 +125,7 @@ export async function bbCreatePullRequest(
   const body = buildPRBody(proposal);
 
   const res = await fetch(
-    `https://api.bitbucket.org/2.0/repositories/${config?.workspace}/${config?.repo}/pullrequests`,
+    `https://api.bitbucket.org/2.0/repositories/${encodeURIComponent(config?.workspace ?? "")}/${encodeURIComponent(config?.repo ?? "")}/pullrequests`,
     {
       method: "POST",
       headers: getAuthHeaders(),

@@ -128,10 +128,10 @@ export function formatHealthScore(score: HealthScore): string {
   }
 
   output += "## Metrics\n";
-  output += "| Metric | Score | Weight | Contribution |\n";
-  output += "|--------|-------|--------|-------------|\n";
+  output += "| Metric | Score | Weight | Contribution | Value |\n";
+  output += "|--------|-------|--------|--------------|-------|\n";
   for (const m of score.metrics) {
-    output += `| ${m.name} | ${m.normalizedScore.toFixed(1)} | ${m.weight}% | ${m.contribution.toFixed(1)} | ${m.displayValue}\n`;
+    output += `| ${m.name} | ${m.normalizedScore.toFixed(1)} | ${m.weight}% | ${m.contribution.toFixed(1)} | ${m.displayValue} |\n`;
   }
 
   return output;

@@ -170,9 +170,10 @@ export interface HerdrAdapterOptions {
   harnessModelFlag?: Record<string, string>;
   /** Extra arguments passed to the agent executable (after herdr's --). */
   agentArgs?: readonly string[];
-  /** Per-agent prompt timeout in ms (default 5 min; herdr max 300000). */
+  /** Per-agent prompt timeout in ms (default 5 min). An explicit value is
+   *  honoured as-is — only herdr's own CLI range applies downstream. */
   timeoutMs?: number;
-  /** agent start readiness timeout in ms (default 30s; herdr 3000..300000). */
+  /** agent start readiness timeout in ms (default 30s). */
   startTimeoutMs?: number;
   /** Delay between same-pane agent start readiness retries (default 1 s; 0
    * only for tests). */
@@ -198,6 +199,15 @@ export interface HerdrAdapterOptions {
 const DEFAULT_TIMEOUT_MS = 300_000;
 const DEFAULT_START_TIMEOUT_MS = 30_000;
 const DEFAULT_READ_LINES = 200;
+
+/**
+ * An explicit timeout is honoured as-is; only a missing or invalid value falls
+ * back to the default. The 5-minute ceiling guards the DEFAULT, never the
+ * operator's explicit `--timeout-ms` (silently clamping it made a 10-minute
+ * request run for 5).
+ */
+const resolveHerdrTimeout = (value: number | undefined, fallback: number): number =>
+  typeof value === "number" && Number.isFinite(value) && value > 0 ? value : fallback;
 
 interface HerdrJson {
   id?: string;
@@ -512,8 +522,8 @@ export async function startAgentUntilReady(
 
 export function createHerdrHostAdapter(options: HerdrAdapterOptions): HostAdapter {
   const runner = options.runner ?? defaultRunner();
-  const defaultTimeoutMs = Math.min(options.timeoutMs ?? DEFAULT_TIMEOUT_MS, 300_000);
-  const startTimeoutMs = Math.min(options.startTimeoutMs ?? DEFAULT_START_TIMEOUT_MS, 300_000);
+  const defaultTimeoutMs = resolveHerdrTimeout(options.timeoutMs, DEFAULT_TIMEOUT_MS);
+  const startTimeoutMs = resolveHerdrTimeout(options.startTimeoutMs, DEFAULT_START_TIMEOUT_MS);
   const retryDelayMs = Math.min(Math.max(options.readinessRetryDelayMs ?? 1_000, 0), 60_000);
   const stalledGraceMs = Math.min(Math.max(options.stalledGraceMs ?? 20_000, 0), 60_000);
   const stalledPollIntervalMs = Math.min(Math.max(options.stalledPollIntervalMs ?? 2_000, 0), 30_000);
@@ -665,7 +675,7 @@ export function createHerdrHostAdapter(options: HerdrAdapterOptions): HostAdapte
   return {
     hostId: "herdr",
     spawnAgent: async ({ agent, proposal, systemPrompt, timeoutMs, model, harness }) =>
-      harvest(proposal, agent, systemPrompt, Math.min(timeoutMs ?? defaultTimeoutMs, 300_000), Date.now(), {
+      harvest(proposal, agent, systemPrompt, resolveHerdrTimeout(timeoutMs, defaultTimeoutMs), Date.now(), {
         model,
         harness,
       }),

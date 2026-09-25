@@ -152,7 +152,10 @@ export function parseDeliveryPlan(markdown: string): Partial<DeliveryPlan> {
   const flush = (): void => {
     if (!open) return;
     const tasks: DeliveryTask[] = [];
-    const TASK_PATTERN = /^[ \t]*-[ \t]*\[(.)\][ \t]*\*\*(.+?)\*\*[ \t]*-[ \t]*(.+)$/;
+    // The formatter separates title and description with an em-dash (—);
+    // hand-written plans may use an ASCII hyphen. Accept both or every
+    // task line of a self-produced plan is silently dropped on re-parse.
+    const TASK_PATTERN = /^[ \t]*-[ \t]*\[(.)\][ \t]*\*\*(.+?)\*\*[ \t]*[-—][ \t]*(.+)$/;
     for (const line of open.body) {
       const tm = line.match(TASK_PATTERN);
       if (!tm) continue;

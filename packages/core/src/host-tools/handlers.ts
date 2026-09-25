@@ -291,8 +291,14 @@ Force with an explicit reason when genuinely required: re-run with \`force=true\
       await gate.release?.();
       throw error;
     }
+    // A failed ship changes nothing on disk and leaves the decision
+    // fingerprint untouched: the confirmation stays unspent (release, not
+    // consume) so the unchanged retry proceeds instead of re-challenging.
+    if (!auditedResult.ok) {
+      await gate.release?.();
+      return auditedResult.error;
+    }
     await gate.consume?.();
-    if (!auditedResult.ok) return auditedResult.error;
     for (const id of auditedResult.shipped) {
       const shipped = repository.get().proposals.find((candidate) => candidate.id === id);
       if (shipped) recordProposalExecuted(shipped.id, shipped.type);

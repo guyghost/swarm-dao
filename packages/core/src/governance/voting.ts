@@ -163,6 +163,8 @@ export function tallyVotes(proposal: Proposal, config: DAOConfig, electorate?: E
   const votes = proposal.votes || [];
 
   // Single pass over votes: accumulate weighted totals + voting-agent count.
+  // Every cast vote counts as participation — including abstentions, which
+  // already contribute to the quorum numerator via weightedAbstain.
   let weightedFor = 0;
   let weightedAgainst = 0;
   let weightedAbstain = 0;
@@ -170,12 +172,11 @@ export function tallyVotes(proposal: Proposal, config: DAOConfig, electorate?: E
 
   for (const v of votes) {
     const w = normalizeVoteWeight(v.weight);
+    votingAgents++;
     if (v.position === "for") {
       weightedFor += w;
-      votingAgents++;
     } else if (v.position === "against") {
       weightedAgainst += w;
-      votingAgents++;
     } else {
       weightedAbstain += w;
     }

@@ -1,3 +1,4 @@
+import { classifyRiskZone } from "../../governance/lifecycle.js";
 import type { DaoStateRepositoryPort } from "../../ports/repository.js";
 import type { Proposal } from "../../types/index.js";
 import { commitMutation } from "../commit-mutation.js";
@@ -26,6 +27,7 @@ export class UpdateProposalUseCase {
         return { persist: false, value: { ok: false as const, error: `Must be open (current: ${proposal.status})` } };
       }
       Object.assign(proposal, command.fields);
+      proposal.riskZone = classifyRiskZone(proposal);
       return { persist: true, value: { ok: true as const, proposal } };
     });
   }

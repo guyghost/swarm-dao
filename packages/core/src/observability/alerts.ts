@@ -7,15 +7,24 @@ import { getCounter, getGauge, getHistogram } from "./metrics.js";
 export type AlertSeverity = "info" | "warning" | "critical";
 export type AlertCondition = "gt" | "lt" | "eq" | "gte" | "lte";
 
+/**
+ * How a metric is read. Counters and gauges have a single value; a histogram
+ * must say which one the rule means — reading its observation count for a
+ * latency rule silently compares the wrong quantity (a "P95 exceeds 30s" rule
+ * fired on 30k observations instead of a slow tail). Defaults to "count".
+ */
+export type AlertAggregate = "count" | "sum" | "avg" | "p50" | "p95" | "p99";
+
 export interface AlertRule {
   id: string;
   name: string;
   description: string;
   metric: string;
+  /** Histogram aggregation; ignored for counters/gauges. */
+  aggregate?: AlertAggregate;
   condition: AlertCondition;
   threshold: number;
   severity: AlertSeverity;
-  duration?: number; // seconds the condition must persist
   enabled: boolean;
 }
 
@@ -100,7 +109,7 @@ function evaluateCondition(value: number, condition: AlertCondition, threshold: 
   }
 }
 
-function getMetricValue(metricName: string): number {
+function getMetricValue(metricName: string, aggregate: AlertAggregate = "count"): number {
   const counter = getCounter(metricName);
   if (counter) return counter.getCount();
 
@@ -108,9 +117,24 @@ function getMetricValue(metricName: string): number {
   if (gauge) return gauge.getValue();
 
   const histogram = getHistogram(metricName);
-  if (histogram) return histogram.getCount();
+  if (!histogram) return 0;
 
-  return 0;
+  switch (aggregate) {
+    case "sum":
+      return histogram.getSum();
+    case "avg": {
+      const count = histogram.getCount();
+      return count > 0 ? histogram.getSum() / count : 0;
+    }
+    case "p50":
+      return histogram.getPercentile(50);
+    case "p95":
+      return histogram.getPercentile(95);
+    case "p99":
+      return histogram.getPercentile(99);
+    default:
+      return histogram.getCount();
+  }
 }
 
 export function evaluateRules(): Alert[] {
@@ -119,7 +143,7 @@ export function evaluateRules(): Alert[] {
   for (const rule of rules) {
     if (!rule.enabled) continue;
 
-    const value = getMetricValue(rule.metric);
+    const value = getMetricValue(rule.metric, rule.aggregate);
     const triggered = evaluateCondition(value, rule.condition, rule.threshold);
 
     const existing = alerts.find((a) => a.ruleId === rule.id && a.status === "firing");
@@ -186,6 +210,7 @@ export const DEFAULT_ALERT_RULES: Omit<AlertRule, "id">[] = [
     name: "High Deliberation Time",
     description: "P95 deliberation time exceeds 30 seconds",
     metric: "dao_deliberation_duration_ms",
+    aggregate: "p95",
     condition: "gt",
     threshold: 30000,
     severity: "warning",

@@ -91,6 +91,29 @@ describe("health-score", () => {
     expect(formatted).toContain("Health Score");
   });
 
+  it("emits a metric table whose header matches its rows", () => {
+    const proposals = [
+      {
+        id: 1,
+        title: "A",
+        type: "product-feature" as const,
+        description: "",
+        proposedBy: "",
+        status: "executed" as const,
+        votes: [],
+        agentOutputs: [{ agentId: "a", agentName: "A", role: "r", content: "", durationMs: 0 }],
+        createdAt: "",
+      },
+    ];
+    const formatted = formatHealthScore(computeHealthScore(proposals, {}, DEFAULT_HEALTH_WEIGHTS));
+    const rows = formatted
+      .split("\n")
+      .filter((line) => line.startsWith("|"))
+      .map((line) => line.split("|").length - 2); // cells between the outer pipes
+    expect(rows.length).toBeGreaterThan(2); // header + separator + at least one metric
+    expect(new Set(rows).size).toBe(1); // every row declares the same width
+  });
+
   it("generates dashboard", () => {
     const proposals = [
       {

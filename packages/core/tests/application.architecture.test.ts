@@ -92,6 +92,24 @@ describe("application architecture", () => {
     expect(repository.get().proposals).toHaveLength(1);
   });
 
+  it("classifies security-sensitive proposal details as red at creation", async () => {
+    const repository = new InMemoryDaoStateRepository(createInitialState("/project/.dao"));
+    repository.get().initialized = true;
+
+    const result = await new CreateProposalUseCase({
+      repository,
+      clock: { now: () => "2031-02-03T04:05:06.000Z" },
+    }).execute({
+      title: "Improve account recovery",
+      type: "product-feature",
+      description: "Reduce support requests",
+      problemStatement: "Password reset tokens are currently stored in plaintext",
+      proposedBy: "user",
+    });
+
+    expect(result).toMatchObject({ ok: true, proposal: { riskZone: "red" } });
+  });
+
   it("creates governance amendments through a dedicated use case", async () => {
     const state = createInitialState("/project/.dao");
     state.initialized = true;
@@ -566,6 +584,30 @@ describe("application architecture", () => {
     });
 
     expect(result).toMatchObject({ ok: true, proposal: { acceptanceCriteria: ["Mutation is centralized"] } });
+  });
+
+  it("reclassifies risk when an open proposal's problem statement becomes security-sensitive", async () => {
+    const state = createInitialState("/project/.dao");
+    state.proposals.push({
+      id: 1,
+      title: "Improve account recovery",
+      type: "product-feature",
+      description: "Reduce support requests",
+      proposedBy: "user",
+      status: "open",
+      riskZone: "orange",
+      votes: [],
+      agentOutputs: [],
+      createdAt: "2031-01-01T00:00:00.000Z",
+    });
+    const repository = new InMemoryDaoStateRepository(state);
+
+    const result = await new UpdateProposalUseCase({ repository }).execute({
+      proposalId: 1,
+      fields: { problemStatement: "Password reset tokens are stored in plaintext" },
+    });
+
+    expect(result).toMatchObject({ ok: true, proposal: { riskZone: "red" } });
   });
 
   it("records outcome ratings with injected time", async () => {

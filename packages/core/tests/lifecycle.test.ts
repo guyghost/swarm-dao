@@ -62,6 +62,19 @@ describe("governance/lifecycle.ts (risk + label helpers)", () => {
     }
   });
 
+  it("classifies sensitive problem statements and acceptance criteria as red", () => {
+    const proposal: Proposal = {
+      ...base,
+      type: "product-feature",
+      title: "Improve account recovery",
+      description: "Reduce support requests",
+      problemStatement: "Password reset tokens are currently stored in plaintext",
+      acceptanceCriteria: ["Encrypt every recovery token before persistence"],
+    };
+
+    expect(classifyRiskZone(proposal)).toBe("red");
+  });
+
   it("keeps substring keyword coverage for compound terms", () => {
     for (const title of [
       "Cybersecurity hardening",
