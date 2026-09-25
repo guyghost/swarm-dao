@@ -152,6 +152,40 @@ describe("herdr host adapter", () => {
     expect(output.agentId).toBe("critic");
   });
 
+  test("honours an explicit timeout instead of clamping it to the default ceiling", async () => {
+    const fake = fakeHerdr([
+      { stdout: WORKSPACE_CREATED, exitCode: 0 }, // workspace create
+      { stdout: AGENT_SETTLED("working"), exitCode: 0 }, // agent start
+      { stdout: AGENT_SETTLED("idle"), exitCode: 0 }, // prompt --wait
+      { exitCode: 0 }, // workspace close
+    ]);
+    // The CLI's --timeout-ms lands here; 10 minutes must not be silently
+    // reduced to the 5-minute default.
+    const adapter = createHerdrHostAdapter({ workDir, runner: fake.runner, kind: "pi", timeoutMs: 600_000 });
+
+    await adapter.spawnAgent({ agent: agent("critic"), proposal: proposal(8), systemPrompt: "P" });
+
+    const promptCommand = fake.calls.find((call) => call.argv[2] === "prompt");
+    const timeoutIndex = promptCommand ? promptCommand.argv.indexOf("--timeout") : -1;
+    expect(promptCommand?.argv[timeoutIndex + 1]).toBe("600000");
+  });
+
+  test("uses the 5-minute default when no timeout is configured", async () => {
+    const fake = fakeHerdr([
+      { stdout: WORKSPACE_CREATED, exitCode: 0 },
+      { stdout: AGENT_SETTLED("working"), exitCode: 0 },
+      { stdout: AGENT_SETTLED("idle"), exitCode: 0 },
+      { exitCode: 0 },
+    ]);
+    const adapter = createHerdrHostAdapter({ workDir, runner: fake.runner, kind: "pi" });
+
+    await adapter.spawnAgent({ agent: agent("critic"), proposal: proposal(9), systemPrompt: "P" });
+
+    const promptCommand = fake.calls.find((call) => call.argv[2] === "prompt");
+    const timeoutIndex = promptCommand ? promptCommand.argv.indexOf("--timeout") : -1;
+    expect(promptCommand?.argv[timeoutIndex + 1]).toBe("300000");
+  });
+
   test("multi-line prompts are passed as a single verbatim argv element (never shell-interpreted)", async () => {
     const fake = fakeHerdr([
       { stdout: WORKSPACE_CREATED, exitCode: 0 },
