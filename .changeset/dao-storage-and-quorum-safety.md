@@ -1,6 +1,12 @@
 ---
-"@guyghost/swarm-dao-core": patch
+"@guyghost/swarm-dao-core": major
 ---
+
+Breaking change: the public `branchDirName` output and on-disk branch directory
+layout change. This requires a major release so consumers using `^2.2.1` do not
+automatically receive the storage migration. Automatic migration of unambiguous
+legacy directories does not preserve compatibility with concurrently running
+older hosts.
 
 Preserve DAO state when Git branch or worktree discovery fails. Give branch
 storage an exact-name hash, migrate unambiguous legacy directories, and preserve
