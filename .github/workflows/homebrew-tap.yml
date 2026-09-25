@@ -49,7 +49,11 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           url="https://registry.npmjs.org/@guyghost/swarm-dao-cli/-/swarm-dao-cli-${VERSION}.tgz"
-          current_url="$(grep '^  url ' Formula/swarm-dao.rb)"
+          # Trim the formula's indentation before comparing: `grep` returns the
+          # whole line ("  url \"…\""), so comparing it against an unindented
+          # "url \"…\"" never matched and this early exit was dead code — the
+          # daily sync then ran `git commit` on an unchanged file and failed.
+          current_url="$(grep '^[[:space:]]*url ' Formula/swarm-dao.rb | sed 's/^[[:space:]]*//')"
           if [ "$current_url" = "url \"${url}\"" ]; then
             echo "Tap already at ${VERSION}"
             echo "changed=false" >> "$GITHUB_OUTPUT"
@@ -57,11 +61,19 @@ jobs:
           fi
           sha256="$(curl -fsSL "$url" | shasum -a 256 | cut -d' ' -f1)"
           sed -i.bak \
-            -e "s|^  url .*|  url \"${url}\"|" \
-            -e "s|^  sha256 .*|  sha256 \"${sha256}\"|" \
+            -e "s|^[[:space:]]*url .*|  url \"${url}\"|" \
+            -e "s|^[[:space:]]*sha256 .*|  sha256 \"${sha256}\"|" \
             Formula/swarm-dao.rb
           rm Formula/swarm-dao.rb.bak
-          echo "changed=true" >> "$GITHUB_OUTPUT"
+          # Authoritative idempotence check: the sed can be a no-op (same
+          # version, or a sha that already matches). "Nothing to commit" is a
+          # success for a daily sync, never a failed job.
+          if git diff --quiet -- Formula/swarm-dao.rb; then
+            echo "Tap already at ${VERSION} (formula unchanged after refresh)"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Commit and push
         if: steps.update.outputs.changed == 'true'
