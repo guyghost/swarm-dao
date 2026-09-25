@@ -1,4 +1,4 @@
-import { type ActorRefFrom, assign, createActor, setup } from "xstate";
+import { type ActorRefFrom, assign, createActor, type Snapshot, setup } from "xstate";
 
 export type DeliveryRiskClass = "unknown" | "standard" | "sensitive";
 export type DeliveryTerminalOutcome = "validated" | "rolledBack" | "failed" | "blocked" | "cancelled" | "rejected";
@@ -477,8 +477,11 @@ export const softwareDeliveryMachine = setupDeliveryMachine.createMachine({
 
 export type SoftwareDeliveryActor = ActorRefFrom<typeof softwareDeliveryMachine>;
 
-export const createSoftwareDeliveryActor = (input: SoftwareDeliveryMachineInput): SoftwareDeliveryActor => {
-  const actor = createActor(softwareDeliveryMachine, { input });
+export const createSoftwareDeliveryActor = (
+  input: SoftwareDeliveryMachineInput,
+  snapshot?: Snapshot<unknown>,
+): SoftwareDeliveryActor => {
+  const actor = createActor(softwareDeliveryMachine, { input, ...(snapshot ? { snapshot } : {}) });
   actor.start();
   return actor;
 };
