@@ -194,6 +194,29 @@ Child reasoning.`;
     expect(tally.approved).toBe(true); // 6/9 = 66% > 55%
   });
 
+  it("counts abstentions as cast votes in votingAgents", () => {
+    const proposal = {
+      id: 15,
+      title: "Abstentions",
+      type: "product-feature" as const,
+      description: "d",
+      proposedBy: "test",
+      status: "deliberating" as const,
+      votes: [
+        { agentId: "a", agentName: "A", position: "for" as const, reasoning: "ok", weight: 1 },
+        { agentId: "b", agentName: "B", position: "abstain" as const, reasoning: "meh", weight: 1 },
+        { agentId: "c", agentName: "C", position: "against" as const, reasoning: "no", weight: 1 },
+      ],
+      agentOutputs: [],
+      createdAt: new Date().toISOString(),
+    };
+
+    const tally = tallyVotes(proposal, DEFAULT_CONFIG);
+    // An abstention is a cast vote (it counts toward quorum weight) — the
+    // "Votes Cast: X / Y" report must not under-report participation.
+    expect(tally.votingAgents).toBe(3);
+  });
+
   it("applies type-specific approval thresholds (security-change requires 70%)", () => {
     const proposal = {
       id: 3,
