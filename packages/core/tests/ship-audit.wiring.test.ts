@@ -166,6 +166,39 @@ describe("ship-audit wiring", () => {
     expect(repository.get().proposals.find((p) => p.id === proposalId)?.status).toBe("executed");
   });
 
+  test("a failed ship does not spend the confirmation — the unchanged retry proceeds", async () => {
+    const ctx: DaoToolContext = {
+      adapter: approvingHost,
+      workDir: path.dirname(daoRoot),
+      deliberationMode: "auto",
+      controlToolName: "dao_check",
+      repository,
+    };
+    // An unexecuted dependency makes the confirmed ship fail INSIDE the
+    // use-case (ok:false) without touching the decision fingerprint.
+    const dep = await new CreateProposalUseCase({ repository, clock: systemClock }).execute({
+      title: "Dependency",
+      type: "technical-change",
+      description: "d",
+      proposedBy: "test",
+    });
+    if (!dep.ok) throw new Error(dep.error);
+    const proposal = repository.get().proposals.find((p) => p.id === proposalId);
+    if (!proposal) throw new Error("missing");
+    proposal.dependsOn = [dep.proposal.id];
+
+    const first = await handleDaoShip(ctx, proposalId);
+    expect(first).toContain("AUDIT_REQUIRED");
+    const second = await handleDaoShip(ctx, proposalId);
+    expect(second).toContain("unexecuted dependencies");
+
+    // Nothing shipped and nothing changed: the retry must proceed under the
+    // SAME confirmation instead of demanding a fresh challenge cycle.
+    const third = await handleDaoShip(ctx, proposalId);
+    expect(third).toContain("unexecuted dependencies");
+    expect(third).not.toContain("AUDIT_REQUIRED");
+  });
+
   test("the fingerprint covers decision-relevant content deterministically", async () => {
     const proposal = repository.get().proposals.find((p) => p.id === proposalId);
     if (!proposal) throw new Error("missing");
