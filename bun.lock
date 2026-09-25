@@ -230,6 +230,8 @@
       "version": "0.1.0",
       "dependencies": {
         "@guyghost/swarm-dao-core": "workspace:*",
+        "@guyghost/swarm-dao-graph": "workspace:*",
+        "@guyghost/swarm-dao-product": "workspace:*",
       },
       "devDependencies": {
         "@types/bun": "1.3.14",

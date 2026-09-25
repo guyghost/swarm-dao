@@ -303,8 +303,13 @@ const buildEvent = (
       return { type, source };
     case "REVIEW_RESOLVED": {
       const resolution = payload.resolution;
-      if (resolution !== "scope-reduced" && resolution !== "budget-expanded" && resolution !== "abandoned") {
-        issues.push("payload.resolution must be scope-reduced, budget-expanded, or abandoned");
+      if (
+        resolution !== "scope-reduced" &&
+        resolution !== "budget-expanded" &&
+        resolution !== "deploy-authorized" &&
+        resolution !== "abandoned"
+      ) {
+        issues.push("payload.resolution must be scope-reduced, budget-expanded, deploy-authorized, or abandoned");
       }
       return {
         type,
@@ -314,7 +319,9 @@ const buildEvent = (
             ? "budget-expanded"
             : resolution === "scope-reduced"
               ? "scope-reduced"
-              : "abandoned",
+              : resolution === "deploy-authorized"
+                ? "deploy-authorized"
+                : "abandoned",
         expandedBudget: typeof payload.expandedBudget === "number" ? payload.expandedBudget : undefined,
       };
     }
