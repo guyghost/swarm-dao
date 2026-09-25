@@ -961,7 +961,17 @@ export interface HostAdapter {
     timeoutMs?: number;
   }): Promise<AgentOutput>;
 
-  /** Spawn multiple agents concurrently (up to maxConcurrent) */
+  /**
+   * Low-level parallel fan-out: spawns each agent with its OWN raw
+   * `agent.systemPrompt`, batched by `maxConcurrent`. It applies NO dispatch
+   * layer — no proposal brief, no shared charter, no prior-agents section.
+   *
+   * The deliberation paths do not use this method: `dispatchSwarm` /
+   * `dispatchSequentialSwarm` build the full per-agent prompt and call
+   * `spawnAgent` once per agent. Use `spawnAgents` only when you already have
+   * self-contained agent prompts; a deliberating caller must compose the
+   * prompt first, or the agent will deliberate without the proposal.
+   */
   spawnAgents(params: { agents: DAOAgent[]; proposal: Proposal; maxConcurrent: number }): Promise<AgentOutput[]>;
 
   /** Return the current host session model, if available */
