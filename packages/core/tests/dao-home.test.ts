@@ -45,9 +45,9 @@ describe("ADR-007 naming (pure)", () => {
   });
 
   it("maps a branch to a flat, safe directory name", () => {
-    expect(branchDirName("feature/adr-007", null)).toBe("feature-adr-007");
-    expect(branchDirName("release/v1.2", null)).toBe("release-v1-2");
-    expect(branchDirName("--weird--branch--", null)).toBe("weird-branch");
+    expect(branchDirName("feature/adr-007", null)).toMatch(/^branch-feature-adr-007-[a-f0-9]{16}$/);
+    expect(branchDirName("release/v1.2", null)).toMatch(/^branch-release-v1-2-[a-f0-9]{16}$/);
+    expect(branchDirName("--weird--branch--", null)).toMatch(/^branch-weird-branch-[a-f0-9]{16}$/);
     expect(branchDirName(null, "a1b2c3d4e5f6")).toBe("detached-a1b2c3d4");
     expect(branchDirName(null, null)).toBe("default");
   });
@@ -97,7 +97,7 @@ describe("ADR-007 resolution precedence", () => {
 
       const layout = await resolveDaoLayout(repo);
       expect(layout.mode).toBe("home");
-      expect(layout.stateRoot).toContain(path.join("branches", "main"));
+      expect(layout.stateRoot).toContain(path.join("branches", branchDirName("main", null)));
     } finally {
       await fs.rm(repo, { recursive: true, force: true });
       await fs.rm(home, { recursive: true, force: true });
@@ -143,7 +143,7 @@ describe("ADR-007 resolution precedence", () => {
       const layout = await resolveDaoLayout(repo);
       expect(layout.mode).toBe("home");
       expect(layout.projectRoot).toBe(path.join(home, deriveProjectId(realpath, path.basename(realpath))));
-      expect(layout.stateRoot).toBe(path.join(layout.projectRoot, "branches", "main"));
+      expect(layout.stateRoot).toBe(path.join(layout.projectRoot, "branches", branchDirName("main", null)));
 
       const project = JSON.parse(await fs.readFile(path.join(layout.projectRoot, "project.json"), "utf-8"));
       expect(project.repoPath).toBe(realpath);
@@ -224,11 +224,11 @@ describe("ADR-007 passive GC", () => {
     try {
       initRepo(repo);
       const layout = await resolveDaoLayout(repo); // seeds project.json
-      await seedStaleBranches(repo, layout.projectRoot, "main");
+      await seedStaleBranches(repo, layout.projectRoot, branchDirName("main", null));
 
       const after = await resolveDaoLayout(repo); // passive GC sweep
       const branches = await fs.readdir(path.join(after.projectRoot, "branches"));
-      expect(branches).toContain("main");
+      expect(branches).toContain(branchDirName("main", null));
       expect(branches).not.toContain("deleted-branch");
     } finally {
       await fs.rm(repo, { recursive: true, force: true });
@@ -247,7 +247,7 @@ describe("ADR-007 passive GC", () => {
       const project = JSON.parse(await fs.readFile(projectPath, "utf-8"));
       project.repoPath = "/somewhere/else";
       await fs.writeFile(projectPath, JSON.stringify(project));
-      await seedStaleBranches(repo, layout.projectRoot, "main");
+      await seedStaleBranches(repo, layout.projectRoot, branchDirName("main", null));
 
       await resolveDaoLayout(repo);
       const branches = await fs.readdir(path.join(layout.projectRoot, "branches"));
