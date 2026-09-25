@@ -74,6 +74,7 @@ export function validateAmendmentPayload(payload: AmendmentPayload): AmendmentVa
         "maxConcurrent",
         "riskThreshold",
         "healthWeights",
+        "maxVoteWeight",
       ];
       for (const key of Object.keys(payload.changes)) {
         if (!validConfigFields.includes(key)) errors.push(`Unknown config field: ${key}`);
@@ -93,6 +94,17 @@ export function validateAmendmentPayload(payload: AmendmentPayload): AmendmentVa
           payload.changes.maxConcurrent < 1)
       ) {
         errors.push("maxConcurrent must be a positive integer");
+      }
+      // maxVoteWeight caps a single vote's weight in addVoteOn: a value below 1
+      // would reject every vote (any positive weight "exceeds" it), a governance
+      // deadlock, so it must be a finite number >= 1.
+      if (
+        payload.changes.maxVoteWeight !== undefined &&
+        (typeof payload.changes.maxVoteWeight !== "number" ||
+          !Number.isFinite(payload.changes.maxVoteWeight) ||
+          payload.changes.maxVoteWeight < 1)
+      ) {
+        errors.push("maxVoteWeight must be a number >= 1");
       }
       break;
     }

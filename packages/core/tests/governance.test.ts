@@ -568,6 +568,25 @@ describe("governance/amendments", () => {
     expect(result.errors).toContain("Unknown gate 'not-a-gate'");
   });
 
+  it("accepts maxVoteWeight as a config-update field", () => {
+    // The field is documented as configurable; the sanctioned amendment path
+    // must reach it, like the other governance knobs.
+    const result = validateAmendmentPayload({ type: "config-update", changes: { maxVoteWeight: 5 } });
+    expect(result.valid).toBe(true);
+  });
+
+  it("rejects a maxVoteWeight below 1 (it would reject every vote)", () => {
+    for (const maxVoteWeight of [0, -1]) {
+      const result = validateAmendmentPayload({ type: "config-update", changes: { maxVoteWeight } });
+      expect(result.valid).toBe(false);
+    }
+    const nonNumber = validateAmendmentPayload({
+      type: "config-update",
+      changes: { maxVoteWeight: "3" as unknown as number },
+    });
+    expect(nonNumber.valid).toBe(false);
+  });
+
   it("executes agent-update amendment", () => {
     const state = createInitialState("/tmp/dao-test");
     state.initialized = true;

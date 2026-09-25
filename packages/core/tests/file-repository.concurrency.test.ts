@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { CreateProposalUseCase, FileDaoStateRepository } from "@guyghost/swarm-dao-core";
+import { addVoteOn, CreateProposalUseCase, FileDaoStateRepository } from "@guyghost/swarm-dao-core";
 
 async function mkRoot(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), "swarm-file-repo-"));
@@ -371,6 +371,51 @@ describe("FileDaoStateRepository concurrency", () => {
 
       const repo = await FileDaoStateRepository.open(cwd);
       expect(repo.get().config.maxConcurrent).toBeGreaterThanOrEqual(1);
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("drops a deadlocking maxVoteWeight (< 1) from state.json", async () => {
+    const cwd = await mkRoot();
+    try {
+      const daoRoot = path.join(cwd, ".dao");
+      await fs.mkdir(daoRoot, { recursive: true });
+      await fs.writeFile(
+        path.join(daoRoot, "state.json"),
+        JSON.stringify({
+          initialized: true,
+          config: { maxVoteWeight: 0 },
+          proposals: [
+            {
+              id: 1,
+              title: "Open",
+              type: "product-feature",
+              description: "d",
+              proposedBy: "u",
+              status: "open",
+              votes: [],
+              agentOutputs: [],
+              createdAt: "2026-01-01T00:00:00.000Z",
+            },
+          ],
+          nextProposalId: 2,
+        }),
+        "utf8",
+      );
+
+      const repo = await FileDaoStateRepository.open(cwd);
+      // maxVoteWeight 0 would reject every vote in addVoteOn: the repair drops
+      // the override so the built-in default applies and voting still works.
+      expect(repo.get().config.maxVoteWeight).toBeUndefined();
+      const vote = await addVoteOn(repo, 1, {
+        agentId: "cli-user",
+        agentName: "cli-user",
+        position: "for",
+        reasoning: "ok",
+        weight: 1,
+      });
+      expect(vote.ok).toBe(true);
     } finally {
       await fs.rm(cwd, { recursive: true, force: true });
     }

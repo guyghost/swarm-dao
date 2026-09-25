@@ -123,6 +123,16 @@ function repairConfig(candidate: unknown, fallback: DAOConfig): { config: DAOCon
     repaired = true;
   }
   config.maxConcurrent = normalizeBatchSize(config.maxConcurrent);
+  // maxVoteWeight below 1 would make addVoteOn reject every vote (a governance
+  // deadlock reachable from an editable state.json): drop the override so the
+  // built-in default applies again.
+  if (candidate.maxVoteWeight !== undefined) {
+    const raw = candidate.maxVoteWeight;
+    if (typeof raw !== "number" || !Number.isFinite(raw) || raw < 1) {
+      config.maxVoteWeight = fallback.maxVoteWeight;
+      repaired = true;
+    }
+  }
   if (candidate.requiredGates !== undefined) {
     if (!Array.isArray(candidate.requiredGates) || !candidate.requiredGates.every((gate) => typeof gate === "string")) {
       config.requiredGates = [...fallback.requiredGates];
