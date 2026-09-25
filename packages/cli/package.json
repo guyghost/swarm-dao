@@ -34,7 +34,7 @@
     "@guyghost/swarm-dao-tmux-adapter": "^0.4.2"
   },
   "devDependencies": {
-    "@types/bun": "1.3.14"
+    "@types/bun": "1.4.2"
   },
   "repository": {
     "type": "git",
