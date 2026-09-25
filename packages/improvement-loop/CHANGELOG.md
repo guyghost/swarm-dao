@@ -1,5 +1,24 @@
 # @guyghost/swarm-dao-improvement
 
+## 0.6.10
+
+### Patch Changes
+
+- ec03c6f: Durable audit appends, lock revalidation before commit, and fail-closed improvement sandboxes.
+- 2f510a9: Scope audit + Pi slash reads to session repositories; extend architecture contracts; prune unused core export maps; align sandbox defaults (doctor/docs); raise coverage floors; schedule-only real-runtime CI.
+- Updated dependencies [28d24ca]
+- Updated dependencies [4443f1a]
+- Updated dependencies [2b03f27]
+- Updated dependencies [ec03c6f]
+- Updated dependencies [f38bea6]
+- Updated dependencies [e7ef6a2]
+- Updated dependencies [4aa7b9c]
+- Updated dependencies [f38bea6]
+- Updated dependencies [2f510a9]
+- Updated dependencies [c3cf299]
+  - @guyghost/swarm-dao-core@3.0.0
+  - @guyghost/swarm-dao-herdr-adapter@0.5.3
+
 ## 0.6.9
 
 ### Patch Changes

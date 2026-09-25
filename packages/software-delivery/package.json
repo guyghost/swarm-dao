@@ -1,6 +1,6 @@
 {
   "name": "@guyghost/swarm-dao-software-delivery",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Swarm DAO repository-local software delivery coordinator with producer-bound signals",
   "type": "module",
   "main": "./dist/index.js",
@@ -24,9 +24,9 @@
     "prepublishOnly": "bun run build"
   },
   "dependencies": {
-    "@guyghost/swarm-dao-core": "^2.2.1",
-    "@guyghost/swarm-dao-graph": "^0.4.1",
-    "@guyghost/swarm-dao-product": "^0.3.8"
+    "@guyghost/swarm-dao-core": "^3.0.0",
+    "@guyghost/swarm-dao-graph": "^0.4.2",
+    "@guyghost/swarm-dao-product": "^0.3.9"
   },
   "devDependencies": {
     "@types/bun": "1.3.14",

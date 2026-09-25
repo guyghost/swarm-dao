@@ -1,5 +1,100 @@
 # @guyghost/swarm-dao-core
 
+## 3.0.0
+
+### Major Changes
+
+- 2b03f27: Breaking change: the public `branchDirName` output and on-disk branch directory
+  layout change. This requires a major release so consumers using `^2.2.1` do not
+  automatically receive the storage migration. Automatic migration of unambiguous
+  legacy directories does not preserve compatibility with concurrently running
+  older hosts.
+  
+  Preserve DAO state when Git branch or worktree discovery fails. Give branch
+  storage an exact-name hash, migrate unambiguous legacy directories, and preserve
+  ambiguous legacy data with an actionable error instead of sharing branch state.
+  Stop running DAO hosts before upgrading so no old process continues writing to
+  a legacy branch directory after its migration.
+  
+  Reject out-of-range quorum amendments both when proposed and when applied.
+  Refresh persistence locks through the owned file descriptor without truncating
+  the lock payload; allow newly created, incomplete locks time to finish writing.
+
+### Minor Changes
+
+- e7ef6a2: Remove the process-global DAO repository singleton (getState/setRepository/Legacy); hosts and handlers own FileDaoStateRepository instances per ADR-002 rule 3.
+- 4aa7b9c: Add a repository-native software delivery coordinator that connects Product Loop qualification and budget, exact-hash Graph approval, reversible local staging, observation, and rollback.
+  
+  Also publish the Product Loop human deploy-authorization signal fix required by the coordinator.
+- 2f510a9: Scope audit + Pi slash reads to session repositories; extend architecture contracts; prune unused core export maps; align sandbox defaults (doctor/docs); raise coverage floors; schedule-only real-runtime CI.
+- c3cf299: Reliability hardening: ADR-007 docs, layout-aware doctor, pure delegation machines in models/ (injected clock), repository-scoped list/agents/plan/artefacts/dashboard handlers, Pi tool parity (help/list/agents/control), adapter tests covering src/, real-runtime CI job, publish coverage+doc-links+OSV audit gates.
+
+### Patch Changes
+
+- 28d24ca: Fix six defects found in the bug hunt (round 2), each with a reproduction test:
+  
+  - Red-zone classification reads the whole proposal, not just `title`/`description`
+    (problem statement, acceptance criteria, context, success metrics, rollback
+    conditions, affected paths, structured `content`), and `UpdateProposalUseCase`
+    reclassifies after an edit — a security-sensitive statement added after creation
+    can no longer stay orange and skip the mandatory red-zone dry-run.
+  - `tallyVotes` counts abstentions in `votingAgents`: an abstention is a cast vote
+    (it already weighs into the quorum), so "Votes Cast: X / Y" no longer
+    under-reports participation.
+  - The ship-audit confirmation is spent only when the ship actually happened: a
+    failed `dao_ship` (`ok: false`, e.g. unexecuted dependencies) now releases the
+    claim without consuming the confirmation, so the unchanged retry proceeds
+    instead of forcing a fresh two-call challenge cycle.
+  - `parseDeliveryPlan` accepts the em-dash separator `formatPlan` emits, so a
+    self-produced plan no longer re-parses with zero tasks (silent data loss).
+  - Bitbucket configuration validates `workspace`/`repo` at the chokepoint
+    (GitHub #166 parity) and the API routes percent-encode the slugs and the base
+    branch — a `/` in `workspace`, `repo`, or a branch name like `feature/x` can no
+    longer re-route the request or 404.
+- 4443f1a: Fix five latent core defects found in the bug hunt:
+  
+  - Normalize batch size in `dispatchSwarm`/`runRoundTable` so a zero/negative/NaN
+    `maxConcurrent` (editable config or `config-update` amendment) can no longer
+    stall deliberation forever; the amendment now rejects a non-positive value.
+  - Repair and validate `state.json` `config` on load: a partial `{ "config": {} }`
+    used to replace the whole default and crash `runGates`/`tallyVotes`.
+  - Emit raw `le` bucket boundaries in the Prometheus exposition instead of the
+    internal `le_10` keys.
+  - Bound RICE inputs before scoring so `effort: 0` no longer yields `Infinity`.
+  - Share the tally's vote-heading matcher with the sequential pipeline so the
+    rendered `Vote`/`Vote:` form cannot leak an upstream vote into later analyses.
+  
+  Second pass (low-severity hardening):
+  
+  - Risk classification matches the "auth" family on word boundaries (with
+    prefixes: unauthorized/reauthentication/OAuth/deauthorize) so
+    "author"/"authoritative" no longer force the red zone while the security forms
+    still do; the unambiguous stems (security, token, password, …) stay substring
+    based so compounds like "cybersecurity"/"passwordless" keep matching.
+  - Amendments reject non-numeric / out-of-range agent weights and refuse to add
+    a duplicate agent id (identity keys must stay unique).
+  - The ship-audit claim is held until the confirmation is consumed, so two
+    concurrent confirms can never proceed from one challenge (INV-6); callers
+    release it on error paths.
+  - Decision-brief approval score uses the decisive (non-abstain) weight, matching
+    `tallyVotes`.
+  - Git ref validation rejects consecutive `/` segments, as documented.
+- ec03c6f: Durable audit appends, lock revalidation before commit, and fail-closed improvement sandboxes.
+- f38bea6: Harden the observability/summary surfaces flagged in the bug hunt:
+  
+  - Alert rules can read a histogram aggregate (`count` | `sum` | `avg` | `p50` |
+    `p95` | `p99`); the default "High Deliberation Time" rule now reads `p95` as
+    its description always claimed, instead of comparing the observation count.
+    The never-implemented `duration` field is removed from `AlertRule`.
+  - `formatHealthScore` emits a well-formed metric table (header now matches the
+    rows, and each row carries its closing pipe).
+  - `config.maxVoteWeight` is accepted by the `config-update` amendment with a
+    bound (`finite number >= 1`); a below-1 value is rejected because it would
+    make `addVoteOn` reject every vote. `repairConfig` drops an invalid
+    `maxVoteWeight` from a hand-edited `state.json` for the same reason.
+  - `HostAdapter.spawnAgents` is documented as a raw-prompt parallel fan-out with
+    no dispatch layer.
+
 ## 2.2.1
 
 ### Patch Changes

@@ -1,5 +1,24 @@
 # @guyghost/swarm-dao-herdr-adapter
 
+## 0.5.3
+
+### Patch Changes
+
+- f38bea6: Honour an explicit timeout instead of silently clamping it to 300s: the
+  5-minute ceiling now guards only the default, so a `--timeout-ms` the operator
+  asked for (e.g. 10 minutes) is passed through. A missing or invalid value still
+  falls back to the default.
+- Updated dependencies [28d24ca]
+- Updated dependencies [4443f1a]
+- Updated dependencies [2b03f27]
+- Updated dependencies [ec03c6f]
+- Updated dependencies [e7ef6a2]
+- Updated dependencies [4aa7b9c]
+- Updated dependencies [f38bea6]
+- Updated dependencies [2f510a9]
+- Updated dependencies [c3cf299]
+  - @guyghost/swarm-dao-core@3.0.0
+
 ## 0.5.2
 
 ### Patch Changes

@@ -1,5 +1,30 @@
 # @guyghost/swarm-dao-pi-adapter
 
+## 0.10.0
+
+### Minor Changes
+
+- c3cf299: Reliability hardening: ADR-007 docs, layout-aware doctor, pure delegation machines in models/ (injected clock), repository-scoped list/agents/plan/artefacts/dashboard handlers, Pi tool parity (help/list/agents/control), adapter tests covering src/, real-runtime CI job, publish coverage+doc-links+OSV audit gates.
+
+### Patch Changes
+
+- ec03c6f: Durable audit appends, lock revalidation before commit, and fail-closed improvement sandboxes.
+- e7ef6a2: Remove the process-global DAO repository singleton (getState/setRepository/Legacy); hosts and handlers own FileDaoStateRepository instances per ADR-002 rule 3.
+- 2f510a9: Scope audit + Pi slash reads to session repositories; extend architecture contracts; prune unused core export maps; align sandbox defaults (doctor/docs); raise coverage floors; schedule-only real-runtime CI.
+- Updated dependencies [28d24ca]
+- Updated dependencies [4443f1a]
+- Updated dependencies [2b03f27]
+- Updated dependencies [ec03c6f]
+- Updated dependencies [e7ef6a2]
+- Updated dependencies [4aa7b9c]
+- Updated dependencies [f38bea6]
+- Updated dependencies [2f510a9]
+- Updated dependencies [c3cf299]
+  - @guyghost/swarm-dao-core@3.0.0
+  - @guyghost/swarm-dao-improvement@0.6.10
+  - @guyghost/swarm-dao-product@0.3.9
+  - @guyghost/swarm-dao-graph@0.4.2
+
 ## 0.9.2
 
 ### Patch Changes

@@ -1,5 +1,65 @@
 # @guyghost/swarm-dao-cli
 
+## 0.17.0
+
+### Minor Changes
+
+- 4aa7b9c: Add a repository-native software delivery coordinator that connects Product Loop qualification and budget, exact-hash Graph approval, reversible local staging, observation, and rollback.
+  
+  Also publish the Product Loop human deploy-authorization signal fix required by the coordinator.
+- c3cf299: Reliability hardening: ADR-007 docs, layout-aware doctor, pure delegation machines in models/ (injected clock), repository-scoped list/agents/plan/artefacts/dashboard handlers, Pi tool parity (help/list/agents/control), adapter tests covering src/, real-runtime CI job, publish coverage+doc-links+OSV audit gates.
+
+### Patch Changes
+
+- 4443f1a: Fix five latent core defects found in the bug hunt:
+  
+  - Normalize batch size in `dispatchSwarm`/`runRoundTable` so a zero/negative/NaN
+    `maxConcurrent` (editable config or `config-update` amendment) can no longer
+    stall deliberation forever; the amendment now rejects a non-positive value.
+  - Repair and validate `state.json` `config` on load: a partial `{ "config": {} }`
+    used to replace the whole default and crash `runGates`/`tallyVotes`.
+  - Emit raw `le` bucket boundaries in the Prometheus exposition instead of the
+    internal `le_10` keys.
+  - Bound RICE inputs before scoring so `effort: 0` no longer yields `Infinity`.
+  - Share the tally's vote-heading matcher with the sequential pipeline so the
+    rendered `Vote`/`Vote:` form cannot leak an upstream vote into later analyses.
+  
+  Second pass (low-severity hardening):
+  
+  - Risk classification matches the "auth" family on word boundaries (with
+    prefixes: unauthorized/reauthentication/OAuth/deauthorize) so
+    "author"/"authoritative" no longer force the red zone while the security forms
+    still do; the unambiguous stems (security, token, password, …) stay substring
+    based so compounds like "cybersecurity"/"passwordless" keep matching.
+  - Amendments reject non-numeric / out-of-range agent weights and refuse to add
+    a duplicate agent id (identity keys must stay unique).
+  - The ship-audit claim is held until the confirmation is consumed, so two
+    concurrent confirms can never proceed from one challenge (INV-6); callers
+    release it on error paths.
+  - Decision-brief approval score uses the decisive (non-abstain) weight, matching
+    `tallyVotes`.
+  - Git ref validation rejects consecutive `/` segments, as documented.
+- ec03c6f: Durable audit appends, lock revalidation before commit, and fail-closed improvement sandboxes.
+- e7ef6a2: Remove the process-global DAO repository singleton (getState/setRepository/Legacy); hosts and handlers own FileDaoStateRepository instances per ADR-002 rule 3.
+- 2f510a9: Scope audit + Pi slash reads to session repositories; extend architecture contracts; prune unused core export maps; align sandbox defaults (doctor/docs); raise coverage floors; schedule-only real-runtime CI.
+- Updated dependencies [28d24ca]
+- Updated dependencies [4443f1a]
+- Updated dependencies [2b03f27]
+- Updated dependencies [ec03c6f]
+- Updated dependencies [f38bea6]
+- Updated dependencies [e7ef6a2]
+- Updated dependencies [4aa7b9c]
+- Updated dependencies [f38bea6]
+- Updated dependencies [2f510a9]
+- Updated dependencies [c3cf299]
+  - @guyghost/swarm-dao-core@3.0.0
+  - @guyghost/swarm-dao-improvement@0.6.10
+  - @guyghost/swarm-dao-herdr-adapter@0.5.3
+  - @guyghost/swarm-dao-software-delivery@0.2.0
+  - @guyghost/swarm-dao-product@0.3.9
+  - @guyghost/swarm-dao-graph@0.4.2
+  - @guyghost/swarm-dao-tmux-adapter@0.4.3
+
 ## 0.16.0
 
 ### Minor Changes
