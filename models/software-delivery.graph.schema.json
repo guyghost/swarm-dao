@@ -1,0 +1,206 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "software-delivery.graph.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "version",
+    "scope",
+    "proposalStateAuthority",
+    "evidenceRoot",
+    "owner",
+    "externalGates",
+    "states",
+    "events",
+    "nodes",
+    "eventProducers",
+    "edges",
+    "requiredAnchors",
+    "anchorCommands"
+  ],
+  "properties": {
+    "$schema": { "const": "./software-delivery.graph.schema.json" },
+    "id": { "const": "swarm-dao-software-delivery" },
+    "version": { "const": 1 },
+    "scope": { "const": "repository-native-software-delivery" },
+    "proposalStateAuthority": { "const": "none" },
+    "evidenceRoot": { "const": "evidence/software-deliveries" },
+    "owner": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "authority"],
+      "properties": {
+        "id": { "const": "human-owner" },
+        "kind": { "const": "human" },
+        "authority": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": ["owns_target", "resolves_risk_classification", "cancels"]
+          }
+        }
+      }
+    },
+    "externalGates": {
+      "const": [
+        {
+          "system": "graph-engineering",
+          "humanEvent": "MODEL_APPROVED",
+          "requiredHash": "delivery-model-hash",
+          "requiredState": "ready"
+        },
+        {
+          "system": "product-loop",
+          "humanEvent": "REVIEW_RESOLVED",
+          "requiredCondition": "sensitive-deploy-authorized",
+          "requiredState": "ship"
+        }
+      ]
+    },
+    "states": {
+      "const": [
+        "intake",
+        "awaitingRiskReview",
+        "draftingGraphModel",
+        "validatingGraphModel",
+        "awaitingGraphApproval",
+        "graphReady",
+        "implementing",
+        "productVerification",
+        "awaitingShipReview",
+        "shipReady",
+        "awaitingShipCapability",
+        "observing",
+        "validated",
+        "rolledBack",
+        "failed",
+        "blocked",
+        "cancelled",
+        "rejected"
+      ]
+    },
+    "events": {
+      "const": [
+        "INTAKE_ACCEPTED",
+        "INTAKE_REJECTED",
+        "RISK_CLASSIFICATION_RESOLVED",
+        "GRAPH_MODEL_DRAFTED",
+        "MODEL_CONTRACT_VALID",
+        "MODEL_CONTRACT_INVALID",
+        "GRAPH_APPROVAL_CONFIRMED",
+        "GRAPH_APPROVAL_REJECTED",
+        "GRAPH_IMPLEMENTATION_STARTED",
+        "GRAPH_IMPLEMENTATION_SUCCEEDED",
+        "CHILD_FAILED",
+        "CHILD_BLOCKED",
+        "CHILD_CANCELLED",
+        "PRODUCT_REVIEW_REQUIRED",
+        "PRODUCT_REVIEW_BLOCKED",
+        "PRODUCT_SHIP_READY",
+        "PRODUCT_SHIP_AUTHORIZED",
+        "SHIP_CAPABILITY_MISSING",
+        "SHIP_CAPABILITY_CONFIRMED",
+        "SHIP_CONFIRMED",
+        "OBSERVATION_SAMPLE_RECORDED",
+        "OBSERVATION_VALIDATED",
+        "ROLLBACK_REQUIRED",
+        "ROLLBACK_CONFIRMED",
+        "CORRECTIVE_TASK_OPENED",
+        "CANCEL_REQUESTED",
+        "CANCEL_SETTLED"
+      ]
+    },
+    "nodes": {
+      "type": "array",
+      "minItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "kind", "authority", "emits"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "kind": { "enum": ["ai_worker", "deterministic"] },
+          "authority": { "enum": ["signal_only", "anchor", "effect"] },
+          "emits": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "eventProducers": {
+      "type": "array",
+      "minItems": 27,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["event", "source", "producers"],
+        "properties": {
+          "event": { "type": "string", "minLength": 1 },
+          "source": { "enum": ["ai", "tool", "human", "system"] },
+          "producers": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "edges": {
+      "type": "array",
+      "minItems": 10,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["from", "to", "type"],
+        "properties": {
+          "from": { "type": "string", "minLength": 1 },
+          "to": { "type": "string", "minLength": 1 },
+          "type": {
+            "enum": ["feeds", "validates", "owns_target", "authorizes", "watches", "vetoes"]
+          }
+        }
+      }
+    },
+    "requiredAnchors": {
+      "const": [
+        "delivery-model-contract",
+        "delivery-machine-tests",
+        "delivery-architecture-contract",
+        "rollback-path-exists",
+        "delivery-runtime-scenario",
+        "delivery-regression",
+        "repository-ci"
+      ]
+    },
+    "anchorCommands": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "delivery-model-contract",
+        "delivery-machine-tests",
+        "delivery-architecture-contract",
+        "rollback-path-exists",
+        "delivery-runtime-scenario",
+        "delivery-regression",
+        "repository-ci"
+      ],
+      "properties": {
+        "delivery-model-contract": { "const": "bun run software-delivery:validate" },
+        "delivery-machine-tests": {
+          "const": "bun test packages/core/tests/software-delivery.machine.test.ts packages/core/tests/software-delivery.regression.test.ts"
+        },
+        "delivery-architecture-contract": {
+          "const": "bun test packages/core/tests/architecture.contract.test.ts packages/core/tests/application.architecture.test.ts"
+        },
+        "rollback-path-exists": { "const": "bun run software-delivery:anchors" },
+        "delivery-runtime-scenario": { "const": "bun run software-delivery:demo" },
+        "delivery-regression": { "const": "bun run software-delivery:regression" },
+        "repository-ci": { "const": "bun run ci" }
+      }
+    }
+  }
+}

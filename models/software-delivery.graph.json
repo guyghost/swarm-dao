@@ -1,0 +1,323 @@
+{
+  "$schema": "./software-delivery.graph.schema.json",
+  "id": "swarm-dao-software-delivery",
+  "version": 1,
+  "scope": "repository-native-software-delivery",
+  "proposalStateAuthority": "none",
+  "evidenceRoot": "evidence/software-deliveries",
+  "owner": {
+    "id": "human-owner",
+    "kind": "human",
+    "authority": [
+      "owns_target",
+      "resolves_risk_classification",
+      "cancels"
+    ]
+  },
+  "externalGates": [
+    {
+      "system": "graph-engineering",
+      "humanEvent": "MODEL_APPROVED",
+      "requiredHash": "delivery-model-hash",
+      "requiredState": "ready"
+    },
+    {
+      "system": "product-loop",
+      "humanEvent": "REVIEW_RESOLVED",
+      "requiredCondition": "sensitive-deploy-authorized",
+      "requiredState": "ship"
+    }
+  ],
+  "states": [
+    "intake",
+    "awaitingRiskReview",
+    "draftingGraphModel",
+    "validatingGraphModel",
+    "awaitingGraphApproval",
+    "graphReady",
+    "implementing",
+    "productVerification",
+    "awaitingShipReview",
+    "shipReady",
+    "awaitingShipCapability",
+    "observing",
+    "validated",
+    "rolledBack",
+    "failed",
+    "blocked",
+    "cancelled",
+    "rejected"
+  ],
+  "events": [
+    "INTAKE_ACCEPTED",
+    "INTAKE_REJECTED",
+    "RISK_CLASSIFICATION_RESOLVED",
+    "GRAPH_MODEL_DRAFTED",
+    "MODEL_CONTRACT_VALID",
+    "MODEL_CONTRACT_INVALID",
+    "GRAPH_APPROVAL_CONFIRMED",
+    "GRAPH_APPROVAL_REJECTED",
+    "GRAPH_IMPLEMENTATION_STARTED",
+    "GRAPH_IMPLEMENTATION_SUCCEEDED",
+    "CHILD_FAILED",
+    "CHILD_BLOCKED",
+    "CHILD_CANCELLED",
+    "PRODUCT_REVIEW_REQUIRED",
+    "PRODUCT_REVIEW_BLOCKED",
+    "PRODUCT_SHIP_READY",
+    "PRODUCT_SHIP_AUTHORIZED",
+    "SHIP_CAPABILITY_MISSING",
+    "SHIP_CAPABILITY_CONFIRMED",
+    "SHIP_CONFIRMED",
+    "OBSERVATION_SAMPLE_RECORDED",
+    "OBSERVATION_VALIDATED",
+    "ROLLBACK_REQUIRED",
+    "ROLLBACK_CONFIRMED",
+    "CORRECTIVE_TASK_OPENED",
+    "CANCEL_REQUESTED",
+    "CANCEL_SETTLED"
+  ],
+  "nodes": [
+    {
+      "id": "modeler",
+      "kind": "ai_worker",
+      "authority": "signal_only",
+      "emits": ["GRAPH_MODEL_DRAFTED"]
+    },
+    {
+      "id": "intake-validator",
+      "kind": "deterministic",
+      "authority": "anchor",
+      "emits": ["INTAKE_ACCEPTED", "INTAKE_REJECTED"]
+    },
+    {
+      "id": "model-contract-validator",
+      "kind": "deterministic",
+      "authority": "anchor",
+      "emits": ["MODEL_CONTRACT_VALID", "MODEL_CONTRACT_INVALID"]
+    },
+    {
+      "id": "graph-child-adapter",
+      "kind": "deterministic",
+      "authority": "anchor",
+      "emits": [
+        "GRAPH_APPROVAL_CONFIRMED",
+        "GRAPH_APPROVAL_REJECTED",
+        "GRAPH_IMPLEMENTATION_STARTED",
+        "GRAPH_IMPLEMENTATION_SUCCEEDED",
+        "CHILD_FAILED",
+        "CHILD_BLOCKED",
+        "CHILD_CANCELLED"
+      ]
+    },
+    {
+      "id": "product-child-adapter",
+      "kind": "deterministic",
+      "authority": "anchor",
+      "emits": [
+        "PRODUCT_REVIEW_REQUIRED",
+        "PRODUCT_REVIEW_BLOCKED",
+        "PRODUCT_SHIP_READY",
+        "PRODUCT_SHIP_AUTHORIZED",
+        "OBSERVATION_VALIDATED",
+        "ROLLBACK_REQUIRED",
+        "CORRECTIVE_TASK_OPENED",
+        "CHILD_FAILED",
+        "CHILD_BLOCKED",
+        "CHILD_CANCELLED"
+      ]
+    },
+    {
+      "id": "effect-executor",
+      "kind": "deterministic",
+      "authority": "effect",
+      "emits": ["SHIP_CONFIRMED", "CANCEL_SETTLED"]
+    },
+    {
+      "id": "staging-target",
+      "kind": "deterministic",
+      "authority": "anchor",
+      "emits": [
+        "SHIP_CAPABILITY_MISSING",
+        "SHIP_CAPABILITY_CONFIRMED",
+        "ROLLBACK_CONFIRMED"
+      ]
+    },
+    {
+      "id": "observer",
+      "kind": "deterministic",
+      "authority": "anchor",
+      "emits": ["OBSERVATION_SAMPLE_RECORDED"]
+    }
+  ],
+  "eventProducers": [
+    {
+      "event": "INTAKE_ACCEPTED",
+      "source": "tool",
+      "producers": ["intake-validator"]
+    },
+    {
+      "event": "INTAKE_REJECTED",
+      "source": "tool",
+      "producers": ["intake-validator"]
+    },
+    {
+      "event": "RISK_CLASSIFICATION_RESOLVED",
+      "source": "human",
+      "producers": ["human-owner"]
+    },
+    {
+      "event": "GRAPH_MODEL_DRAFTED",
+      "source": "ai",
+      "producers": ["modeler"]
+    },
+    {
+      "event": "MODEL_CONTRACT_VALID",
+      "source": "tool",
+      "producers": ["model-contract-validator"]
+    },
+    {
+      "event": "MODEL_CONTRACT_INVALID",
+      "source": "tool",
+      "producers": ["model-contract-validator"]
+    },
+    {
+      "event": "GRAPH_APPROVAL_CONFIRMED",
+      "source": "tool",
+      "producers": ["graph-child-adapter"]
+    },
+    {
+      "event": "GRAPH_APPROVAL_REJECTED",
+      "source": "tool",
+      "producers": ["graph-child-adapter"]
+    },
+    {
+      "event": "GRAPH_IMPLEMENTATION_STARTED",
+      "source": "tool",
+      "producers": ["graph-child-adapter"]
+    },
+    {
+      "event": "GRAPH_IMPLEMENTATION_SUCCEEDED",
+      "source": "tool",
+      "producers": ["graph-child-adapter"]
+    },
+    {
+      "event": "CHILD_FAILED",
+      "source": "tool",
+      "producers": ["graph-child-adapter", "product-child-adapter"]
+    },
+    {
+      "event": "CHILD_BLOCKED",
+      "source": "tool",
+      "producers": ["graph-child-adapter", "product-child-adapter"]
+    },
+    {
+      "event": "CHILD_CANCELLED",
+      "source": "tool",
+      "producers": ["graph-child-adapter", "product-child-adapter"]
+    },
+    {
+      "event": "PRODUCT_REVIEW_REQUIRED",
+      "source": "tool",
+      "producers": ["product-child-adapter"]
+    },
+    {
+      "event": "PRODUCT_REVIEW_BLOCKED",
+      "source": "tool",
+      "producers": ["product-child-adapter"]
+    },
+    {
+      "event": "PRODUCT_SHIP_READY",
+      "source": "tool",
+      "producers": ["product-child-adapter"]
+    },
+    {
+      "event": "PRODUCT_SHIP_AUTHORIZED",
+      "source": "tool",
+      "producers": ["product-child-adapter"]
+    },
+    {
+      "event": "SHIP_CAPABILITY_MISSING",
+      "source": "tool",
+      "producers": ["staging-target"]
+    },
+    {
+      "event": "SHIP_CAPABILITY_CONFIRMED",
+      "source": "tool",
+      "producers": ["staging-target"]
+    },
+    {
+      "event": "SHIP_CONFIRMED",
+      "source": "tool",
+      "producers": ["effect-executor"]
+    },
+    {
+      "event": "OBSERVATION_SAMPLE_RECORDED",
+      "source": "tool",
+      "producers": ["observer"]
+    },
+    {
+      "event": "OBSERVATION_VALIDATED",
+      "source": "tool",
+      "producers": ["product-child-adapter"]
+    },
+    {
+      "event": "ROLLBACK_REQUIRED",
+      "source": "tool",
+      "producers": ["product-child-adapter"]
+    },
+    {
+      "event": "ROLLBACK_CONFIRMED",
+      "source": "tool",
+      "producers": ["staging-target"]
+    },
+    {
+      "event": "CORRECTIVE_TASK_OPENED",
+      "source": "tool",
+      "producers": ["product-child-adapter"]
+    },
+    {
+      "event": "CANCEL_REQUESTED",
+      "source": "human",
+      "producers": ["human-owner"]
+    },
+    {
+      "event": "CANCEL_SETTLED",
+      "source": "tool",
+      "producers": ["effect-executor"]
+    }
+  ],
+  "edges": [
+    { "from": "modeler", "to": "model-contract-validator", "type": "feeds" },
+    { "from": "intake-validator", "to": "state-machine", "type": "validates" },
+    { "from": "model-contract-validator", "to": "state-machine", "type": "validates" },
+    { "from": "human-owner", "to": "state-machine", "type": "owns_target" },
+    { "from": "state-machine", "to": "effect-executor", "type": "authorizes" },
+    { "from": "effect-executor", "to": "graph-child-adapter", "type": "authorizes" },
+    { "from": "effect-executor", "to": "product-child-adapter", "type": "authorizes" },
+    { "from": "effect-executor", "to": "staging-target", "type": "authorizes" },
+    { "from": "graph-child-adapter", "to": "state-machine", "type": "validates" },
+    { "from": "product-child-adapter", "to": "state-machine", "type": "validates" },
+    { "from": "staging-target", "to": "state-machine", "type": "validates" },
+    { "from": "observer", "to": "state-machine", "type": "validates" },
+    { "from": "effect-executor", "to": "observer", "type": "feeds" }
+  ],
+  "requiredAnchors": [
+    "delivery-model-contract",
+    "delivery-machine-tests",
+    "delivery-architecture-contract",
+    "rollback-path-exists",
+    "delivery-runtime-scenario",
+    "delivery-regression",
+    "repository-ci"
+  ],
+  "anchorCommands": {
+    "delivery-model-contract": "bun run software-delivery:validate",
+    "delivery-machine-tests": "bun test packages/core/tests/software-delivery.machine.test.ts packages/core/tests/software-delivery.regression.test.ts",
+    "delivery-architecture-contract": "bun test packages/core/tests/architecture.contract.test.ts packages/core/tests/application.architecture.test.ts",
+    "rollback-path-exists": "bun run software-delivery:anchors",
+    "delivery-runtime-scenario": "bun run software-delivery:demo",
+    "delivery-regression": "bun run software-delivery:regression",
+    "repository-ci": "bun run ci"
+  }
+}
