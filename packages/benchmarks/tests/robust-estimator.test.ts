@@ -4,16 +4,35 @@ import {
   adjudicateRegressions,
   calibrationSlowdown,
   compareReports,
+  formatComparisons,
   ioCalibrationSlowdown,
   reMeasureCase,
 } from "../scripts/compare-benchmarks.js";
-import { type BenchmarkMeasurement, type BenchmarkReport, formatReport, summarize } from "../src/harness.js";
+import {
+  type BenchmarkMeasurement,
+  type BenchmarkReport,
+  type BenchmarkSuite,
+  formatReport,
+  summarize,
+} from "../src/harness.js";
 
 const CASE = "file persist (1 proposal)";
 const gates = { threshold: 0.25, floorMs: 0.05, slowdown: 1, ioSlowdown: 1 };
 
 function report(...measurements: BenchmarkMeasurement[]): BenchmarkReport {
   return { generatedAt: "2031-01-01T00:00:00.000Z", runtime: "test", measurements };
+}
+
+async function withSuiteClock(suite: BenchmarkSuite, now: () => number, run: () => Promise<void>): Promise<void> {
+  const clock = spyOn(performance, "now").mockImplementation(now);
+  try {
+    SUITES.push(suite);
+    await run();
+  } finally {
+    const index = SUITES.indexOf(suite);
+    if (index !== -1) SUITES.splice(index, 1);
+    clock.mockRestore();
+  }
 }
 
 describe("bench:compare — per-iteration estimator (issue #218)", () => {
@@ -109,6 +128,37 @@ describe("bench:compare — per-iteration estimator (issue #218)", () => {
     expect(result.dismissed[0]?.reMeasuredMs).toBe(0);
   });
 
+  it.each([0.01, 0.1])(
+    "formats a positive %sms minimum against a zero baseline without an infinite percentage",
+    (currentMs) => {
+      const baseline = report(summarize("artefacts", "tiny case", [0]));
+      const comparisons = compareReports(
+        report(summarize("artefacts", "tiny case", [currentMs])),
+        baseline,
+        gates.threshold,
+      );
+      const output = formatComparisons(comparisons);
+      expect(output).toContain(`${currentMs.toFixed(3)}ms vs 0.000ms (n/a)`);
+      expect(output).not.toContain("Infinity");
+      // Formatting must leave the numeric gate and absolute-floor decision intact.
+      expect(comparisons[0]?.changeRatio).toBe(Number.POSITIVE_INFINITY);
+      expect(comparisons[0]?.status).toBe(currentMs > gates.floorMs ? "regression" : "ok");
+    },
+  );
+
+  it("preserves finite percentages and the new-case label", () => {
+    const baseline = report(summarize("suite", "unchanged", [0]), summarize("suite", "slower", [1]));
+    const current = report(
+      summarize("suite", "unchanged", [0]),
+      summarize("suite", "slower", [2]),
+      summarize("suite", "new case", [1]),
+    );
+    const output = formatComparisons(compareReports(current, baseline, gates.threshold));
+    expect(output).toContain("0.000ms vs 0.000ms (0.0%)");
+    expect(output).toContain("2.000ms vs 1.000ms (100.0%)");
+    expect(output).toContain("1.000ms vs — (new)");
+  });
+
   it("shows the gated minimum alongside mean and p95 diagnostics", () => {
     const output = formatReport(report(summarize("persistence", CASE, [1.2, 1.2, 200])));
     expect(output).toContain("min (ms)");
@@ -117,50 +167,78 @@ describe("bench:compare — per-iteration estimator (issue #218)", () => {
   });
 
   for (const steadyMs of [1.2, 3]) {
-    it(`${steadyMs === 1.2 ? "dismisses noise" : "confirms a sustained regression"} with a stall in every remeasurement attempt`, async () => {
-      // Only the clock is controlled: the real runCase/summarize/reMeasureCase
-      // path executes five 100-iteration attempts, each with one 200ms stall.
-      // Every old run mean exceeds the 2.16875ms gate, even at a 1.2ms true cost.
-      let now = 0;
-      let iteration = 0;
-      let setups = 0;
-      let teardowns = 0;
-      const suite = {
-        name: "issue-218-fixture",
-        warmupIterations: 0,
-        setup: () => {
-          iteration = 0;
-          setups++;
-        },
-        teardown: () => {
-          teardowns++;
-        },
-        cases: [
-          {
-            name: CASE,
-            run: () => {
-              now += ++iteration === 100 ? 200 : steadyMs;
-            },
+    it.serial(
+      `${steadyMs === 1.2 ? "dismisses noise" : "confirms a sustained regression"} with a stall in every remeasurement attempt`,
+      async () => {
+        // Only the clock is controlled: the real runCase/summarize/reMeasureCase
+        // path executes five 100-iteration attempts, each with one 200ms stall.
+        // Every old run mean exceeds the 2.16875ms gate, even at a 1.2ms true cost.
+        let now = 0;
+        let iteration = 0;
+        let setups = 0;
+        let teardowns = 0;
+        const suite = {
+          name: "issue-218-fixture",
+          warmupIterations: 0,
+          setup: () => {
+            iteration = 0;
+            setups++;
           },
-        ],
-      };
-      const clock = spyOn(performance, "now").mockImplementation(() => now);
-      SUITES.push(suite);
-      try {
-        const baseline = report(summarize(suite.name, CASE, [1.735, 1.735]));
-        const flagged = compareReports(report(summarize(suite.name, CASE, [20, 20])), baseline, gates.threshold);
-        const minima = await reMeasureCase(suite.name, CASE);
-        expect(minima).toEqual(Array(5).fill(steadyMs));
-        expect(setups).toBe(5);
-        expect(teardowns).toBe(5);
-        const result = await adjudicateRegressions(flagged, baseline, gates, async () => minima);
-        expect(result.confirmed).toHaveLength(steadyMs === 3 ? 1 : 0);
-        expect(result.dismissed).toHaveLength(steadyMs === 1.2 ? 1 : 0);
-        if (steadyMs === 1.2) expect(result.dismissed[0]?.reMeasuredMs).toBe(steadyMs);
-      } finally {
-        SUITES.splice(SUITES.indexOf(suite), 1);
-        clock.mockRestore();
-      }
-    });
+          teardown: () => {
+            teardowns++;
+          },
+          cases: [
+            {
+              name: CASE,
+              run: () => {
+                now += ++iteration === 100 ? 200 : steadyMs;
+              },
+            },
+          ],
+        };
+        await withSuiteClock(
+          suite,
+          () => now,
+          async () => {
+            const baseline = report(summarize(suite.name, CASE, [1.735, 1.735]));
+            const flagged = compareReports(report(summarize(suite.name, CASE, [20, 20])), baseline, gates.threshold);
+            const minima = await reMeasureCase(suite.name, CASE);
+            expect(minima).toEqual(Array(5).fill(steadyMs));
+            expect(setups).toBe(5);
+            expect(teardowns).toBe(5);
+            const result = await adjudicateRegressions(flagged, baseline, gates, async () => minima);
+            expect(result.confirmed).toHaveLength(steadyMs === 3 ? 1 : 0);
+            expect(result.dismissed).toHaveLength(steadyMs === 1.2 ? 1 : 0);
+            if (steadyMs === 1.2) expect(result.dismissed[0]?.reMeasuredMs).toBe(steadyMs);
+          },
+        );
+      },
+    );
   }
+
+  it.serial.each([false, true])(
+    "restores shared state after a fixture failure (already removed: %s)",
+    async (removeFirst) => {
+      const originalNow = performance.now;
+      const originalSuites = [...SUITES];
+      const suite: BenchmarkSuite = { name: "issue-218-cleanup-fixture", cases: [] };
+      const failure = new Error("fixture failure");
+      await expect(
+        withSuiteClock(
+          suite,
+          () => 0,
+          async () => {
+            if (removeFirst) {
+              const index = SUITES.indexOf(suite);
+              expect(index).not.toBe(-1);
+              SUITES.splice(index, 1);
+            }
+            throw failure;
+          },
+        ),
+      ).rejects.toBe(failure);
+      expect(SUITES).toEqual(originalSuites);
+      expect(performance.now).toBe(originalNow);
+    },
+  );
 });

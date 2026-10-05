@@ -153,7 +153,12 @@ export function compareReports(
 export function formatComparisons(comparisons: Comparison[]): string {
   return comparisons
     .map((comparison) => {
-      const change = comparison.changeRatio === null ? "new" : `${(comparison.changeRatio * 100).toFixed(1)}%`;
+      const change =
+        comparison.changeRatio === null
+          ? "new"
+          : Number.isFinite(comparison.changeRatio)
+            ? `${(comparison.changeRatio * 100).toFixed(1)}%`
+            : "n/a";
       const baseline = comparison.baselineMs === null ? "—" : `${comparison.baselineMs.toFixed(3)}ms`;
       return `${comparison.status.toUpperCase().padEnd(11)} ${comparison.suite}/${comparison.name} — ${comparison.currentMs.toFixed(3)}ms vs ${baseline} (${change})`;
     })
