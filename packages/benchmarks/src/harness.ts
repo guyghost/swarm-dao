@@ -109,11 +109,12 @@ export async function runSuites(suites: BenchmarkSuite[], options: RunOptions = 
 }
 
 export function formatReport(report: BenchmarkReport): string {
-  const header = ["suite", "benchmark", "iterations", "mean (ms)", "p95 (ms)", "ops/s"];
+  const header = ["suite", "benchmark", "iterations", "min (ms)", "mean (ms)", "p95 (ms)", "ops/s"];
   const rows = report.measurements.map((measurement) => [
     measurement.suite,
     measurement.name,
     String(measurement.iterations),
+    measurement.minMs.toFixed(3),
     measurement.meanMs.toFixed(3),
     measurement.p95Ms.toFixed(3),
     measurement.opsPerSecond.toFixed(1),
