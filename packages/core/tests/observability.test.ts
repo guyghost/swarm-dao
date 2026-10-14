@@ -7,22 +7,32 @@ import {
   DAO_METRICS,
   evaluateRules,
   finishSpan,
+  formatAlert,
   formatAlerts,
   formatMetrics,
   formatMetricsPrometheus,
   formatTrace,
   getActiveAlerts,
   getActiveSpans,
+  getAlertRules,
   getAllAlerts,
+  getAllMetrics,
   getGauge,
+  getHistogram,
   getTrace,
   initializeDefaultAlertRules,
+  recordAgentResponseTime,
+  recordDeliberationDuration,
   recordProposalApproved,
   recordProposalCreated,
+  recordProposalExecuted,
   recordProposalRejected,
+  recordVoteCast,
+  removeAlertRule,
   resetAlerts,
   resetMetrics,
   resetTracing,
+  resolveAlert,
   startSpan,
   traced,
 } from "@guyghost/swarm-dao-core";
@@ -55,17 +65,31 @@ describe("observability/metrics", () => {
     expect(hist.getCount()).toBe(3);
     expect(hist.getPercentile(50)).toBe(25);
     expect(hist.getPercentile(100)).toBe(75);
+    expect(getHistogram("test_hist")).toBe(hist);
   });
 
-  it("records DAO proposal lifecycle metrics", () => {
+  it("records DAO proposal lifecycle and deliberation metrics", () => {
     recordProposalCreated("product-feature");
     recordProposalCreated("security-change");
     recordProposalApproved(1, "product-feature");
     recordProposalRejected(2, "security-change");
+    recordProposalExecuted(1, "product-feature");
+    recordVoteCast("strategist", "approve", 1);
+    recordDeliberationDuration(1200, 1);
+    recordAgentResponseTime(450, "strategist");
 
     expect(DAO_METRICS.proposalsCreated.getCount()).toBe(2);
     expect(DAO_METRICS.proposalsApproved.getCount()).toBe(1);
+    expect(DAO_METRICS.proposalsExecuted.getCount()).toBe(1);
+    expect(DAO_METRICS.votesCast.getCount()).toBe(1);
+    expect(DAO_METRICS.deliberationDuration.getCount()).toBe(1);
+    expect(DAO_METRICS.agentResponseTime.getCount()).toBe(1);
     expect(DAO_METRICS.approvalRate.getValue()).toBe(50);
+
+    const all = getAllMetrics();
+    expect(all.counters.length).toBeGreaterThan(0);
+    expect(all.gauges.length).toBeGreaterThan(0);
+    expect(all.histograms.length).toBeGreaterThan(0);
   });
 
   it("formats metrics", () => {
@@ -145,7 +169,7 @@ describe("observability/alerts", () => {
     resetAlerts();
   });
 
-  it("creates alert rules", () => {
+  it("creates, lists, and removes alert rules", () => {
     const rule = createAlertRule({
       name: "Test",
       description: "Test rule",
@@ -156,9 +180,14 @@ describe("observability/alerts", () => {
       enabled: true,
     });
     expect(rule.id).toBeDefined();
+    expect(getAlertRules().map((r) => r.id)).toContain(rule.id);
+
+    expect(removeAlertRule(rule.id)).toBe(true);
+    expect(removeAlertRule("non-existent-rule")).toBe(false);
+    expect(getAlertRules().length).toBe(0);
   });
 
-  it("evaluates rules and creates alerts", () => {
+  it("evaluates rules, formats active alerts, and resolves alerts explicitly", () => {
     createCounter("dao_agent_count", "");
     createAlertRule({
       name: "No Agents",
@@ -172,10 +201,21 @@ describe("observability/alerts", () => {
 
     const newAlerts = evaluateRules();
     expect(newAlerts.length).toBe(1);
-    expect(newAlerts[0]?.severity).toBe("critical");
+    const firstAlert = newAlerts[0];
+    expect(firstAlert?.severity).toBe("critical");
+    if (!firstAlert) return;
+
+    const singleFormatted = formatAlert(firstAlert);
+    expect(singleFormatted).toContain("No Agents");
+    expect(singleFormatted).toContain("FIRING");
+    expect(formatAlerts()).toContain("Active Alerts");
+
+    expect(resolveAlert(firstAlert.id)).toBe(true);
+    expect(resolveAlert(firstAlert.id)).toBe(false);
+    expect(getActiveAlerts().length).toBe(0);
   });
 
-  it("resolves alerts", () => {
+  it("resolves alerts automatically when metric recovers", () => {
     createGauge("test_agent_count", "");
     const _rule = createAlertRule({
       name: "No Agents",
@@ -257,7 +297,7 @@ describe("observability/alerts", () => {
     expect(getAllAlerts().length).toBe(256);
   });
 
-  it("formats alerts", () => {
+  it("formats alerts when none are active", () => {
     resetAlerts();
     const formatted = formatAlerts();
     expect(formatted).toContain("No Active Alerts");

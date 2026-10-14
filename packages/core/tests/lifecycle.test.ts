@@ -1,5 +1,11 @@
 import { describe, expect, it } from "bun:test";
-import { classifyRiskZone, statusLabel } from "../src/governance/lifecycle.js";
+import {
+  classifyRiskZone,
+  getCouncilsForType,
+  getRequiredApprovals,
+  requiresSecurityReview,
+  statusLabel,
+} from "../src/governance/lifecycle.js";
 import type { Proposal } from "../src/types/index.js";
 
 // Transitions no longer live here — the XState machine
@@ -27,6 +33,19 @@ describe("governance/lifecycle.ts (risk + label helpers)", () => {
   it("returns a human label for a status", () => {
     expect(statusLabel("open")).toContain("Open");
     expect(statusLabel("approved")).toContain("Approved");
+  });
+
+  it("returns required approvals, security review requirement, and councils by zone/type", () => {
+    expect(getRequiredApprovals("green")).toBe(1);
+    expect(getRequiredApprovals("orange")).toBe(2);
+    expect(getRequiredApprovals("red")).toBe(2);
+
+    expect(requiresSecurityReview("green")).toBe(false);
+    expect(requiresSecurityReview("orange")).toBe(false);
+    expect(requiresSecurityReview("red")).toBe(true);
+
+    expect(getCouncilsForType("security-change")).toContain("security-council");
+    expect(getCouncilsForType("product-feature")).toContain("product-council");
   });
 
   it("does not send a proposal to the red zone just for the word 'author'", () => {

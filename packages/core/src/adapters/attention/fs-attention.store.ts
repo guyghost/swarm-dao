@@ -39,13 +39,16 @@ export class FsAttentionStore implements AttentionStorePort {
 
   public async listRuns(source: AttentionSource): Promise<readonly string[]> {
     const seen = new Set<string>();
-    for (const relative of rootsFor(source)) {
-      let entries: Dirent[];
-      try {
-        entries = await readdir(join(this.#root, relative), { withFileTypes: true });
-      } catch {
-        continue;
-      }
+    const results = await Promise.all(
+      rootsFor(source).map(async (relative) => {
+        try {
+          return await readdir(join(this.#root, relative), { withFileTypes: true });
+        } catch {
+          return [] as Dirent[];
+        }
+      }),
+    );
+    for (const entries of results) {
       for (const entry of entries) {
         if (entry.isDirectory() && SAFE_RUN_ID.test(entry.name)) seen.add(entry.name);
       }

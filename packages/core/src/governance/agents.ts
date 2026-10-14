@@ -382,12 +382,20 @@ async function readAndMergeMarkdownAgents(
   base: MarkdownLayers,
 ): Promise<MarkdownLayers> {
   const markdownAgents = new Map<string, Partial<DAOAgent> & { body?: string }>();
-  const parsedEntries = await Promise.all(
-    daoEntries.map(async (entry) => {
-      const content = await fs.readFile(path.join(absDir, entry), "utf-8");
-      return parseAgentFrontmatter(content);
-    }),
-  );
+  const [parsedEntries, charterContent] = await Promise.all([
+    Promise.all(
+      daoEntries.map(async (entry) => {
+        const content = await fs.readFile(path.join(absDir, entry), "utf-8");
+        return parseAgentFrontmatter(content);
+      }),
+    ),
+    base.projectCharter === null
+      ? fs
+          .readFile(path.join(absDir, "charter.md"), "utf-8")
+          .then((charter) => (charter.trim() ? charter.trim() : null))
+          .catch(() => null)
+      : Promise.resolve(base.projectCharter),
+  ]);
   for (const frontmatter of parsedEntries) {
     if (frontmatter.id) {
       markdownAgents.set(frontmatter.id, frontmatter);
@@ -397,15 +405,7 @@ async function readAndMergeMarkdownAgents(
   // The per-project charter layer applies to every agent (swarm-forge
   // local-* convention: layers add to the shared law, never replace it).
   // The closest directory wins: .dao/agents beats the repo's agents/.
-  let projectCharter = base.projectCharter;
-  if (projectCharter === null) {
-    try {
-      const charter = await fs.readFile(path.join(absDir, "charter.md"), "utf-8");
-      if (charter.trim()) projectCharter = charter.trim();
-    } catch {
-      // No project charter here — keep looking in the remaining dirs.
-    }
-  }
+  const projectCharter = base.projectCharter ?? charterContent;
 
   const agents = baseAgents.map((agent) => {
     const override = markdownAgents.get(agent.id);

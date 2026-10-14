@@ -15,9 +15,59 @@ import {
   InMemoryDaoStateRepository,
   initStorage,
   recordHealthSnapshot,
+  validateWeights,
 } from "@guyghost/swarm-dao-core";
 
 describe("health-score", () => {
+  describe("validateWeights", () => {
+    it("accepts DEFAULT_HEALTH_WEIGHTS and custom weights summing to 100", () => {
+      expect(validateWeights(DEFAULT_HEALTH_WEIGHTS)).toEqual({ valid: true, errors: [] });
+      expect(
+        validateWeights({
+          passRate: 40,
+          avgRating: 30,
+          deliberationDepth: 20,
+          participation: 10,
+        }),
+      ).toEqual({ valid: true, errors: [] });
+    });
+
+    it("rejects weights whose sum does not equal 100", () => {
+      const under = validateWeights({
+        passRate: 20,
+        avgRating: 20,
+        deliberationDepth: 20,
+        participation: 20,
+      });
+      expect(under.valid).toBe(false);
+      expect(under.errors).toContain("Weights must sum to 100, got 80");
+
+      const empty = validateWeights({});
+      expect(empty.valid).toBe(false);
+      expect(empty.errors).toContain("Weights must sum to 100, got 0");
+    });
+
+    it("rejects negative weights or weights greater than 100 even when sum is 100", () => {
+      const result = validateWeights({
+        passRate: 120,
+        avgRating: -20,
+        deliberationDepth: 0,
+        participation: 0,
+      });
+      expect(result.valid).toBe(false);
+      expect(result.errors).toContain("passRate must be 0-100");
+      expect(result.errors).toContain("avgRating must be 0-100");
+    });
+
+    it("ignores undefined fields while validating provided weights", () => {
+      const validPartial = validateWeights({
+        passRate: 100,
+        avgRating: undefined,
+      });
+      expect(validPartial).toEqual({ valid: true, errors: [] });
+    });
+  });
+
   // ── Original tests ──────────────────────────────────────────
 
   it("returns insufficient data for empty proposals", () => {
