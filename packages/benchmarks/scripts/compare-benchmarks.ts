@@ -42,10 +42,11 @@ function key(measurement: { suite: string; name: string }): string {
   return `${measurement.suite}/${measurement.name}`;
 }
 
-const meanSuiteMs = (report: BenchmarkReport | null, suite: string): number | null => {
+// Average per-case minima, not run means: a kernel stall must not loosen the gate.
+const meanSuiteMinimumMs = (report: BenchmarkReport | null, suite: string): number | null => {
   const entries = (report?.measurements ?? []).filter((measurement) => measurement.suite === suite);
   if (entries.length === 0) return null;
-  return entries.reduce((sum, measurement) => sum + measurement.meanMs, 0) / entries.length;
+  return entries.reduce((sum, measurement) => sum + measurement.minMs, 0) / entries.length;
 };
 
 /**
@@ -61,8 +62,8 @@ export function kernelSlowdown(
   calibrationSuite: string,
   maxSlowdown: number = MAX_SLOWDOWN,
 ): number | null {
-  const currentMs = meanSuiteMs(current, calibrationSuite);
-  const baselineMs = meanSuiteMs(baseline, calibrationSuite);
+  const currentMs = meanSuiteMinimumMs(current, calibrationSuite);
+  const baselineMs = meanSuiteMinimumMs(baseline, calibrationSuite);
   if (currentMs === null || baselineMs === null || baselineMs === 0 || currentMs === 0) return null;
   if (!Number.isFinite(currentMs / baselineMs)) return null;
   // A faster runner never tightens the gate; a slower one relaxes it, capped.
@@ -85,14 +86,21 @@ export function ioCalibrationSlowdown(
   return kernelSlowdown(current, baseline, CALIBRATION_IO_SUITE, maxSlowdown);
 }
 
+function relativeChange(currentMs: number, baselineMs: number): number {
+  // Sub-microsecond minima round to zero. This is still a measured baseline,
+  // not a new case: any positive increase must clear the absolute noise floor.
+  if (baselineMs === 0) return currentMs > 0 ? Number.POSITIVE_INFINITY : 0;
+  return (currentMs - baselineMs) / baselineMs;
+}
+
 export function isRegression(
   currentMs: number,
   baselineMs: number,
   allowedThreshold: number,
   allowedFloorMs: number,
 ): boolean {
-  if (baselineMs <= 0) return false;
-  const changeRatio = (currentMs - baselineMs) / baselineMs;
+  if (baselineMs < 0) return false;
+  const changeRatio = relativeChange(currentMs, baselineMs);
   return changeRatio > allowedThreshold && currentMs - baselineMs > allowedFloorMs;
 }
 
@@ -114,28 +122,28 @@ export function compareReports(
     const allowedThreshold = threshold + (suiteSlowdown - 1);
     const allowedFloor = floorMs * suiteSlowdown;
     const previous = baselineByKey.get(key(measurement));
-    if (!previous || previous.meanMs === 0) {
+    if (!previous) {
       return {
         suite: measurement.suite,
         name: measurement.name,
-        currentMs: measurement.meanMs,
-        baselineMs: previous?.meanMs ?? null,
+        currentMs: measurement.minMs,
+        baselineMs: null,
         changeRatio: null,
         status: "new" as const,
       };
     }
-    const changeRatio = (measurement.meanMs - previous.meanMs) / previous.meanMs;
+    const changeRatio = relativeChange(measurement.minMs, previous.minMs);
     // A regression requires BOTH the relative threshold and the absolute
     // noise floor — and both scale with the measured runner slowdown for the
     // case's resource class (CPU vs filesystem), so a slow shared runner
     // cannot fail the whole fleet while a genuine algorithmic regression
     // (relative AND absolute, way beyond both scaled gates) still fails.
-    const regressed = isRegression(measurement.meanMs, previous.meanMs, allowedThreshold, allowedFloor);
+    const regressed = isRegression(measurement.minMs, previous.minMs, allowedThreshold, allowedFloor);
     return {
       suite: measurement.suite,
       name: measurement.name,
-      currentMs: measurement.meanMs,
-      baselineMs: previous.meanMs,
+      currentMs: measurement.minMs,
+      baselineMs: previous.minMs,
       changeRatio,
       status: regressed ? ("regression" as const) : ("ok" as const),
     };
@@ -145,7 +153,12 @@ export function compareReports(
 export function formatComparisons(comparisons: Comparison[]): string {
   return comparisons
     .map((comparison) => {
-      const change = comparison.changeRatio === null ? "new" : `${(comparison.changeRatio * 100).toFixed(1)}%`;
+      const change =
+        comparison.changeRatio === null
+          ? "new"
+          : Number.isFinite(comparison.changeRatio)
+            ? `${(comparison.changeRatio * 100).toFixed(1)}%`
+            : "n/a";
       const baseline = comparison.baselineMs === null ? "—" : `${comparison.baselineMs.toFixed(3)}ms`;
       return `${comparison.status.toUpperCase().padEnd(11)} ${comparison.suite}/${comparison.name} — ${comparison.currentMs.toFixed(3)}ms vs ${baseline} (${change})`;
     })
@@ -154,14 +167,13 @@ export function formatComparisons(comparisons: Comparison[]): string {
 
 /**
  * Re-measure one benchmark case in isolation, `attempts` times, and report each
- * run's mean. Uses a higher iteration count than the suite default so the
- * re-measurement is steadier than the run that raised the flag (more samples
- * also dilute single GC pauses inside a run's mean). Suite state is re-seeded
- * before every attempt (setup/teardown per attempt): stateful suites cap the
- * total runs between setups — the deliberation pool holds 200 proposals,
- * consumed one per iteration, which a 3×50 re-measurement barely fit and
- * 5×100 exhausted mid-adjudication (caught live on CI) — and every attempt
- * then starts from an identical state, keeping the means comparable.
+ * run's minimum iteration, the same statistic used for the baseline and first
+ * comparison. More iterations give additive filesystem/GC stalls more chances
+ * to clear; taking a minimum of run means still retains a stall in every run
+ * (issue #218). Suite state is re-seeded before every attempt: stateful suites
+ * cap total runs between setups — the deliberation pool holds 200 proposals,
+ * consumed one per iteration, which 5×100 exhausted mid-adjudication on CI.
+ * Every attempt starts from identical state, keeping the minima comparable.
  * Returns an empty array when the case no longer exists (renamed/removed).
  */
 export async function reMeasureCase(
@@ -173,20 +185,20 @@ export async function reMeasureCase(
   const suite = SUITES.find((candidate) => candidate.name === suiteName);
   const benchmark = suite?.cases.find((candidate) => candidate.name === caseName);
   if (!suite || !benchmark) return [];
-  const means: number[] = [];
+  const minima: number[] = [];
   for (let attempt = 0; attempt < attempts; attempt++) {
     await suite.setup?.();
     try {
-      means.push((await runCase(suite, benchmark, { iterations })).meanMs);
+      minima.push((await runCase(suite, benchmark, { iterations })).minMs);
     } finally {
       await suite.teardown?.();
     }
   }
-  return means;
+  return minima;
 }
 
 export interface AdjudicationResult {
-  /** Flags whose re-measured median still sits beyond the calibrated gates. */
+  /** Flags whose best re-measured iteration still sits beyond the calibrated gates. */
   confirmed: Comparison[];
   /** Flags dismissed as runner noise because the re-measurement fell inside. */
   dismissed: Array<Comparison & { reMeasuredMs: number }>;
@@ -195,17 +207,13 @@ export interface AdjudicationResult {
 /**
  * Second-chance gate: a flag must reproduce on isolated re-measurement before
  * it may fail CI. The same calibrated gates (relative AND absolute) apply to
- * the re-measured BEST (minimum) run — adjudication never loosens the
- * definition of a regression, it only demands the evidence reproduce.
+ * the best minimum iteration across attempts, compared with the baseline's
+ * minimum iteration. Adjudication never loosens the definition of a regression.
  *
- * Why the minimum and not the median (2026-09-14 CI incident): measurement
- * noise (GC pauses, scheduler bursts) is strictly additive, so a run's mean
- * can only be inflated, never deflated. A sub-ms case re-measured while a GC
- * burst is active yields 2–3 inflated means in a row, and the median stays
- * contaminated — `deliberation/run control gates` (+71% vs a +55% gate) was
- * confirmed that way on a healthy runner. The minimum is the least-noise
- * estimator of the case's true cost: if even the best re-measurement sits
- * beyond the gate, the case genuinely cannot run at baseline speed here.
+ * Additive noise (filesystem stalls, GC pauses, scheduler bursts) can inflate
+ * every run mean, so even the minimum of five means can confirm a false
+ * regression (issue #218). Using iteration minima at every stage measures
+ * repeatable best-case cost; mean and p95 remain available as diagnostics.
  */
 export async function adjudicateRegressions(
   regressions: Comparison[],
@@ -227,21 +235,22 @@ export async function adjudicateRegressions(
   const confirmed: Comparison[] = [];
   const dismissed: AdjudicationResult["dismissed"] = [];
   for (const regression of regressions) {
-    const baselineMs = baselineByKey.get(key(regression))?.meanMs ?? 0;
-    const means = await reMeasure(regression.suite, regression.name);
+    const baselineMs = baselineByKey.get(key(regression))?.minMs;
+    const minima = await reMeasure(regression.suite, regression.name);
     // Nothing to re-measure, or no baseline entry to adjudicate against (e.g.
     // the case was renamed between baseline and run, or a malformed baseline):
     // keep the honest failure — dismissal requires reproduced evidence, not
     // missing data (Copilot review on #81).
     const { allowedThreshold, allowedFloor } = gatesFor(regression.suite);
     if (
-      means.length === 0 ||
-      baselineMs <= 0 ||
-      isRegression(Math.min(...means), baselineMs, allowedThreshold, allowedFloor)
+      minima.length === 0 ||
+      baselineMs === undefined ||
+      baselineMs < 0 ||
+      isRegression(Math.min(...minima), baselineMs, allowedThreshold, allowedFloor)
     ) {
       confirmed.push(regression);
     } else {
-      dismissed.push({ ...regression, reMeasuredMs: Math.min(...means) });
+      dismissed.push({ ...regression, reMeasuredMs: Math.min(...minima) });
     }
   }
   return { confirmed, dismissed };
@@ -296,6 +305,7 @@ async function main(): Promise<void> {
   }
 
   const comparisons = compareReports(current, baseline, threshold, floorMs, slowdown, ioSlowdown);
+  console.log("Comparing minimum iteration durations (minMs).");
   console.log(formatComparisons(comparisons));
   console.log(
     `\ncalibration: cpu slowdown x${slowdown.toFixed(2)} -> gate at >${((threshold + slowdown - 1) * 100).toFixed(0)}% and ${(floorMs * slowdown).toFixed(3)}ms; io slowdown x${ioSlowdown.toFixed(2)} -> gate at >${((threshold + ioSlowdown - 1) * 100).toFixed(0)}% and ${(floorMs * ioSlowdown).toFixed(3)}ms.`,
@@ -312,7 +322,7 @@ async function main(): Promise<void> {
   });
   for (const flake of dismissed) {
     console.log(
-      `ADJUDICATED  ${flake.suite}/${flake.name} — best re-measured run ${flake.reMeasuredMs.toFixed(3)}ms vs ${flake.baselineMs?.toFixed(3)}ms is inside the gate; dismissed as runner noise.`,
+      `ADJUDICATED  ${flake.suite}/${flake.name} — best re-measured iteration ${flake.reMeasuredMs.toFixed(3)}ms vs ${flake.baselineMs?.toFixed(3)}ms is inside the gate; dismissed as runner noise.`,
     );
   }
   if (confirmed.length === 0) {
