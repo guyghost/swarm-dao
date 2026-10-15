@@ -1,5 +1,11 @@
 # @guyghost/swarm-dao-core
 
+## 3.0.1
+
+### Patch Changes
+
+- a439429: Parallelize sequential filesystem operations in loops (`fs-attention.store`, `dao-home`, `project-brief`, `governance/agents`) and expand unit test coverage for `validateWeights`, `executeProposal`, `verifyExecution`, `governance/agents`, `governance/scoring`, `governance/lifecycle`, `observability`, `product-loop`, and `improvement-loop`.
+
 ## 3.0.0
 
 ### Major Changes
