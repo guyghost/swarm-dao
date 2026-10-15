@@ -181,6 +181,7 @@ describe("swarm-dao delivery CLI route", () => {
       withEnvironment(
         {
           SWARM_DAO_HOME: path.join(cwd, "dao-home"),
+          TMUX: "",
           ...(bunPath ? { PATH: bunPath } : {}),
         },
         () => main(args, cwd),

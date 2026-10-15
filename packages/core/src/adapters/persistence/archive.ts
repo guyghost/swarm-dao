@@ -7,7 +7,7 @@
 // I/O; this module owns the layout rules.
 
 import { isArchivedStatus } from "../../domain/proposal-status.js";
-import type { DAOState, Proposal, ProposalStatus } from "../../types/index.js";
+import type { DAOState, Proposal } from "../../types/index.js";
 
 /** Bump on incompatible archive layout changes; `parseArchive` rejects
  *  archives written by a newer layout instead of silently mis-reading. */
