@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import {
   calculateCompositeScore,
   calculateRICEScore,
+  formatCompositeScore,
   formatRICEScore,
   parseRICEFromOutput,
   parseScoresFromOutput,
@@ -100,5 +101,10 @@ describe("governance/scoring.ts", () => {
     expect(result.weighted).toBe(6.8);
     expect(result.riskZone).toBe("orange");
     expect(result.breakdown).toBe("7.0×0.3 + 6.0×0.2 + 5.0×0.15 + 7.5×0.2 + 8.5×0.15 = 6.8");
+
+    const formatted = formatCompositeScore(result);
+    expect(formatted).toContain("## Composite Score");
+    expect(formatted).toContain("**Weighted:** 6.8/10");
+    expect(formatted).toContain("| User Impact | 7.0 |");
   });
 });

@@ -244,21 +244,25 @@ async function sweepStaleBranches(
   } catch {
     return [];
   }
-  const directories: string[] = [];
-  for (const entry of present) {
-    const stats = await fs.stat(path.join(branchesDir, entry)).catch(() => null);
-    if (stats?.isDirectory()) directories.push(entry);
-  }
+  const statEntries = await Promise.all(
+    present.map(async (entry) => {
+      const stats = await fs.stat(path.join(branchesDir, entry)).catch(() => null);
+      return stats?.isDirectory() ? entry : null;
+    }),
+  );
+  const directories = statEntries.filter((entry): entry is string => entry !== null);
   const stale = planGcDirs(directories, liveIds, keepId);
-  for (const dir of stale) {
-    const target = path.join(branchesDir, dir);
-    if (dryRun) {
-      logger.info(`🗑 GC (dry-run): would remove ${target}`);
-      continue;
-    }
-    await fs.rm(target, { recursive: true, force: true });
-    logger.info(`🗑 GC: removed DAO state of deleted branch "${dir}" (${target})`);
-  }
+  await Promise.all(
+    stale.map(async (dir) => {
+      const target = path.join(branchesDir, dir);
+      if (dryRun) {
+        logger.info(`🗑 GC (dry-run): would remove ${target}`);
+        return;
+      }
+      await fs.rm(target, { recursive: true, force: true });
+      logger.info(`🗑 GC: removed DAO state of deleted branch "${dir}" (${target})`);
+    }),
+  );
   return stale.map((dir) => path.join(branchesDir, dir));
 }
 

@@ -89,22 +89,29 @@ async function layoutSection(root: string): Promise<string | null> {
     lines.push(`- …${sorted.length - LAYOUT_ENTRIES} more entries`);
   }
 
-  for (const dir of SUBDIRS_TO_PEEK) {
-    try {
-      const subEntries = await fs.readdir(path.join(root, dir), { withFileTypes: true });
-      const subVisible = subEntries
-        .filter((entry) => !entry.name.startsWith(".") && !IGNORED_ENTRIES.has(entry.name))
-        .slice(0, 12)
-        .sort((a, b) => Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name));
-      if (subVisible.length > 0) {
-        lines.push("", `Inside ${dir}/:`);
-        for (const entry of subVisible) {
-          lines.push(`- ${dir}/${entry.name}${entry.isDirectory() ? "/" : ""}`);
-        }
+  const subdirSections = await Promise.all(
+    SUBDIRS_TO_PEEK.map(async (dir) => {
+      try {
+        const subEntries = await fs.readdir(path.join(root, dir), { withFileTypes: true });
+        const subVisible = subEntries
+          .filter((entry) => !entry.name.startsWith(".") && !IGNORED_ENTRIES.has(entry.name))
+          .slice(0, 12)
+          .sort((a, b) => Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name));
+        return subVisible.length > 0
+          ? [
+              "",
+              `Inside ${dir}/:`,
+              ...subVisible.map((entry) => `- ${dir}/${entry.name}${entry.isDirectory() ? "/" : ""}`),
+            ]
+          : [];
+      } catch {
+        // directory does not exist here — skip
+        return [];
       }
-    } catch {
-      // directory does not exist here — skip
-    }
+    }),
+  );
+  for (const section of subdirSections) {
+    lines.push(...section);
   }
 
   return `## Layout\n${lines.join("\n")}`;
